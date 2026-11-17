@@ -1,0 +1,21 @@
+{
+  "id": "/",
+  "name": "سوق الجملة - منصة تجارة الأغذية B2B",
+  "short_name": "سوق الجملة",
+  "description": "سوق الجملة والتجزئة للمواد الغذائية في العراق - ربط الموردين والموزعين بشبكة المتاجر",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#0E6E5C",
+  "background_color": "#F7F8FA",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

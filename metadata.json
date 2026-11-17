@@ -1,0 +1,6 @@
+{
+  "name": "سوق الجملة | Souq Al-Jumla B2B",
+  "description": "منصة B2B لتجارة المواد الغذائية بالجملة والتجزئة في العراق، تربط الموردين والموزعين بشبكة المتاجر والسوبرماركت.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+@layer base {
+  html, body {
+    overflow-x: clip;
+    max-width: 100%;
+  }
+  body {
+    font-family: 'Cairo', 'IBM Plex Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, sans-serif;
+  }
+}
+
+.font-brand {
+  font-family: 'Cairo', 'Tajawal', 'IBM Plex Sans Arabic', -apple-system, sans-serif;
+  letter-spacing: -0.015em;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F1F3F5;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-slideInRight {
+  animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slideInLeft {
+  animation: slideInLeft 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+/* Global Dark Appearance Mode (وضع المظهر الداكن) */
+html.dark-theme {
+  color-scheme: dark;
+}
+
+html.dark-theme body {
+  background-color: #0b0f17;
+  color: #f3f4f6;
+}
+
+html.dark-theme .bg-white {
+  background-color: #141923 !important;
+  color: #f3f4f6;
+}
+
+html.dark-theme .bg-white\/95 {
+  background-color: rgba(20, 25, 35, 0.96) !important;
+}
+
+html.dark-theme .bg-\[\#F5F5F5\],
+html.dark-theme .bg-\[\#F8F9FA\],
+html.dark-theme .bg-\[\#F7F8FA\],
+html.dark-theme .bg-\[\#FAFBFD\],
+html.dark-theme .bg-\[\#F8FAFC\] {
+  background-color: #0f141d !important;
+  color: #e5e7eb;
+}
+
+html.dark-theme .border-\[\#E5E7EB\],
+html.dark-theme .border-\[\#E9E9E9\],
+html.dark-theme .border-\[\#F0F2F5\],
+html.dark-theme .border-\[\#EFF1F4\],
+html.dark-theme .border-\[\#E9ECEF\] {
+  border-color: #263042 !important;
+}
+
+html.dark-theme .text-\[\#1F2328\],
+html.dark-theme .text-\[\#221F1F\],
+html.dark-theme .text-gray-900,
+html.dark-theme .text-gray-800 {
+  color: #f3f4f6 !important;
+}
+
+html.dark-theme .text-\[\#6B7280\],
+html.dark-theme .text-\[\#797878\],
+html.dark-theme .text-gray-600 {
+  color: #9ca3af !important;
+}
+
+html.dark-theme input,
+html.dark-theme select,
+html.dark-theme textarea {
+  color: #f3f4f6 !important;
+}
+
