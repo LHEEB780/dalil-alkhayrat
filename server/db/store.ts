@@ -5,6 +5,10 @@ import {
   SupplierProfile,
   DriverProfile,
   VanInventoryItem,
+  VanRouteStop,
+  VanTransactionRecord,
+  VanLoadRequest,
+  VanLoadRequestItem,
   CreditAccount,
   LedgerEntry,
   SubOrder,
@@ -15,6 +19,8 @@ import {
   ShiftCloseReport,
   PaymentMethod,
   StorePOSSaleRecord,
+  StorePOSReturnItem,
+  StorePOSReturnRecord,
   CreditUpgradeRequest,
   SupplierReview,
   SupplierReviewSummary
@@ -26,6 +32,8 @@ import {
   initialStores,
   initialDrivers,
   initialVanInventory,
+  initialVanRouteStops,
+  initialVanTransactions,
   initialCreditAccounts,
   initialLedgerEntries,
   initialStoreInventory,
@@ -42,6 +50,9 @@ class AppDataStore {
   stores: StoreProfile[] = [...initialStores];
   drivers: DriverProfile[] = [...initialDrivers];
   vanInventory: VanInventoryItem[] = [...initialVanInventory];
+  vanRouteStops: VanRouteStop[] = [...initialVanRouteStops];
+  vanTransactions: VanTransactionRecord[] = [...initialVanTransactions];
+  vanLoadRequests: VanLoadRequest[] = [];
   creditAccounts: CreditAccount[] = [...initialCreditAccounts];
   ledgerEntries: LedgerEntry[] = [...initialLedgerEntries];
   subOrders: SubOrder[] = [...initialSubOrders];
@@ -50,6 +61,7 @@ class AppDataStore {
   posters: StorePosterConfig[] = [...initialPosters];
   shiftReports: ShiftCloseReport[] = [];
   storePOSSales: StorePOSSaleRecord[] = [...initialStorePOSSales];
+  storePOSReturns: StorePOSReturnRecord[] = [];
   creditUpgradeRequests: CreditUpgradeRequest[] = [];
   supplierReviews: SupplierReview[] = [
     {
@@ -559,32 +571,142 @@ class AppDataStore {
     };
   }
 
-  // ================= VAN MOBILE WAREHOUSE OPERATIONS =================
+  // ================= VAN MOBILE WAREHOUSE & FLEET DSD OPERATIONS =================
+  private syncVanItemToStoreInventory(storeId: string, vanItem: VanInventoryItem, quantity: number): boolean {
+    const existing = this.storeInventory.find(s => s.storeId === storeId && s.barcode === vanItem.barcode);
+    if (existing) {
+      existing.stockQuantity += quantity;
+      existing.isLowStock = existing.stockQuantity <= existing.reorderLevel;
+      return true;
+    }
+
+    const catalogProduct = this.products.find(p => p.barcode === vanItem.barcode);
+    const retailPrice = Math.round((vanItem.unitPriceIQD * 1.15) / 250) * 250;
+    const futureExpiry = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    this.storeInventory.unshift({
+      id: `sinv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      storeId,
+      barcode: vanItem.barcode,
+      productName: vanItem.productName,
+      category: catalogProduct?.category || 'مواد غذائية أساسية',
+      unit: vanItem.unit,
+      stockQuantity: quantity,
+      reorderLevel: 5,
+      costPriceIQD: vanItem.unitPriceIQD,
+      retailSellingPriceIQD: retailPrice,
+      expiryDate: futureExpiry,
+      isNearExpiry: false,
+      isLowStock: quantity <= 5,
+      monthlyAverageSales: Math.max(10, quantity * 2)
+    });
+    return true;
+  }
+
+  getDriverCommissionSummary(driverId: string) {
+    const driver = this.drivers.find(d => d.id === driverId);
+    if (!driver) return null;
+    const dailyTargetIQD = driver.dailyTargetIQD || 2500000;
+    const commissionRatePercent = driver.commissionRatePercent ?? 1.5;
+    const todayCashSalesIQD = driver.todayCashSalesIQD || 0;
+    const todayCreditSalesIQD = driver.todayCreditSalesIQD || 0;
+    const todayDebtCollectedIQD = driver.todayDebtCollectedIQD || 0;
+    const totalAchievedIQD = todayCashSalesIQD + todayCreditSalesIQD + todayDebtCollectedIQD;
+    const targetProgressPercent = Math.min(100, Math.round((totalAchievedIQD / dailyTargetIQD) * 100));
+    // Commission calculated on cash sales + debt collections (encourages cash flow)
+    const commissionBaseIQD = todayCashSalesIQD + todayDebtCollectedIQD;
+    const estimatedCommissionIQD = Math.round((commissionBaseIQD * commissionRatePercent) / 100);
+
+    return {
+      dailyTargetIQD,
+      commissionRatePercent,
+      todayCashSalesIQD,
+      todayCreditSalesIQD,
+      todayDebtCollectedIQD,
+      totalAchievedIQD,
+      targetProgressPercent,
+      estimatedCommissionIQD
+    };
+  }
+
   recordVanDirectSale(params: {
     driverId: string;
     storeId: string;
-    barcode: string;
-    quantity: number;
+    barcode?: string;
+    quantity?: number;
+    items?: { barcode: string; quantity: number }[];
     paymentType: 'cash' | 'credit';
+    notes?: string;
   }) {
     const driver = this.drivers.find(d => d.id === params.driverId);
-    if (!driver) throw new Error('Driver not found');
+    if (!driver) throw new Error('السائق غير موجود');
     const store = this.stores.find(s => s.id === params.storeId);
-    if (!store) throw new Error('Store not found');
+    if (!store) throw new Error('المتجر غير موجود');
 
-    const vanItem = this.vanInventory.find(v => v.driverId === params.driverId && v.barcode === params.barcode);
-    if (!vanItem || vanItem.remainingQuantity < params.quantity) {
-      throw new Error('الكمية غير متوفرة في مخزون سيارة التوزيع (الفان)');
+    const lineRequests =
+      Array.isArray(params.items) && params.items.length > 0
+        ? params.items
+        : params.barcode && params.quantity
+        ? [{ barcode: params.barcode, quantity: Number(params.quantity) }]
+        : [];
+
+    if (lineRequests.length === 0) {
+      throw new Error('يرجى تحديد صنف واحد على الأقل لإتمام البيع');
     }
 
-    const saleAmount = vanItem.unitPriceIQD * params.quantity;
-    vanItem.soldQuantity += params.quantity;
-    vanItem.remainingQuantity -= params.quantity;
+    // Validate all lines before mutating stock
+    const resolvedLines: { vanItem: VanInventoryItem; qty: number; lineTotal: number }[] = [];
+    let grandTotal = 0;
+
+    for (const req of lineRequests) {
+      const qty = Math.floor(Number(req.quantity));
+      if (!qty || qty <= 0) throw new Error('كمية البيع يجب أن تكون رقماً موجباً');
+      const vanItem = this.vanInventory.find(
+        v => v.driverId === params.driverId && v.barcode === req.barcode
+      );
+      if (!vanItem || vanItem.remainingQuantity < qty) {
+        throw new Error(`الكمية المطلوبة غير متوفرة في مخزون الفان للصنف (${vanItem?.productName || req.barcode})`);
+      }
+      const lineTotal = vanItem.unitPriceIQD * qty;
+      grandTotal += lineTotal;
+      resolvedLines.push({ vanItem, qty, lineTotal });
+    }
+
+    // Check credit limit if paymentType === 'credit'
+    if (params.paymentType === 'credit') {
+      const creditAcc = this.getCreditAccount(store.id, driver.supplierId);
+      if (creditAcc && creditAcc.isBlocked && !creditAcc.supplierExceptionAllowed) {
+        throw new Error(`الحساب الائتماني لمتجر ${store.name} موقوف حالياً: ${creditAcc.blockReason}`);
+      }
+      if (creditAcc && creditAcc.availableCreditIQD < grandTotal && !creditAcc.supplierExceptionAllowed) {
+        throw new Error(
+          `الرصيد الائتماني المتاح لمتجر ${store.name} (${creditAcc.availableCreditIQD.toLocaleString()} د.ع) لا يكفي لتغطية الفاتورة (${grandTotal.toLocaleString()} د.ع)`
+        );
+      }
+    }
+
+    const receiptNumber = `VAN-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const txItems: NonNullable<VanTransactionRecord['items']> = [];
+
+    for (const { vanItem, qty, lineTotal } of resolvedLines) {
+      vanItem.soldQuantity += qty;
+      vanItem.remainingQuantity -= qty;
+      this.syncVanItemToStoreInventory(store.id, vanItem, qty);
+      txItems.push({
+        barcode: vanItem.barcode,
+        productName: vanItem.productName,
+        unit: vanItem.unit,
+        quantity: qty,
+        unitPriceIQD: vanItem.unitPriceIQD,
+        totalIQD: lineTotal
+      });
+    }
 
     if (params.paymentType === 'cash') {
-      driver.currentCashCollectedIQD += saleAmount;
+      driver.currentCashCollectedIQD += grandTotal;
+      driver.todayCashSalesIQD = (driver.todayCashSalesIQD || 0) + grandTotal;
     } else {
-      // Record in ledger
+      driver.todayCreditSalesIQD = (driver.todayCreditSalesIQD || 0) + grandTotal;
       const creditAcc = this.getCreditAccount(store.id, driver.supplierId);
       if (creditAcc) {
         this.addLedgerEntry({
@@ -592,29 +714,456 @@ class AppDataStore {
           supplierId: driver.supplierId,
           storeId: store.id,
           referenceType: 'INVOICE',
-          referenceId: `VAN-SALE-${Date.now()}`,
+          referenceId: receiptNumber,
           entryDate: new Date().toISOString().split('T')[0],
-          debitIQD: saleAmount,
+          dueDate: new Date(Date.now() + creditAcc.paymentTermDays * 24 * 60 * 60 * 1000)
+            .toISOString()
+            .split('T')[0],
+          debitIQD: grandTotal,
           creditIQD: 0,
-          runningBalanceIQD: creditAcc.currentUsedCreditIQD + saleAmount,
-          descriptionAr: `بيع فوري مباشر من سيارة التوزيع (${driver.vanWarehouseName}) - ${vanItem.productName}`
+          runningBalanceIQD: creditAcc.currentUsedCreditIQD + grandTotal,
+          descriptionAr: `فاتورة بيع مباشر من سيارة التوزيع (${driver.vanWarehouseName}) - ${txItems.length} أصناف`
         });
       }
     }
 
-    // Update store inventory
-    const storeItem = this.storeInventory.find(s => s.storeId === store.id && s.barcode === params.barcode);
-    if (storeItem) {
-      storeItem.stockQuantity += params.quantity;
-      storeItem.isLowStock = storeItem.stockQuantity <= storeItem.reorderLevel;
+    // Auto-update matching route stop if exists
+    const stop = this.vanRouteStops.find(
+      s => s.driverId === driver.id && s.storeId === store.id
+    );
+    if (stop) {
+      stop.status = 'sold';
+      stop.lastSaleAmountIQD = (stop.lastSaleAmountIQD || 0) + grandTotal;
+      stop.visitedAt = new Date().toISOString();
     }
+
+    const transaction: VanTransactionRecord = {
+      id: `vtx_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      receiptNumber,
+      driverId: driver.id,
+      driverName: driver.name,
+      supplierId: driver.supplierId,
+      storeId: store.id,
+      storeName: store.name,
+      type: 'direct_sale',
+      paymentType: params.paymentType,
+      items: txItems,
+      totalAmountIQD: grandTotal,
+      createdAt: new Date().toISOString(),
+      notes: params.notes || 'بيع مباشر من الفان + مزامنة تلقائية لمخزون كاشير المتجر'
+    };
+
+    this.vanTransactions.unshift(transaction);
 
     return {
       success: true,
-      saleAmountIQD: saleAmount,
-      remainingVanStock: vanItem.remainingQuantity,
+      receiptNumber,
+      transaction,
+      saleAmountIQD: grandTotal,
+      syncedToStorePOS: true,
+      remainingVanStock: resolvedLines[0]?.vanItem.remainingQuantity ?? 0,
       driverCashBalance: driver.currentCashCollectedIQD
     };
+  }
+
+  recordVanDebtCollection(params: {
+    driverId: string;
+    storeId: string;
+    amountIQD: number;
+    notes?: string;
+  }) {
+    const driver = this.drivers.find(d => d.id === params.driverId);
+    if (!driver) throw new Error('السائق غير موجود');
+    const store = this.stores.find(s => s.id === params.storeId);
+    if (!store) throw new Error('المتجر غير موجود');
+
+    const amount = Math.floor(Number(params.amountIQD));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('يرجى إدخال مبلغ تحصيل صحيح أكبر من صفر');
+    }
+
+    const creditAcc = this.getCreditAccount(store.id, driver.supplierId);
+    if (!creditAcc) {
+      throw new Error(`لا يوجد حساب آجل مفتوح لمتجر ${store.name} مع هذا المورد`);
+    }
+    if (creditAcc.currentUsedCreditIQD <= 0) {
+      throw new Error(`لا توجد ذمم آجلة مستحقة على ${store.name} حالياً`);
+    }
+    if (amount > creditAcc.currentUsedCreditIQD) {
+      throw new Error(
+        `مبلغ التحصيل يتجاوز إجمالي الدين المستحق (${creditAcc.currentUsedCreditIQD.toLocaleString()} د.ع)`
+      );
+    }
+
+    const receiptNumber = `COL-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const ledgerEntry = this.addLedgerEntry({
+      creditAccountId: creditAcc.id,
+      supplierId: driver.supplierId,
+      storeId: store.id,
+      referenceType: 'PAYMENT',
+      referenceId: receiptNumber,
+      entryDate: new Date().toISOString().split('T')[0],
+      debitIQD: 0,
+      creditIQD: amount,
+      runningBalanceIQD: Math.max(0, creditAcc.currentUsedCreditIQD - amount),
+      descriptionAr:
+        params.notes?.trim() ||
+        `تحصيل نقدي ميداني بواسطة المندوب (${driver.name}) — وصل رقم ${receiptNumber}`
+    });
+
+    driver.currentCashCollectedIQD += amount;
+    driver.todayDebtCollectedIQD = (driver.todayDebtCollectedIQD || 0) + amount;
+
+    const stop = this.vanRouteStops.find(
+      s => s.driverId === driver.id && s.storeId === store.id
+    );
+    if (stop && stop.status === 'pending') {
+      stop.status = 'visited';
+      stop.visitedAt = new Date().toISOString();
+    }
+
+    const transaction: VanTransactionRecord = {
+      id: `vtx_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      receiptNumber,
+      driverId: driver.id,
+      driverName: driver.name,
+      supplierId: driver.supplierId,
+      storeId: store.id,
+      storeName: store.name,
+      type: 'debt_collection',
+      paymentType: 'cash',
+      totalAmountIQD: amount,
+      createdAt: new Date().toISOString(),
+      notes: params.notes?.trim() || 'تحصيل دفعة نقدية من حساب الآجل (FIFO)'
+    };
+
+    this.vanTransactions.unshift(transaction);
+
+    return {
+      success: true,
+      receiptNumber,
+      transaction,
+      ledgerEntry,
+      updatedCreditAccount: creditAcc,
+      driverCashBalance: driver.currentCashCollectedIQD
+    };
+  }
+
+  loadVanStock(params: {
+    driverId: string;
+    barcode: string;
+    quantity: number;
+    unitPriceIQD?: number;
+  }): VanInventoryItem {
+    const driver = this.drivers.find(d => d.id === params.driverId);
+    if (!driver) throw new Error('السائق غير موجود');
+    const qty = Math.floor(Number(params.quantity));
+    if (!Number.isFinite(qty) || qty <= 0) {
+      throw new Error('كمية التحميل يجب أن تكون أكبر من صفر');
+    }
+
+    const existing = this.vanInventory.find(
+      v => v.driverId === params.driverId && v.barcode === params.barcode
+    );
+    if (existing) {
+      existing.loadedQuantity += qty;
+      existing.remainingQuantity += qty;
+      if (params.unitPriceIQD && Number(params.unitPriceIQD) > 0) {
+        existing.unitPriceIQD = Number(params.unitPriceIQD);
+      }
+      return existing;
+    }
+
+    const product = this.products.find(p => p.barcode === params.barcode);
+    if (!product) throw new Error('المنتج غير موجود في الكتالوج');
+
+    const supplierOffer =
+      this.offers.find(o => o.barcode === params.barcode && o.supplierId === driver.supplierId) ||
+      this.offers.find(o => o.barcode === params.barcode);
+
+    const newItem: VanInventoryItem = {
+      id: `van_inv_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      driverId: driver.id,
+      barcode: product.barcode,
+      productName: product.nameAr,
+      unit: product.unit,
+      loadedQuantity: qty,
+      soldQuantity: 0,
+      returnedQuantity: 0,
+      damagedQuantity: 0,
+      remainingQuantity: qty,
+      unitPriceIQD:
+        params.unitPriceIQD && Number(params.unitPriceIQD) > 0
+          ? Number(params.unitPriceIQD)
+          : supplierOffer?.priceIQD || 25000
+    };
+
+    this.vanInventory.push(newItem);
+    return newItem;
+  }
+
+  createVanLoadRequest(params: {
+    driverId: string;
+    items: { barcode: string; quantity: number }[];
+    notes?: string;
+  }): VanLoadRequest {
+    const driver = this.drivers.find(d => d.id === params.driverId);
+    if (!driver) throw new Error('السائق غير موجود');
+    if (!Array.isArray(params.items) || params.items.length === 0) {
+      throw new Error('يرجى اختيار صنف واحد على الأقل لطلب تجهيز الفان');
+    }
+
+    const requestItems: VanLoadRequestItem[] = [];
+    let totalEstimatedIQD = 0;
+
+    for (const raw of params.items) {
+      const qty = Math.floor(Number(raw.quantity));
+      if (!raw.barcode || !Number.isFinite(qty) || qty <= 0) continue;
+      const product = this.products.find(p => p.barcode === raw.barcode);
+      if (!product) continue;
+      const supplierOffer =
+        this.offers.find(o => o.barcode === raw.barcode && o.supplierId === driver.supplierId) ||
+        this.offers.find(o => o.barcode === raw.barcode);
+      const unitPriceIQD = supplierOffer?.priceIQD || 25000;
+      totalEstimatedIQD += unitPriceIQD * qty;
+      requestItems.push({
+        barcode: product.barcode,
+        productName: product.nameAr,
+        unit: product.unit,
+        requestedQuantity: qty,
+        approvedQuantity: qty,
+        unitPriceIQD
+      });
+    }
+
+    if (requestItems.length === 0) {
+      throw new Error('لا توجد أصناف صالحة في طلب التجهيز');
+    }
+
+    const req: VanLoadRequest = {
+      id: `vlr_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      requestNumber: `LOAD-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      driverId: driver.id,
+      driverName: driver.name,
+      vanWarehouseName: driver.vanWarehouseName,
+      supplierId: driver.supplierId,
+      supplierName: driver.supplierName,
+      items: requestItems,
+      totalEstimatedIQD,
+      status: 'pending_approval',
+      notes: params.notes?.trim() || 'طلب تجهيز بضاعة من متجر المورد للفان',
+      createdAt: new Date().toISOString()
+    };
+
+    this.vanLoadRequests.unshift(req);
+    return req;
+  }
+
+  approveVanLoadRequest(params: {
+    requestId: string;
+    adjustedQuantities?: Record<string, number>;
+    reviewedBy?: string;
+  }): VanLoadRequest {
+    const req = this.vanLoadRequests.find(r => r.id === params.requestId);
+    if (!req) throw new Error('طلب التجهيز غير موجود');
+    if (req.status !== 'pending_approval') {
+      throw new Error('تمت معالجة طلب التجهيز هذا مسبقاً');
+    }
+
+    let finalTotal = 0;
+    for (const item of req.items) {
+      const override = params.adjustedQuantities?.[item.barcode];
+      const finalQty =
+        override !== undefined && Number.isFinite(Number(override))
+          ? Math.max(0, Math.floor(Number(override)))
+          : item.requestedQuantity;
+      item.approvedQuantity = finalQty;
+      finalTotal += finalQty * item.unitPriceIQD;
+
+      if (finalQty > 0) {
+        this.loadVanStock({
+          driverId: req.driverId,
+          barcode: item.barcode,
+          quantity: finalQty,
+          unitPriceIQD: item.unitPriceIQD
+        });
+
+        // Deduct from supplier offer available stock if present
+        const offer = this.offers.find(
+          o => o.barcode === item.barcode && o.supplierId === req.supplierId
+        );
+        if (offer) {
+          offer.availableStock = Math.max(0, offer.availableStock - finalQty);
+        }
+      }
+    }
+
+    req.totalEstimatedIQD = finalTotal;
+    req.status = 'approved';
+    req.reviewedBy = params.reviewedBy || 'محاسب / إدارة المورد';
+    req.reviewedAt = new Date().toISOString();
+    return req;
+  }
+
+  rejectVanLoadRequest(requestId: string, notes?: string): VanLoadRequest {
+    const req = this.vanLoadRequests.find(r => r.id === requestId);
+    if (!req) throw new Error('طلب التجهيز غير موجود');
+    if (req.status !== 'pending_approval') {
+      throw new Error('تمت معالجة طلب التجهيز هذا مسبقاً');
+    }
+    req.status = 'rejected';
+    req.reviewedBy = 'محاسب / إدارة المورد';
+    req.reviewedAt = new Date().toISOString();
+    if (notes) req.notes = notes;
+    return req;
+  }
+
+  createDriverVan(params: {
+    supplierId: string;
+    name: string;
+    phone: string;
+    vehiclePlate: string;
+    vehicleModel: string;
+    vanWarehouseName: string;
+    dailyTargetIQD?: number;
+    commissionRatePercent?: number;
+  }): DriverProfile {
+    const supplier = this.suppliers.find(s => s.id === params.supplierId);
+    if (!supplier) throw new Error('المورد غير موجود');
+    if (!params.name?.trim() || !params.vehiclePlate?.trim()) {
+      throw new Error('يرجى إدخال اسم السائق ورقم لوحة المركبة');
+    }
+
+    const newDriver: DriverProfile = {
+      id: `drv_${Date.now()}`,
+      supplierId: supplier.id,
+      supplierName: supplier.companyName,
+      name: params.name.trim(),
+      phone: params.phone?.trim() || '+964 770 000 0000',
+      vehiclePlate: params.vehiclePlate.trim(),
+      vehicleModel: params.vehicleModel?.trim() || 'تويوتا هايس 2024',
+      vanWarehouseName: params.vanWarehouseName?.trim() || `فان ${this.drivers.length + 1} - بغداد`,
+      currentCashCollectedIQD: 0,
+      isActiveShift: true,
+      shiftStartTime: new Date().toISOString(),
+      dailyTargetIQD: Number(params.dailyTargetIQD) || 2000000,
+      commissionRatePercent: Number(params.commissionRatePercent) || 1.5,
+      todayCashSalesIQD: 0,
+      todayCreditSalesIQD: 0,
+      todayDebtCollectedIQD: 0
+    };
+
+    this.drivers.push(newDriver);
+    supplier.totalVans = this.drivers.filter(d => d.supplierId === supplier.id).length;
+    return newDriver;
+  }
+
+  addVanRouteStop(driverId: string, storeId: string, notes?: string): VanRouteStop {
+    const driver = this.drivers.find(d => d.id === driverId);
+    if (!driver) throw new Error('السائق غير موجود');
+    const store = this.stores.find(s => s.id === storeId);
+    if (!store) throw new Error('المتجر غير موجود');
+
+    const existing = this.vanRouteStops.find(
+      s => s.driverId === driverId && s.storeId === storeId
+    );
+    if (existing) {
+      existing.status = 'pending';
+      if (notes) existing.notes = notes;
+      return existing;
+    }
+
+    const driverStops = this.vanRouteStops.filter(s => s.driverId === driverId);
+    const stop: VanRouteStop = {
+      id: `stop_${Date.now()}`,
+      driverId,
+      storeId: store.id,
+      storeName: store.name,
+      district: store.district,
+      address: store.address,
+      phone: store.phone,
+      sequence: driverStops.length + 1,
+      status: 'pending',
+      notes: notes?.trim() || 'زيارة توزيع ميداني مجدولة'
+    };
+
+    this.vanRouteStops.push(stop);
+    return stop;
+  }
+
+  updateVanRouteStopStatus(
+    stopId: string,
+    status: VanRouteStop['status'],
+    notes?: string
+  ): VanRouteStop {
+    const stop = this.vanRouteStops.find(s => s.id === stopId);
+    if (!stop) throw new Error('نقطة التوزيع غير موجودة');
+    stop.status = status;
+    if (status === 'visited' || status === 'sold') {
+      stop.visitedAt = new Date().toISOString();
+    }
+    if (notes !== undefined) stop.notes = notes;
+    return stop;
+  }
+
+  updateDriverAvailability(
+    driverId: string,
+    availabilityStatus: 'available' | 'busy',
+    busyReason?: string
+  ): DriverProfile {
+    const driver = this.drivers.find(d => d.id === driverId);
+    if (!driver) throw new Error('السائق غير موجود');
+    driver.availabilityStatus = availabilityStatus;
+    driver.busyReason = availabilityStatus === 'busy' ? (busyReason?.trim() || 'مشغول بالتوزيع') : undefined;
+    return driver;
+  }
+
+  reorderVanRouteStops(driverId: string, orderedStopIds: string[]): VanRouteStop[] {
+    const driverStops = this.vanRouteStops.filter(s => s.driverId === driverId);
+    orderedStopIds.forEach((id, idx) => {
+      const target = driverStops.find(s => s.id === id);
+      if (target) {
+        target.sequence = idx + 1;
+      }
+    });
+    // Ensure any remaining stops not listed still have valid sequences
+    let nextSeq = orderedStopIds.length + 1;
+    driverStops.forEach(s => {
+      if (!orderedStopIds.includes(s.id)) {
+        s.sequence = nextSeq++;
+      }
+    });
+    return this.vanRouteStops
+      .filter(s => s.driverId === driverId)
+      .sort((a, b) => a.sequence - b.sequence);
+  }
+
+  removeVanRouteStop(stopId: string): boolean {
+    const idx = this.vanRouteStops.findIndex(s => s.id === stopId);
+    if (idx === -1) throw new Error('نقطة التوزيع غير موجودة');
+    const [removed] = this.vanRouteStops.splice(idx, 1);
+    const remaining = this.vanRouteStops
+      .filter(s => s.driverId === removed.driverId)
+      .sort((a, b) => a.sequence - b.sequence);
+    remaining.forEach((s, i) => {
+      s.sequence = i + 1;
+    });
+    return true;
+  }
+
+  settleShiftReport(reportId: string): ShiftCloseReport {
+    const report = this.shiftReports.find(r => r.id === reportId);
+    if (!report) throw new Error('تقرير الوردية غير موجود');
+    report.status = 'settled';
+    report.settledAt = new Date().toISOString();
+
+    const driver = this.drivers.find(d => d.id === report.driverId);
+    if (driver) {
+      driver.isActiveShift = true;
+      driver.shiftStartTime = new Date().toISOString();
+    }
+    return report;
   }
 
   recordVanReturnOrDamage(params: {
@@ -625,7 +1174,7 @@ class AppDataStore {
     reason: string;
   }) {
     const vanItem = this.vanInventory.find(v => v.driverId === params.driverId && v.barcode === params.barcode);
-    if (!vanItem) throw new Error('Item not in van');
+    if (!vanItem) throw new Error('الصنف غير موجود في حمولة الفان');
 
     if (params.type === 'return') {
       vanItem.returnedQuantity += params.quantity;
@@ -644,7 +1193,7 @@ class AppDataStore {
     notes?: string;
   }): ShiftCloseReport {
     const driver = this.drivers.find(d => d.id === params.driverId);
-    if (!driver) throw new Error('Driver not found');
+    if (!driver) throw new Error('السائق غير موجود');
 
     const expectedCash = driver.currentCashCollectedIQD;
     const cashVariance = params.actualCashCountedIQD - expectedCash;
@@ -758,6 +1307,170 @@ class AppDataStore {
       paymentType,
       timestamp: saleRecord.createdAt,
       triggeredLowStockAlerts
+    };
+  }
+
+  getStorePOSReturns(storeId: string) {
+    return this.storePOSReturns.filter(r => r.storeId === storeId);
+  }
+
+  recordStorePOSReturn(params: {
+    storeId: string;
+    originalReceiptNumber?: number;
+    customerName?: string;
+    refundMethod?: 'cash' | 'card' | 'credit_ledger';
+    reason?: string;
+    processedBy?: string;
+    items: {
+      barcode: string;
+      productName?: string;
+      quantity: number;
+      unitPriceIQD?: number;
+      restockToShelf?: boolean;
+    }[];
+  }) {
+    if (!params.storeId) {
+      throw new Error('معرف المتجر مطلوب لتسجيل المرتجع');
+    }
+    if (!Array.isArray(params.items) || params.items.length === 0) {
+      throw new Error('يرجى تحديد صنف واحد على الأقل للإرجاع');
+    }
+
+    let originalSale: StorePOSSaleRecord | undefined;
+    let discountMultiplier = 1;
+    const returnedAlreadyMap = new Map<string, number>();
+
+    if (params.originalReceiptNumber !== undefined && params.originalReceiptNumber !== null && String(params.originalReceiptNumber).trim() !== '') {
+      const receiptNo = Number(params.originalReceiptNumber);
+      originalSale = this.storePOSSales.find(
+        s => s.storeId === params.storeId && s.receiptNumber === receiptNo
+      );
+      if (!originalSale) {
+        throw new Error(`الفاتورة رقم #${receiptNo} غير موجودة`);
+      }
+
+      if (originalSale.subtotalIQD > 0) {
+        discountMultiplier = Math.max(0, Math.min(1, originalSale.totalIQD / originalSale.subtotalIQD));
+      }
+
+      // Sum previously returned quantities for this receipt
+      for (const prevRet of this.storePOSReturns) {
+        if (prevRet.storeId === params.storeId && prevRet.originalReceiptNumber === receiptNo) {
+          for (const prevItem of prevRet.items) {
+            returnedAlreadyMap.set(
+              prevItem.barcode,
+              (returnedAlreadyMap.get(prevItem.barcode) || 0) + prevItem.quantity
+            );
+          }
+        }
+      }
+    }
+
+    const processedItems: StorePOSReturnItem[] = [];
+    const restockedItems: {
+      barcode: string;
+      productName: string;
+      addedQty: number;
+      newStockQuantity: number;
+    }[] = [];
+    let totalRefundIQD = 0;
+    let profitAdjustmentIQD = 0;
+
+    for (const rawItem of params.items) {
+      const qty = Math.floor(Number(rawItem.quantity));
+      if (!rawItem.barcode || !Number.isFinite(qty) || qty <= 0) {
+        throw new Error('كمية الإرجاع يجب أن تكون رقماً موجباً صحيحاً');
+      }
+
+      const inv = this.storeInventory.find(
+        s => s.storeId === params.storeId && s.barcode === rawItem.barcode
+      );
+
+      let unitPriceIQD = Number(rawItem.unitPriceIQD ?? inv?.retailSellingPriceIQD ?? 0);
+
+      if (originalSale) {
+        const soldLine = originalSale.items.find(it => it.barcode === rawItem.barcode);
+        if (!soldLine) {
+          throw new Error(`الصنف (${rawItem.productName || rawItem.barcode}) غير موجود في الفاتورة #${originalSale.receiptNumber}`);
+        }
+        const alreadyReturned = returnedAlreadyMap.get(rawItem.barcode) || 0;
+        const maxReturnable = Math.max(0, soldLine.quantity - alreadyReturned);
+        if (qty > maxReturnable) {
+          throw new Error(
+            maxReturnable === 0
+              ? `تم إرجاع كامل كمية "${soldLine.productName}" مسبقاً من الفاتورة #${originalSale.receiptNumber}`
+              : `الكمية المطلوب إرجاعها من "${soldLine.productName}" (${qty}) تتجاوز المتبقي القابل للإرجاع (${maxReturnable})`
+          );
+        }
+        unitPriceIQD = Math.round(soldLine.unitPriceIQD * discountMultiplier);
+      }
+
+      if (!inv && unitPriceIQD <= 0) {
+        throw new Error(`الصنف (${rawItem.barcode}) غير موجود في مخزون المتجر`);
+      }
+
+      const productName = inv?.productName || rawItem.productName || 'منتج';
+      const restockToShelf = rawItem.restockToShelf !== false;
+
+      if (restockToShelf && inv) {
+        inv.stockQuantity += qty;
+        inv.isLowStock = inv.stockQuantity <= inv.reorderLevel;
+        restockedItems.push({
+          barcode: inv.barcode,
+          productName: inv.productName,
+          addedQty: qty,
+          newStockQuantity: inv.stockQuantity
+        });
+      }
+
+      const lineRefund = Math.round(unitPriceIQD * qty);
+      totalRefundIQD += lineRefund;
+
+      const costPrice = inv ? inv.costPriceIQD : Math.round(unitPriceIQD * 0.85);
+      profitAdjustmentIQD += Math.max(0, Math.round((unitPriceIQD - costPrice) * qty));
+
+      processedItems.push({
+        barcode: rawItem.barcode,
+        productName,
+        quantity: qty,
+        unitPriceIQD,
+        restockToShelf
+      });
+    }
+
+    const nextReturnNumber =
+      this.storePOSReturns.reduce((max, r) => Math.max(max, r.returnNumber), 5000) + 1;
+
+    const refundMethod: StorePOSReturnRecord['refundMethod'] =
+      params.refundMethod === 'card' || params.refundMethod === 'credit_ledger'
+        ? params.refundMethod
+        : 'cash';
+
+    const returnRecord: StorePOSReturnRecord = {
+      id: `ret_${nextReturnNumber}`,
+      returnNumber: nextReturnNumber,
+      storeId: params.storeId,
+      originalReceiptNumber: originalSale?.receiptNumber,
+      customerName: params.customerName?.trim() || originalSale?.customerName || 'زبون نقدي',
+      refundMethod,
+      items: processedItems,
+      totalRefundIQD,
+      profitAdjustmentIQD,
+      reason: params.reason?.trim() || 'استرجاع منتج عند الكاشير',
+      processedBy: params.processedBy?.trim() || 'أمين الصندوق',
+      createdAt: new Date().toISOString()
+    };
+
+    this.storePOSReturns.unshift(returnRecord);
+
+    return {
+      returnId: returnRecord.id,
+      returnNumber: returnRecord.returnNumber,
+      returnRecord,
+      restockedItems,
+      restockedUnitsCount: restockedItems.reduce((s, it) => s + it.addedQty, 0),
+      totalRefundIQD,
+      timestamp: returnRecord.createdAt
     };
   }
 

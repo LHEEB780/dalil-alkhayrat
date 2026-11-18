@@ -5,6 +5,8 @@ import {
   SupplierProfile,
   DriverProfile,
   VanInventoryItem,
+  VanRouteStop,
+  VanTransactionRecord,
   CreditAccount,
   LedgerEntry,
   SubOrder,
@@ -983,7 +985,30 @@ export const initialDrivers: DriverProfile[] = [
     vanWarehouseName: 'فان رقم 1 - قاطع الكرخ والمنصور',
     currentCashCollectedIQD: 1450000,
     isActiveShift: true,
-    shiftStartTime: '2026-11-08T07:30:00Z'
+    shiftStartTime: '2026-11-17T07:30:00Z',
+    dailyTargetIQD: 2500000,
+    commissionRatePercent: 1.5,
+    todayCashSalesIQD: 950000,
+    todayCreditSalesIQD: 420000,
+    todayDebtCollectedIQD: 500000
+  },
+  {
+    id: 'drv_mustafa_karkh',
+    supplierId: 'supp_rafidain',
+    supplierName: 'شركة الرافدين للتجارة العامة والأغذية',
+    name: 'مصطفى كريم الدليمي',
+    phone: '+964 770 512 4488',
+    vehiclePlate: 'بغداد 61904 ن',
+    vehicleModel: 'هيونداي H-100 مبرد 2024',
+    vanWarehouseName: 'فان رقم 2 - قاطع الكرادة والجادرية',
+    currentCashCollectedIQD: 820000,
+    isActiveShift: true,
+    shiftStartTime: '2026-11-17T07:45:00Z',
+    dailyTargetIQD: 2000000,
+    commissionRatePercent: 1.5,
+    todayCashSalesIQD: 620000,
+    todayCreditSalesIQD: 280000,
+    todayDebtCollectedIQD: 200000
   },
   {
     id: 'drv_ali_rasheed',
@@ -996,7 +1021,12 @@ export const initialDrivers: DriverProfile[] = [
     vanWarehouseName: 'فان رقم 3 - قاطع الرصافة والكرادة',
     currentCashCollectedIQD: 980000,
     isActiveShift: true,
-    shiftStartTime: '2026-11-08T08:00:00Z'
+    shiftStartTime: '2026-11-17T08:00:00Z',
+    dailyTargetIQD: 2200000,
+    commissionRatePercent: 1.25,
+    todayCashSalesIQD: 980000,
+    todayCreditSalesIQD: 0,
+    todayDebtCollectedIQD: 0
   }
 ];
 
@@ -1052,6 +1082,135 @@ export const initialVanInventory: VanInventoryItem[] = [
     damagedQuantity: 0,
     remainingQuantity: 28,
     unitPriceIQD: 18500
+  },
+  {
+    id: 'van_inv_5',
+    driverId: 'drv_mustafa_karkh',
+    barcode: '6281007000123',
+    productName: 'أرز بسمتي هندي عنبر درجة أولى',
+    unit: 'كيس (10 كغم)',
+    loadedQuantity: 30,
+    soldQuantity: 12,
+    returnedQuantity: 0,
+    damagedQuantity: 0,
+    remainingQuantity: 18,
+    unitPriceIQD: 28500
+  },
+  {
+    id: 'van_inv_6',
+    driverId: 'drv_mustafa_karkh',
+    barcode: '6210001234567',
+    productName: 'زيت دوار الشمس النقي مكرر',
+    unit: 'كرتون (12 × 1 لتر)',
+    loadedQuantity: 35,
+    soldQuantity: 14,
+    returnedQuantity: 0,
+    damagedQuantity: 0,
+    remainingQuantity: 21,
+    unitPriceIQD: 36000
+  }
+];
+
+export const initialVanRouteStops: VanRouteStop[] = [
+  {
+    id: 'stop_1',
+    driverId: 'drv_ahmed_baghdad',
+    storeId: 'store_almansoor',
+    storeName: 'سوبرماركت المنصور المركزي',
+    district: 'المنصور - شارع 14 رمضان',
+    address: 'قرب ساحة الرواد، عمارة الأمل',
+    phone: '+964 771 234 5678',
+    sequence: 1,
+    status: 'sold',
+    lastSaleAmountIQD: 570000,
+    visitedAt: '2026-11-17T08:40:00Z',
+    notes: 'تم تسليم 10 أكياس أرز و 8 كراتين زيت'
+  },
+  {
+    id: 'stop_2',
+    driverId: 'drv_ahmed_baghdad',
+    storeId: 'store_karrada',
+    storeName: 'أسواق دجلة الخير - الكرادة',
+    district: 'الكرادة داخل',
+    address: 'شارع كرادة داخل قرب تقاطع المسبح',
+    phone: '+964 780 991 2233',
+    sequence: 2,
+    status: 'pending',
+    notes: 'يحتاج تجديد رصيد السكر والزيت + تحصيل دفعة آجل'
+  },
+  {
+    id: 'stop_3',
+    driverId: 'drv_ahmed_baghdad',
+    storeId: 'store_basra_amal',
+    storeName: 'سوبرماركت العشار الذهبي',
+    district: 'قاطع التوزيع الخارجي',
+    address: 'نقطة تسليم الفرع المعتمد',
+    phone: '+964 773 410 8822',
+    sequence: 3,
+    status: 'pending',
+    notes: 'طلبية سريعة عند توفر المعكرونة'
+  },
+  {
+    id: 'stop_4',
+    driverId: 'drv_mustafa_karkh',
+    storeId: 'store_karrada',
+    storeName: 'أسواق دجلة الخير - الكرادة',
+    district: 'الكرادة داخل',
+    address: 'شارع كرادة داخل قرب تقاطع المسبح',
+    phone: '+964 780 991 2233',
+    sequence: 1,
+    status: 'sold',
+    lastSaleAmountIQD: 620000,
+    visitedAt: '2026-11-17T09:15:00Z'
+  }
+];
+
+export const initialVanTransactions: VanTransactionRecord[] = [
+  {
+    id: 'vtx_1001',
+    receiptNumber: 'VAN-2026-1001',
+    driverId: 'drv_ahmed_baghdad',
+    driverName: 'أحمد كاظم البغدادي',
+    supplierId: 'supp_rafidain',
+    storeId: 'store_almansoor',
+    storeName: 'سوبرماركت المنصور المركزي',
+    type: 'direct_sale',
+    paymentType: 'cash',
+    items: [
+      {
+        barcode: '6281007000123',
+        productName: 'أرز بسمتي هندي عنبر درجة أولى',
+        unit: 'كيس (10 كغم)',
+        quantity: 10,
+        unitPriceIQD: 28500,
+        totalIQD: 285000
+      },
+      {
+        barcode: '6210001234567',
+        productName: 'زيت دوار الشمس النقي مكرر',
+        unit: 'كرتون (12 × 1 لتر)',
+        quantity: 8,
+        unitPriceIQD: 36000,
+        totalIQD: 288000
+      }
+    ],
+    totalAmountIQD: 573000,
+    createdAt: '2026-11-17T08:40:00Z',
+    notes: 'بيع مباشر من الفان + مزامنة فورية لمخزون الكاشير'
+  },
+  {
+    id: 'vtx_1002',
+    receiptNumber: 'COL-2026-1002',
+    driverId: 'drv_ahmed_baghdad',
+    driverName: 'أحمد كاظم البغدادي',
+    supplierId: 'supp_rafidain',
+    storeId: 'store_almansoor',
+    storeName: 'سوبرماركت المنصور المركزي',
+    type: 'debt_collection',
+    paymentType: 'cash',
+    totalAmountIQD: 500000,
+    createdAt: '2026-11-17T08:45:00Z',
+    notes: 'تحصيل دفعة نقدية من حساب الآجل - وصل ميداني'
   }
 ];
 

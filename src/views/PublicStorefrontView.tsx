@@ -31,7 +31,13 @@ import {
   Layers,
   ArrowDown,
   Send,
-  Eye
+  Eye,
+  Package,
+  Barcode,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  ShoppingCart
 } from 'lucide-react';
 import { Currency, Language } from '../types/index.ts';
 import { formatCurrency } from '../utils/format.ts';
@@ -350,6 +356,12 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [selectedDetailProduct, setSelectedDetailProduct] = useState<any | null>(null);
+  const [detailSlideIndex, setDetailSlideIndex] = useState(0);
+  const [isDetailInfoExpanded, setIsDetailInfoExpanded] = useState(false);
+  const [detailQty, setDetailQty] = useState(1);
+  const [detailAddedToast, setDetailAddedToast] = useState(false);
+  const detailTouchStartXRef = React.useRef<number | null>(null);
 
   // In-app chat messages
   const [chatMessages, setChatMessages] = useState<Array<{ sender: 'user' | 'store'; text: string; time: string }>>([
@@ -542,19 +554,49 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
     });
   };
 
+  // Open Wholesale-style Retail Product Details Modal
+  const openProductDetails = (product: any) => {
+    setSelectedDetailProduct(product);
+    setDetailSlideIndex(0);
+    setIsDetailInfoExpanded(false);
+    const existingQty = getProductCartQty(product.barcode);
+    setDetailQty(existingQty > 0 ? existingQty : 1);
+    setDetailAddedToast(false);
+  };
+
   // Cart operations
-  const handleAddToCart = (product: any) => {
+  const handleAddToCart = (product: any, qtyToAdd: number = 1) => {
     setB2cCart(prev => {
       const existing = prev.find(p => p.barcode === product.barcode);
       if (existing) {
-        return prev.map(p => p.barcode === product.barcode ? { ...p, qty: p.qty + 1 } : p);
+        return prev.map(p => p.barcode === product.barcode ? { ...p, qty: p.qty + qtyToAdd } : p);
       }
       return [...prev, {
         barcode: product.barcode,
         name: product.productName,
         price: product.retailSellingPriceIQD,
         unit: product.unit,
-        qty: 1,
+        qty: qtyToAdd,
+        imageUrl: product.imageUrl
+      }];
+    });
+  };
+
+  const handleSetProductCartQty = (product: any, targetQty: number) => {
+    setB2cCart(prev => {
+      const existing = prev.find(p => p.barcode === product.barcode);
+      if (targetQty <= 0) {
+        return prev.filter(p => p.barcode !== product.barcode);
+      }
+      if (existing) {
+        return prev.map(p => p.barcode === product.barcode ? { ...p, qty: targetQty } : p);
+      }
+      return [...prev, {
+        barcode: product.barcode,
+        name: product.productName,
+        price: product.retailSellingPriceIQD,
+        unit: product.unit,
+        qty: targetQty,
         imageUrl: product.imageUrl
       }];
     });
@@ -869,32 +911,6 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
             </div>
           </div>
 
-          {/* Action buttons: Enter Store / Store Management */}
-          <div className="flex items-center gap-2 shrink-0">
-            {onOpenStoreManagement && (
-              <button
-                onClick={onOpenStoreManagement}
-                className="py-2.5 px-3.5 rounded-xl bg-[#221F1F] hover:bg-black text-white text-xs font-black shadow-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                title={isAr ? 'تعديل المنتجات والعروض والبنرات' : 'Manage Store'}
-              >
-                <SlidersHorizontal className="w-3.5 h-3.5 text-[#FFE600]" />
-                <span className="hidden sm:inline">{isAr ? 'إدارة المتجر والعروض' : 'Store Studio'}</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                setIsStoreEntered(true);
-                const el = document.getElementById('supermarket-catalog-section');
-                if (el) el.scrollIntoView({ behavior: 'smooth' });
-              }}
-              className="flex-1 sm:flex-none py-2.5 px-5 rounded-xl bg-[#00A046] hover:bg-[#008A3C] text-white text-xs font-black shadow-md flex items-center justify-center gap-2 transition cursor-pointer"
-            >
-              <ShoppingBag className="w-4 h-4" />
-              <span>{isAr ? 'دخول وتصفح السوبرماركت 🛒' : 'Enter Supermarket 🛒'}</span>
-            </button>
-          </div>
-
         </div>
 
       </div>
@@ -979,26 +995,18 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
           </button>
         </div>
 
-        {/* Retail / Single Items Assurance Banner */}
-        <div className="bg-[#E8F8EE] border border-[#B3EBC8] rounded-2xl p-3.5 flex items-center justify-between gap-3 text-xs shadow-2xs">
-          <div className="flex items-center gap-2.5">
-            <span className="w-9 h-9 rounded-xl bg-[#00A046] text-white flex items-center justify-center font-bold text-base shrink-0 shadow-2xs">
-              🛍️
+        {/* Compact Delivery & Retail Price Strip */}
+        <div className="bg-[#ECFDF5] border border-[#C6EEDB] rounded-2xl px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <Zap className="w-4 h-4 text-[#00A046] shrink-0" />
+            <span className="font-bold text-[#0F3D24] truncate">
+              {isAr
+                ? 'بيع مباشر بالقطعة · توصيل سريع خلال 20 دقيقة'
+                : 'Single-item retail · 20 min fast delivery'}
             </span>
-            <div>
-              <div className="font-black text-[#00A046] flex items-center gap-1.5">
-                <span>{isAr ? 'قسم البيع بالمفرد (بالقطعة الواحدة) لزبائن المنازل' : 'Retail Consumer Store (Sold by Single Item)'}</span>
-                <span className="bg-[#00A046] text-white text-[9px] px-1.5 py-0.2 rounded font-mono font-bold">B2C مفرد</span>
-              </div>
-              <p className="text-[11px] text-[#221F1F]/80 mt-0.5">
-                {isAr 
-                  ? 'جميع الأسعار والكميات أدناه مخصصة للبيع بالقطعة الواحدة (مفرد) وليست كراتين جملة • اطلب بالقطعة ويصلك فوري لباب منزلك.'
-                  : 'All items are sold strictly by single piece / retail unit, not wholesale cartons.'}
-              </p>
-            </div>
           </div>
-          <span className="hidden sm:inline bg-white border border-[#B3EBC8] text-[#00A046] px-2.5 py-1 rounded-xl text-[11px] font-black shrink-0">
-            {isAr ? 'أسعار مفرد معتمدة' : 'Verified Retail Prices'}
+          <span className="text-[11px] font-bold text-[#00A046] shrink-0 whitespace-nowrap">
+            {isAr ? 'أسعار المحل' : 'Store Prices'}
           </span>
         </div>
 
@@ -1152,130 +1160,148 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
 
         </div>
 
-        {/* 2.5 Products Grid (Blinkit + ReadyGrocery Card Design) */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
+        {/* 2.5 Clean Low-Text Product Grid (Aligned with Main Wholesale ProductCard) */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-3.5">
           {filteredProducts.map((product) => {
             const inCartQty = getProductCartQty(product.barcode);
             const isFavorited = favoriteProductBarcodes.includes(product.barcode);
+            const cleanTitle = isAr
+              ? product.productName.replace(/\s*\(مفرد\)\s*$/g, '').trim()
+              : product.nameEn || product.productName;
+            const cleanUnit = isAr
+              ? (product.unit || '').replace(/\s*مفردة\s*/g, ' ').replace(/\s+/g, ' ').trim()
+              : getLocalizedText(product.unit || '', 'en');
+            const rating = product.rating || 4.8;
+            const reviewsCount = product.reviewsCount || 85;
+            const hasDiscount = Boolean(product.discountPercent && product.discountPercent > 0);
 
             return (
               <div
                 key={product.barcode}
-                className="bg-white rounded-2xl border border-[#E5E7EB] hover:border-[#00A046]/40 transition shadow-xs hover:shadow-md p-3 flex flex-col justify-between group relative overflow-hidden"
+                onClick={() => openProductDetails(product)}
+                className="group rounded-2xl border border-[#E5E7EB] hover:border-[#00A046]/60 bg-white p-2.5 sm:p-3 flex flex-col justify-between transition-all duration-200 cursor-pointer hover:-translate-y-0.5 hover:shadow-[0_10px_24px_-6px_rgba(0,160,70,0.16),0_2px_8px_-2px_rgba(15,23,42,0.06)]"
               >
-                {/* Top Badges: Retail Single Piece Tag + Wishlist Heart Button */}
-                <div className="flex items-center justify-between gap-1 mb-1 relative z-10">
-                  <div className="flex items-center gap-1">
-                    <span className="bg-[#E8F8EE] text-[#00A046] border border-[#B3EBC8] text-[9px] font-black px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-2xs">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#00A046] animate-pulse"></span>
-                      <span>{isAr ? 'مفرد بالقطعة' : 'Single Item'}</span>
-                    </span>
-                    {product.discountPercent && (
-                      <span className="bg-[#F84147] text-white text-[9px] font-black px-1.5 py-0.5 rounded-md shadow-2xs">
-                        -{product.discountPercent}%
-                      </span>
-                    )}
-                  </div>
+                {/* Clean Pure White Square Image Stage */}
+                <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-white p-2 mb-2.5">
+                  <img
+                    src={product.imageUrl || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80'}
+                    alt={cleanTitle}
+                    referrerPolicy="no-referrer"
+                    className="h-full w-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300"
+                    loading="lazy"
+                  />
 
-                  {/* Product Favorite Button (Heart) */}
+                  {hasDiscount && (
+                    <span className="absolute top-2 start-2 bg-[#F84147] text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded-md shadow-xs tabular-nums">
+                      -{product.discountPercent}%
+                    </span>
+                  )}
+
                   <button
-                    onClick={() => handleToggleProductFavorite(product.barcode)}
-                    className={`w-7 h-7 rounded-full flex items-center justify-center transition shadow-2xs cursor-pointer ${
-                      isFavorited 
-                        ? 'bg-rose-50 text-rose-600' 
-                        : 'bg-white/80 hover:bg-gray-100 text-gray-400 hover:text-rose-500'
-                    }`}
-                    title={isAr ? 'إضافة للمفضلة' : 'Wishlist'}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleProductFavorite(product.barcode);
+                    }}
+                    aria-label={isAr ? 'إضافة للمفضلة' : 'Toggle favorite'}
+                    className="absolute top-2 end-2 w-7 h-7 rounded-full bg-white/90 hover:bg-white backdrop-blur-xs border border-black/5 shadow-xs flex items-center justify-center transition cursor-pointer"
                   >
-                    <Heart className={`w-3.5 h-3.5 ${isFavorited ? 'fill-rose-500 text-rose-500' : ''}`} />
+                    <Heart
+                      className={`w-3.5 h-3.5 transition ${
+                        isFavorited
+                          ? 'fill-[#FFA300] text-[#FFA300]'
+                          : 'text-[#6B7280] hover:text-[#FFA300] stroke-[2]'
+                      }`}
+                    />
                   </button>
                 </div>
 
-                {/* Product Image with delivery speed tag */}
-                <div className="relative h-32 sm:h-36 w-full flex items-center justify-center bg-gray-50/50 rounded-xl overflow-hidden my-1">
-                  <img
-                    src={product.imageUrl || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80'}
-                    alt={product.productName}
-                    className="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"
-                  />
-                  
-                  {/* Delivery time pill (Blinkit / ReadyGrocery style ⏱️ 20 mins) */}
-                  <div className="absolute bottom-1 right-1 bg-white/95 backdrop-blur-xs border border-gray-200 text-gray-800 px-1.5 py-0.5 rounded-md text-[9px] font-bold flex items-center gap-1 shadow-2xs">
-                    <Clock className="w-2.5 h-2.5 text-[#00A046]" />
-                    <span>20 {isAr ? 'دقيقة' : 'mins'}</span>
-                  </div>
-                </div>
-
-                {/* Product Info */}
-                <div className="space-y-1.5 mt-1 text-right flex-1">
-                  
-                  {/* Brand & Category */}
-                  <div className="flex items-center justify-between text-[10px] text-gray-500">
-                    <span className="font-bold text-[#00A046] truncate max-w-[65%]">{product.brand}</span>
-                    <span className="text-[9px] text-gray-400">45+ {isAr ? 'بيع' : 'sold'}</span>
-                  </div>
-
-                  {/* Title */}
-                  <h4 className="text-xs font-black text-[#221F1F] leading-snug line-clamp-2 min-h-[32px]">
-                    {product.productName}
-                  </h4>
-
-                  {/* Clear Packaging Unit Pill (مفرد) */}
-                  <div className="flex items-center gap-1 bg-[#F4FBF6] border border-[#C6EEDB] rounded-lg px-2 py-0.5 w-fit">
-                    <span className="text-[9.5px] text-gray-500 font-bold">{isAr ? 'العبوة:' : 'Pack:'}</span>
-                    <span className="text-[10.5px] font-black text-[#00A046]">{product.unit}</span>
-                  </div>
-                </div>
-
-                {/* Pricing & Add to Cart Controller */}
-                <div className="pt-2 mt-1.5 border-t border-[#F5F5F5] flex items-center justify-between gap-1.5">
-                  
-                  {/* Price per single piece */}
+                {/* Minimal Product Info Body */}
+                <div className="flex-1 flex flex-col justify-between">
                   <div>
-                    <div className="text-xs sm:text-sm font-black text-[#00A046] tracking-tight flex items-baseline gap-1">
-                      <span>
-                        {currency === 'IQD' 
-                          ? `${product.retailSellingPriceIQD.toLocaleString()} د.ع` 
-                          : `$${(product.retailSellingPriceIQD / 1310).toFixed(2)}`}
+                    <h4
+                      className="text-[#111827] text-[12.5px] sm:text-[13.5px] font-bold line-clamp-2 leading-snug mb-1.5 group-hover:text-[#00A046] transition-colors min-h-[35px]"
+                      title={cleanTitle}
+                    >
+                      {cleanTitle}
+                    </h4>
+
+                    {/* Single Unboxed Rating & Delivery Line */}
+                    <div className="flex items-center gap-1.5 text-[11px] text-[#6B7280] mb-1 tabular-nums">
+                      <span className="inline-flex items-center gap-0.5 text-[#111827] font-bold shrink-0">
+                        <Star className="w-3 h-3 fill-[#FFA800] text-[#FFA800]" />
+                        <span>{rating.toFixed(1)}</span>
                       </span>
-                      <span className="text-[9px] text-gray-400 font-normal">{isAr ? 'مفرد' : '/pc'}</span>
+                      <span className="text-[#9CA3AF] shrink-0">({reviewsCount})</span>
+                      <span className="text-[#D1D5DB]" aria-hidden="true">·</span>
+                      <span className="inline-flex items-center gap-0.5 font-semibold text-[#008A3C] truncate">
+                        <Zap className="w-2.5 h-2.5 fill-amber-400 text-amber-500 shrink-0" />
+                        <span className="truncate">{isAr ? '20 د' : '20m'}</span>
+                      </span>
                     </div>
-                    {product.oldPrice && (
-                      <div className="text-[10px] text-gray-400 line-through">
-                        {product.oldPrice.toLocaleString()} د.ع
+
+                    {/* Clean Unboxed Packaging Line */}
+                    <div className="flex items-center gap-1 text-[11px] text-[#6B7280] mb-2 min-w-0">
+                      <Package className="w-3 h-3 text-[#00A046] shrink-0" />
+                      <span className="truncate font-medium text-[#374151]">{cleanUnit}</span>
+                    </div>
+                  </div>
+
+                  {/* Clean Bottom Price & Compact Add Button */}
+                  <div className="mt-auto pt-2 border-t border-[#F1F5F9] flex items-center justify-between gap-1.5">
+                    <div className="min-w-0">
+                      {product.oldPrice && (
+                        <div className="text-[10px] text-[#9CA3AF] line-through leading-none mb-0.5 font-mono tabular-nums truncate whitespace-nowrap">
+                          {formatCurrency(product.oldPrice, currency, language)}
+                        </div>
+                      )}
+                      <div
+                        className={`text-[13px] sm:text-sm font-black font-mono tabular-nums leading-tight whitespace-nowrap ${
+                          hasDiscount ? 'text-[#F84147]' : 'text-[#0F3D24]'
+                        }`}
+                      >
+                        {formatCurrency(product.retailSellingPriceIQD, currency, language)}
+                      </div>
+                    </div>
+
+                    {inCartQty === 0 ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAddToCart(product, 1);
+                        }}
+                        className="h-8 px-2.5 rounded-xl bg-[#00A046] hover:bg-[#008A3C] active:scale-95 text-white font-bold text-[11px] sm:text-xs transition flex items-center justify-center gap-1 cursor-pointer shrink-0 whitespace-nowrap shadow-2xs"
+                      >
+                        <ShoppingCart className="w-3.5 h-3.5" />
+                        <span>{isAr ? 'أضف' : 'Add'}</span>
+                      </button>
+                    ) : (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="h-8 flex items-center bg-[#00A046] text-white rounded-xl shadow-xs overflow-hidden shrink-0"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateQty(product.barcode, -1)}
+                          className="px-2 h-full hover:bg-black/10 transition cursor-pointer flex items-center justify-center"
+                          aria-label={isAr ? 'إنقاص الكمية' : 'Decrease quantity'}
+                        >
+                          <Minus className="w-3 h-3 stroke-[3]" />
+                        </button>
+                        <span className="px-1.5 font-black text-xs tabular-nums">{inCartQty}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateQty(product.barcode, 1)}
+                          className="px-2 h-full hover:bg-black/10 transition cursor-pointer flex items-center justify-center"
+                          aria-label={isAr ? 'زيادة الكمية' : 'Increase quantity'}
+                        >
+                          <Plus className="w-3 h-3 stroke-[3]" />
+                        </button>
                       </div>
                     )}
                   </div>
-
-                  {/* Interactive Add / Quantity Button */}
-                  {inCartQty === 0 ? (
-                    <button
-                      onClick={() => handleAddToCart(product)}
-                      className="px-2.5 py-1.5 rounded-xl bg-[#E8F8EE] hover:bg-[#00A046] text-[#00A046] hover:text-white font-black text-xs transition flex items-center gap-1 border border-[#B3EBC8] cursor-pointer shadow-2xs"
-                    >
-                      <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                      <span>{isAr ? 'إضافة' : 'Add'}</span>
-                    </button>
-                  ) : (
-                    <div className="flex items-center bg-[#00A046] text-white rounded-xl shadow-xs overflow-hidden">
-                      <button
-                        onClick={() => handleUpdateQty(product.barcode, -1)}
-                        className="px-2 py-1.5 hover:bg-black/10 transition cursor-pointer"
-                      >
-                        <Minus className="w-3 h-3 stroke-[3]" />
-                      </button>
-                      <span className="px-2 font-black text-xs">{inCartQty}</span>
-                      <button
-                        onClick={() => handleUpdateQty(product.barcode, 1)}
-                        className="px-2 py-1.5 hover:bg-black/10 transition cursor-pointer"
-                      >
-                        <Plus className="w-3 h-3 stroke-[3]" />
-                      </button>
-                    </div>
-                  )}
-
                 </div>
-
               </div>
             );
           })}
@@ -1503,16 +1529,33 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
                 </a>
 
                 <button
-                  onClick={() => {
+                  type="button"
+                  onClick={async () => {
+                    const shareUrl = `${window.location.origin}/store/${slug}`;
                     if (navigator.share) {
-                      navigator.share({
-                        title: 'سوبرماركت المنصور المركزي',
-                        text: 'تسوق احتياجات منزلك من سوبرماركت المنصور المركزي مع خدمة التوصيل السريع خلال 20 دقيقة',
-                        url: `${window.location.origin}/store/${slug}`
-                      });
+                      try {
+                        await navigator.share({
+                          title: 'سوبرماركت المنصور المركزي',
+                          text: 'تسوق احتياجات منزلك من سوبرماركت المنصور المركزي مع خدمة التوصيل السريع خلال 20 دقيقة',
+                          url: shareUrl
+                        });
+                      } catch (err: any) {
+                        if (err?.name !== 'AbortError') {
+                          try {
+                            await navigator.clipboard.writeText(shareUrl);
+                            showToast(isAr ? 'تم نسخ الرابط' : 'Link copied');
+                          } catch {
+                            // Ignore clipboard fallback errors
+                          }
+                        }
+                      }
                     } else {
-                      navigator.clipboard.writeText(`${window.location.origin}/store/${slug}`);
-                      showToast(isAr ? 'تم نسخ الرابط' : 'Link copied');
+                      try {
+                        await navigator.clipboard.writeText(shareUrl);
+                        showToast(isAr ? 'تم نسخ الرابط' : 'Link copied');
+                      } catch {
+                        // Ignore clipboard errors
+                      }
                     }
                     setIsShareModalOpen(false);
                   }}
@@ -1709,6 +1752,432 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* =========================================================================
+          7. WHOLESALE-STYLE PRODUCT DETAILS MODAL (Opens on card click)
+         ========================================================================= */}
+      {selectedDetailProduct && (() => {
+        const dp = selectedDetailProduct;
+        const dpName = isAr
+          ? dp.productName.replace(/\s*\(مفرد\)\s*$/g, '').trim()
+          : dp.nameEn || dp.productName;
+        const dpUnit = isAr ? dp.unit : getLocalizedText(dp.unit || '', 'en');
+        const dpRating = dp.rating || 4.8;
+        const dpReviewsCount = dp.reviewsCount || 85;
+        const dpDiscount = dp.discountPercent && dp.discountPercent > 0 ? dp.discountPercent : null;
+        const dpFavorited = favoriteProductBarcodes.includes(dp.barcode);
+        const similarItems = products
+          .filter((p) => p.barcode !== dp.barcode)
+          .sort((a, b) => (a.category === dp.category ? -1 : 1) - (b.category === dp.category ? -1 : 1))
+          .slice(0, 6);
+
+        const slidesCount = 3;
+        const nextSlide = () => setDetailSlideIndex((p) => (p + 1) % slidesCount);
+        const prevSlide = () => setDetailSlideIndex((p) => (p - 1 + slidesCount) % slidesCount);
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs sm:p-4"
+            onClick={() => setSelectedDetailProduct(null)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white w-full sm:max-w-3xl h-[96vh] sm:h-auto sm:max-h-[92vh] rounded-t-2xl sm:rounded-2xl flex flex-col shadow-2xl overflow-hidden border border-[#E5E7EB] font-brand"
+            >
+              {/* Sticky Top Header */}
+              <div className="sticky top-0 z-20 bg-white border-b border-[#E5E7EB] px-4 py-3 flex items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDetailProduct(null)}
+                    className="w-10 h-10 rounded-full hover:bg-gray-100 flex items-center justify-center text-[#1F2328] transition cursor-pointer shrink-0"
+                    aria-label={isAr ? 'رجوع' : 'Back'}
+                  >
+                    {isAr ? <ArrowRight className="w-5 h-5" /> : <ArrowLeft className="w-5 h-5" />}
+                  </button>
+                  <div className="min-w-0">
+                    <div className="text-sm font-bold text-[#1F2328] truncate">
+                      {isAr
+                        ? `التوصيل خلال ${storeData?.deliveryTimeMinutes || 20} دقيقة`
+                        : `Delivery within ${storeData?.deliveryTimeMinutes || 20} mins`}
+                    </div>
+                    <div className="text-xs text-[#6B7280] truncate">
+                      {storeData?.name || (isAr ? 'سوبرماركت المنصور المركزي' : 'Al-Mansour Supermarket')}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleProductFavorite(dp.barcode)}
+                    className="w-10 h-10 rounded-full hover:bg-amber-50 flex items-center justify-center transition cursor-pointer"
+                    title={isAr ? 'حفظ في المفضلة' : 'Save to Wishlist'}
+                  >
+                    <Heart
+                      className={`w-5 h-5 transition ${
+                        dpFavorited ? 'fill-[#FFA300] text-[#FFA300]' : 'text-[#6B7280]'
+                      }`}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDetailProduct(null)}
+                    className="w-10 h-10 rounded-full hover:bg-gray-100 flex items-center justify-center text-[#6B7280] transition cursor-pointer"
+                    aria-label={isAr ? 'إغلاق' : 'Close'}
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Scrollable Content Body */}
+              <div className="flex-1 overflow-y-auto bg-[#F8FAFC]">
+                {/* 1. Multi-Slide Product Carousel */}
+                <div className="bg-white border-b border-[#E5E7EB]">
+                  <div
+                    className="relative h-72 sm:h-88 w-full bg-linear-to-b from-[#F9FAFB] to-white flex items-center justify-center overflow-hidden select-none"
+                    onTouchStart={(e) => {
+                      detailTouchStartXRef.current = e.touches[0].clientX;
+                    }}
+                    onTouchEnd={(e) => {
+                      if (detailTouchStartXRef.current === null) return;
+                      const diff = e.changedTouches[0].clientX - detailTouchStartXRef.current;
+                      detailTouchStartXRef.current = null;
+                      if (Math.abs(diff) < 35) return;
+                      if (isAr) {
+                        if (diff > 0) nextSlide();
+                        else prevSlide();
+                      } else {
+                        if (diff < 0) nextSlide();
+                        else prevSlide();
+                      }
+                    }}
+                  >
+                    {dpDiscount && (
+                      <span className="absolute top-3 start-3 z-10 bg-[#F84147] text-white text-xs font-black px-2.5 py-1 rounded-lg shadow-xs tabular-nums">
+                        -{dpDiscount}%
+                      </span>
+                    )}
+
+                    {/* Slide 0: Hero Showcase */}
+                    {detailSlideIndex === 0 && (
+                      <div className="w-full h-full flex items-center justify-center px-6 pt-5 pb-12 sm:px-10 sm:pt-8 sm:pb-14">
+                        <img
+                          src={dp.imageUrl || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80'}
+                          alt={dpName}
+                          referrerPolicy="no-referrer"
+                          className="max-h-full max-w-full object-contain drop-shadow-sm rounded-xl"
+                        />
+                      </div>
+                    )}
+
+                    {/* Slide 1: Packaging & Availability */}
+                    {detailSlideIndex === 1 && (
+                      <div className="w-full h-full flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-6 px-4 pt-4 pb-12 sm:p-10 sm:pb-14 bg-linear-to-br from-emerald-50/40 via-white to-slate-50">
+                        <div className="w-28 h-28 sm:w-44 sm:h-44 bg-white rounded-2xl border border-[#E5E7EB] p-3 flex items-center justify-center shadow-xs shrink-0">
+                          <img
+                            src={dp.imageUrl || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80'}
+                            alt={dpName}
+                            referrerPolicy="no-referrer"
+                            className="max-h-full max-w-full object-contain scale-105"
+                          />
+                        </div>
+                        <div className="text-center sm:text-start max-w-xs space-y-1">
+                          <div className="text-[11px] font-bold text-[#00A046]">
+                            {isAr ? 'مواصفات العبوة والبيع المفرد' : 'Retail Packaging Specs'}
+                          </div>
+                          <div className="text-base sm:text-lg font-black text-[#1F2328]">{dpUnit}</div>
+                          <div className="text-xs sm:text-sm text-[#4B5563]">
+                            {isAr
+                              ? `متوفر حالياً في السوبرماركت (${dp.stockQuantity || 25} عبوة جاهزة للتوصيل).`
+                              : `${dp.stockQuantity || 25} units currently available for dispatch.`}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Slide 2: Verified Barcode & Brand */}
+                    {detailSlideIndex === 2 && (
+                      <div className="w-full h-full flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-6 px-4 pt-4 pb-12 sm:p-10 sm:pb-14 bg-linear-to-br from-slate-50 via-white to-blue-50/40">
+                        <div className="w-36 h-32 sm:w-44 sm:h-44 bg-white rounded-2xl border border-[#E5E7EB] p-4 flex flex-col items-center justify-center shadow-xs shrink-0">
+                          <Barcode className="w-12 h-12 sm:w-14 sm:h-14 text-[#1F2328]" />
+                          <span className="font-mono text-xs font-bold text-[#1F2328] mt-1.5 tracking-wider">
+                            {dp.barcode}
+                          </span>
+                        </div>
+                        <div className="text-center sm:text-start max-w-xs space-y-1">
+                          <div className="text-[11px] font-bold text-blue-700">
+                            {isAr ? 'توثيق المنتج والجودة' : 'Verified Quality & Brand'}
+                          </div>
+                          <div className="text-sm sm:text-base font-bold text-[#1F2328] flex items-center justify-center sm:justify-start gap-1.5">
+                            <ShieldCheck className="w-4 h-4 text-[#00A046] shrink-0" />
+                            <span>{isAr ? 'منتج أصلي محفوظ وفق معايير السلامة' : 'Authentic & Safely Stored'}</span>
+                          </div>
+                          <div className="text-xs text-[#6B7280]">
+                            {isAr ? `العلامة: ${dp.brand}` : `Brand: ${dp.brand}`}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={isAr ? nextSlide : prevSlide}
+                      className="absolute left-3 bottom-2.5 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#DCFCE7]/95 hover:bg-[#BBF7D0] border border-[#86EFAC] shadow-sm flex items-center justify-center text-[#16A34A] transition cursor-pointer"
+                      aria-label={isAr ? 'الشريحة التالية' : 'Next'}
+                    >
+                      <ChevronLeft className="w-4.5 h-4.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={isAr ? prevSlide : nextSlide}
+                      className="absolute right-3 bottom-2.5 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#DCFCE7]/95 hover:bg-[#BBF7D0] border border-[#86EFAC] shadow-sm flex items-center justify-center text-[#16A34A] transition cursor-pointer"
+                      aria-label={isAr ? 'الشريحة السابقة' : 'Prev'}
+                    >
+                      <ChevronRight className="w-4.5 h-4.5" />
+                    </button>
+
+                    <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-white/90 backdrop-blur-xs px-2.5 py-1 rounded-full border border-[#E5E7EB] shadow-2xs">
+                      {[0, 1, 2].map((idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setDetailSlideIndex(idx)}
+                          className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                            detailSlideIndex === idx ? 'w-5 bg-[#00A046]' : 'w-1.5 bg-gray-300'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Product Title & Structured Metadata */}
+                <div className="bg-white px-4 sm:px-6 py-3.5 border-b border-[#E5E7EB]">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 text-[11px] sm:text-xs">
+                      <span className="inline-flex items-center gap-1 text-[#00A046] font-bold whitespace-nowrap shrink-0">
+                        <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                        <span>{isAr ? 'منتج طازج مضمون' : 'Quality Guaranteed'}</span>
+                      </span>
+                      <span className="h-3 w-px bg-[#E5E7EB] shrink-0" aria-hidden="true" />
+                      <span className="inline-flex items-center gap-1 font-semibold text-[#374151] whitespace-nowrap truncate">
+                        <Clock className="w-3.5 h-3.5 text-[#00A046] shrink-0" />
+                        <span>{isAr ? 'توصيل خلال 20 دقيقة' : '20 min delivery'}</span>
+                      </span>
+                    </div>
+
+                    <span className="inline-flex items-center gap-1 text-xs tabular-nums shrink-0 bg-[#FFFBEB] border border-amber-200/80 px-2 py-0.5 rounded-md">
+                      <Star className="w-3.5 h-3.5 fill-[#FFA800] text-[#FFA800]" />
+                      <strong className="text-[#111827]">{dpRating.toFixed(1)}</strong>
+                      <span className="text-[#6B7280] text-[11px]">({dpReviewsCount})</span>
+                    </span>
+                  </div>
+
+                  <h2 className="text-[17px] sm:text-xl font-extrabold text-[#111827] leading-snug tracking-tight">
+                    {dpName}
+                  </h2>
+
+                  <div className="mt-2.5 flex items-center justify-between gap-3 rounded-xl bg-[#F8FAFC] border border-[#E5E7EB] px-3 py-2 text-xs">
+                    <div className="flex items-center gap-1.5 min-w-0 text-[#4B5563]">
+                      <Package className="w-3.5 h-3.5 text-[#00A046] shrink-0" />
+                      <span className="shrink-0">{isAr ? 'التعبئة:' : 'Pack:'}</span>
+                      <strong className="text-[#111827] font-bold truncate">{dpUnit}</strong>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0 text-[#6B7280] font-mono tabular-nums text-[11px] sm:text-xs">
+                      <Barcode className="w-3.5 h-3.5 text-[#9CA3AF] shrink-0" />
+                      <span>{dp.barcode}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Expandable Product Info Accordion (matching main wholesale site) */}
+                <div className="mt-2.5 px-3 sm:px-6 pt-0.5 space-y-2.5 pb-6">
+                  <div
+                    className={`rounded-xl overflow-hidden border transition-all duration-200 ${
+                      isDetailInfoExpanded
+                        ? 'border-sky-400/75 bg-gradient-to-br from-white via-[#EFF8FF] to-[#DBEFFE] shadow-sm'
+                        : 'border-sky-200 bg-gradient-to-br from-white via-[#F4FAFF] to-[#E3F1FD]'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setIsDetailInfoExpanded((p) => !p)}
+                      className="w-full px-3 py-2.5 flex items-center justify-between gap-1.5 text-start cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-6 h-6 rounded-lg bg-white/95 border border-sky-200 flex items-center justify-center shrink-0">
+                          <FileText className="w-3.5 h-3.5 text-sky-600" />
+                        </span>
+                        <span className="text-xs sm:text-sm font-bold text-[#111827] truncate">
+                          {isAr ? 'عرض معلومات المنتج' : 'View Product Info'}
+                        </span>
+                        <span className="w-5 h-5 rounded-full bg-white/90 border border-sky-200 flex items-center justify-center shrink-0">
+                          {isDetailInfoExpanded ? (
+                            <ChevronUp className="w-3 h-3 text-sky-700" />
+                          ) : (
+                            <ChevronDown className="w-3 h-3 text-sky-800" />
+                          )}
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-bold text-sky-900 bg-white/90 border border-sky-200 px-2 py-0.5 rounded-md whitespace-nowrap shrink-0">
+                        {dp.category}
+                      </span>
+                    </button>
+
+                    {isDetailInfoExpanded && (
+                      <div className="px-3.5 pb-3.5 pt-1">
+                        <div className="p-3 rounded-xl bg-white/95 border border-sky-100 text-xs text-[#374151] grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                          <div>
+                            <span className="text-[#6B7280] block text-[11px]">{isAr ? 'العلامة التجارية' : 'Brand'}</span>
+                            <strong className="text-[#111827]">{dp.brand}</strong>
+                          </div>
+                          <div>
+                            <span className="text-[#6B7280] block text-[11px]">{isAr ? 'التوفر في الرف' : 'In Stock'}</span>
+                            <strong className="text-[#00A046]">{dp.stockQuantity || 25} {isAr ? 'وحدة' : 'units'}</strong>
+                          </div>
+                          <div>
+                            <span className="text-[#6B7280] block text-[11px]">{isAr ? 'البيع' : 'Sale Type'}</span>
+                            <strong className="text-[#111827]">{isAr ? 'مفرد بالقطعة' : 'Single Retail'}</strong>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Store Delivery Assurance Box */}
+                  <div className="bg-white rounded-xl border border-[#E5E7EB] p-3.5 flex items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-9 h-9 rounded-xl bg-[#ECFDF5] text-[#00A046] flex items-center justify-center shrink-0">
+                        <Truck className="w-4.5 h-4.5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-[#111827] truncate">
+                          {storeData?.name || (isAr ? 'سوبرماركت المنصور المركزي' : 'Al-Mansour Supermarket')}
+                        </div>
+                        <div className="text-[11px] text-[#6B7280] truncate">
+                          {isAr
+                            ? 'توصيل مجاني للطلبات فوق 25,000 د.ع · الدفع عند الاستلام أو إلكترونياً'
+                            : 'Free delivery over 25,000 IQD · Cash or digital pay'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Similar Store Products Strip */}
+                  {similarItems.length > 0 && (
+                    <div className="bg-white rounded-xl border border-[#E5E7EB] p-3.5 space-y-2.5">
+                      <h4 className="text-xs sm:text-sm font-black text-[#111827]">
+                        {isAr ? 'منتجات مشابهة قد تهمك' : 'Similar Products'}
+                      </h4>
+                      <div className="flex items-stretch gap-2.5 overflow-x-auto pb-1 no-scrollbar">
+                        {similarItems.map((sim) => {
+                          const simTitle = isAr
+                            ? sim.productName.replace(/\s*\(مفرد\)\s*$/g, '').trim()
+                            : sim.nameEn || sim.productName;
+                          return (
+                            <div
+                              key={sim.barcode}
+                              onClick={() => openProductDetails(sim)}
+                              className="w-32 shrink-0 rounded-xl border border-[#E5E7EB] hover:border-[#00A046]/60 bg-white p-2 flex flex-col justify-between cursor-pointer transition"
+                            >
+                              <div className="h-20 w-full flex items-center justify-center mb-1.5">
+                                <img
+                                  src={sim.imageUrl}
+                                  alt={simTitle}
+                                  referrerPolicy="no-referrer"
+                                  className="max-h-full max-w-full object-contain"
+                                />
+                              </div>
+                              <div className="text-[11px] font-bold text-[#111827] line-clamp-2 leading-tight min-h-[28px]">
+                                {simTitle}
+                              </div>
+                              <div className="mt-1.5 flex items-center justify-between gap-1">
+                                <span className="text-[11px] font-black text-[#0F3D24] font-mono tabular-nums whitespace-nowrap">
+                                  {formatCurrency(sim.retailSellingPriceIQD, currency, language)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleAddToCart(sim, 1);
+                                  }}
+                                  className="w-6 h-6 rounded-lg bg-[#E8F8EE] hover:bg-[#00A046] text-[#00A046] hover:text-white flex items-center justify-center transition cursor-pointer shrink-0"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Sticky Bottom Add-to-Cart Bar (matching wholesale modal) */}
+              <div className="sticky bottom-0 z-20 bg-white border-t border-[#E5E7EB] px-4 py-3 flex items-center justify-between gap-3 shrink-0 shadow-[0_-4px_12px_rgba(0,0,0,0.04)]">
+                <div>
+                  {dp.oldPrice && (
+                    <div className="text-[11px] text-[#9CA3AF] line-through font-mono tabular-nums leading-none">
+                      {formatCurrency(dp.oldPrice * detailQty, currency, language)}
+                    </div>
+                  )}
+                  <div className="text-base sm:text-lg font-black text-[#0F3D24] font-mono tabular-nums whitespace-nowrap">
+                    {formatCurrency(dp.retailSellingPriceIQD * detailQty, currency, language)}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center border border-[#E5E7EB] bg-[#F8FAFC] rounded-xl h-10 px-1">
+                    <button
+                      type="button"
+                      onClick={() => setDetailQty((q) => Math.max(1, q - 1))}
+                      className="w-8 h-8 rounded-lg hover:bg-white flex items-center justify-center text-[#1F2328] cursor-pointer"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="w-8 text-center font-mono font-black text-sm tabular-nums">
+                      {detailQty}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setDetailQty((q) => Math.min(dp.stockQuantity || 50, q + 1))}
+                      className="w-8 h-8 rounded-lg hover:bg-white flex items-center justify-center text-[#1F2328] cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSetProductCartQty(dp, detailQty);
+                      setDetailAddedToast(true);
+                      setTimeout(() => setDetailAddedToast(false), 1500);
+                    }}
+                    className="h-10 px-4 sm:px-6 rounded-xl bg-[#00A046] hover:bg-[#008A3C] text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 transition cursor-pointer shadow-sm whitespace-nowrap"
+                  >
+                    {detailAddedToast ? (
+                      <>
+                        <Check className="w-4 h-4 stroke-[2.5]" />
+                        <span>{isAr ? 'تم التحديث في السلة' : 'Updated in Cart'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShoppingCart className="w-4 h-4" />
+                        <span>{isAr ? 'أضف للسلة' : 'Add to Cart'}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

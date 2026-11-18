@@ -319,7 +319,7 @@ apiRouter.patch('/credit/upgrade-requests/:id', (req: Request, res: Response) =>
   }
 });
 
-// ================= 4. DISTRIBUTOR / VAN MOBILE WAREHOUSE =================
+// ================= 4. DISTRIBUTOR / VAN MOBILE WAREHOUSE & FLEET DSD =================
 apiRouter.get('/drivers', (req: Request, res: Response) => {
   const { supplierId } = req.query;
   let list = db.drivers;
@@ -327,16 +327,92 @@ apiRouter.get('/drivers', (req: Request, res: Response) => {
   res.json({ success: true, data: list });
 });
 
+apiRouter.post('/van/drivers', (req: Request, res: Response) => {
+  try {
+    const {
+      supplierId,
+      name,
+      phone,
+      vehiclePlate,
+      vehicleModel,
+      vanWarehouseName,
+      dailyTargetIQD,
+      commissionRatePercent
+    } = req.body;
+    const driver = db.createDriverVan({
+      supplierId: supplierId || 'supp_rafidain',
+      name,
+      phone,
+      vehiclePlate,
+      vehicleModel,
+      vanWarehouseName,
+      dailyTargetIQD: dailyTargetIQD ? Number(dailyTargetIQD) : undefined,
+      commissionRatePercent: commissionRatePercent ? Number(commissionRatePercent) : undefined
+    });
+    res.status(201).json({
+      success: true,
+      message: 'تم تسجيل الفان والسائق بنجاح في أسطول المورد',
+      data: driver
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 apiRouter.get('/van/inventory/:driverId', (req: Request, res: Response) => {
   try {
     const { driverId } = req.params;
     const driver = db.drivers.find(d => d.id === driverId);
     if (!driver) return res.status(404).json({ success: false, message: 'السائق غير موجود' });
-    const items = db.vanInventory.filter(v => v.driverId === driverId);
+    const rawItems = db.vanInventory.filter(v => v.driverId === driverId);
+    const items = rawItems.map(v => {
+      const prod = db.products.find(p => p.barcode === v.barcode);
+      return {
+        ...v,
+        category: prod?.category || 'أخرى',
+        subCategory: prod?.subCategory || undefined,
+      };
+    });
+    const routeStops = db.vanRouteStops
+      .filter(s => s.driverId === driverId)
+      .sort((a, b) => a.sequence - b.sequence);
+    const transactions = db.vanTransactions.filter(t => t.driverId === driverId);
+    const creditAccounts = db.creditAccounts.filter(c => c.supplierId === driver.supplierId);
+    const commissionSummary = db.getDriverCommissionSummary(driverId);
+    const loadRequests = db.vanLoadRequests.filter(r => r.driverId === driverId);
+    const supplierOffers = db.offers.filter(o => o.supplierId === driver.supplierId);
+    const supplierBarcodes = new Set(supplierOffers.map(o => o.barcode));
+    const catalogProducts = supplierBarcodes.size > 0
+      ? db.products.filter(p => supplierBarcodes.has(p.barcode))
+      : db.products;
+    const supplierCatalog = catalogProducts.map(p => {
+      const offer =
+        supplierOffers.find(o => o.barcode === p.barcode) ||
+        db.offers.find(o => o.barcode === p.barcode);
+      return {
+        barcode: p.barcode,
+        nameAr: p.nameAr,
+        brand: p.brand,
+        category: p.category,
+        subCategory: p.subCategory,
+        unit: p.unit,
+        imageUrl: p.imageUrl,
+        priceIQD: offer?.priceIQD || 25000,
+        availableStock: offer?.availableStock ?? 100
+      };
+    });
+
     res.json({
       success: true,
       driver,
       inventory: items,
+      routeStops,
+      transactions,
+      creditAccounts,
+      stores: db.stores,
+      commissionSummary,
+      loadRequests,
+      supplierCatalog,
       totalLoadedUnits: items.reduce((s, i) => s + i.loadedQuantity, 0),
       totalRemainingUnits: items.reduce((s, i) => s + i.remainingQuantity, 0)
     });
@@ -345,19 +421,144 @@ apiRouter.get('/van/inventory/:driverId', (req: Request, res: Response) => {
   }
 });
 
+apiRouter.get('/van/fleet/:supplierId', (req: Request, res: Response) => {
+  try {
+    const { supplierId } = req.params;
+    const drivers = db.drivers.filter(d => d.supplierId === supplierId);
+    const fleet = drivers.map(driver => {
+      const inventory = db.vanInventory.filter(v => v.driverId === driver.id);
+      const routeStops = db.vanRouteStops
+        .filter(s => s.driverId === driver.id)
+        .sort((a, b) => a.sequence - b.sequence);
+      const transactions = db.vanTransactions.filter(t => t.driverId === driver.id);
+      const commissionSummary = db.getDriverCommissionSummary(driver.id);
+      const pendingOrders = db.subOrders.filter(
+        o => o.assignedDriverId === driver.id && o.status !== 'delivered' && o.status !== 'cancelled'
+      ).length;
+
+      return {
+        driver,
+        inventory,
+        routeStops,
+        transactions,
+        commissionSummary,
+        pendingOrders,
+        totalLoadedUnits: inventory.reduce((s, i) => s + i.loadedQuantity, 0),
+        totalSoldUnits: inventory.reduce((s, i) => s + i.soldQuantity, 0),
+        totalRemainingUnits: inventory.reduce((s, i) => s + i.remainingQuantity, 0)
+      };
+    });
+
+    const shiftReports = db.shiftReports.filter(r => r.supplierId === supplierId);
+    const loadRequests = db.vanLoadRequests.filter(r => r.supplierId === supplierId);
+    const catalogProducts = db.products.map(p => {
+      const offer =
+        db.offers.find(o => o.barcode === p.barcode && o.supplierId === supplierId) ||
+        db.offers.find(o => o.barcode === p.barcode);
+      return {
+        barcode: p.barcode,
+        nameAr: p.nameAr,
+        unit: p.unit,
+        defaultPriceIQD: offer?.priceIQD || 25000
+      };
+    });
+
+    res.json({
+      success: true,
+      supplierId,
+      fleet,
+      shiftReports,
+      loadRequests,
+      stores: db.stores,
+      catalogProducts
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.post('/van/load-requests', (req: Request, res: Response) => {
+  try {
+    const { driverId, items, notes } = req.body;
+    const created = db.createVanLoadRequest({ driverId, items, notes });
+    res.status(201).json({
+      success: true,
+      message: 'تم إرسال طلب تجهيز الفان للمورد/المحاسب بانتظار الاعتماد',
+      data: created
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.patch('/van/load-requests/:id/approve', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { adjustedQuantities, reviewedBy } = req.body || {};
+    const approved = db.approveVanLoadRequest({
+      requestId: id,
+      adjustedQuantities,
+      reviewedBy
+    });
+    res.json({
+      success: true,
+      message: 'تمت الموافقة على التجهيز وإضافة جميع البضاعة تلقائياً إلى كاشير الفان',
+      data: approved
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.patch('/van/load-requests/:id/reject', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body || {};
+    const rejected = db.rejectVanLoadRequest(id, notes);
+    res.json({
+      success: true,
+      message: 'تم رفض طلب التجهيز وإشعار السائق',
+      data: rejected
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.post('/van/load-stock', (req: Request, res: Response) => {
+  try {
+    const { driverId, barcode, quantity, unitPriceIQD } = req.body;
+    const item = db.loadVanStock({
+      driverId,
+      barcode,
+      quantity: Number(quantity),
+      unitPriceIQD: unitPriceIQD ? Number(unitPriceIQD) : undefined
+    });
+    res.status(201).json({
+      success: true,
+      message: 'تم تحميل البضاعة في عهدة الفان بنجاح وتحديث المخزون المتنقل',
+      data: item
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 apiRouter.post('/van/direct-sale', (req: Request, res: Response) => {
   try {
-    const { driverId, storeId, barcode, quantity, paymentType } = req.body;
+    const { driverId, storeId, barcode, quantity, items, paymentType, notes } = req.body;
     const result = db.recordVanDirectSale({
       driverId,
       storeId,
       barcode,
-      quantity: Number(quantity),
-      paymentType: paymentType || 'cash'
+      quantity: quantity !== undefined ? Number(quantity) : undefined,
+      items,
+      paymentType: paymentType || 'cash',
+      notes
     });
     res.json({
       success: true,
-      message: 'تم إتمام البيع المباشر من سيارة التوزيع بنجاح وتحديث مخزون الفان',
+      message: 'تم إتمام البيع المباشر من سيارة التوزيع ومزامنة مخزون المتجر بنجاح',
       data: result
     });
   } catch (error: any) {
@@ -365,7 +566,103 @@ apiRouter.post('/van/direct-sale', (req: Request, res: Response) => {
   }
 });
 
-apiRouter.post('/van/return', (req: Request, res: Response) => {
+apiRouter.post('/van/debt-collection', (req: Request, res: Response) => {
+  try {
+    const { driverId, storeId, amountIQD, notes } = req.body;
+    const result = db.recordVanDebtCollection({
+      driverId,
+      storeId,
+      amountIQD: Number(amountIQD),
+      notes
+    });
+    res.status(201).json({
+      success: true,
+      message: 'تم تحصيل الدفعة النقدية من الآجل وقيدها في دفتر الأستاذ وعهدة السائق',
+      data: result
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.post('/van/route-stops', (req: Request, res: Response) => {
+  try {
+    const { driverId, storeId, notes } = req.body;
+    const stop = db.addVanRouteStop(driverId, storeId, notes);
+    res.status(201).json({
+      success: true,
+      message: 'تمت إضافة المتجر إلى خط السير اليومي للفان',
+      data: stop
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.patch('/van/route-stops/:stopId', (req: Request, res: Response) => {
+  try {
+    const { stopId } = req.params;
+    const { status, notes } = req.body;
+    const stop = db.updateVanRouteStopStatus(stopId, status, notes);
+    res.json({
+      success: true,
+      message: 'تم تحديث حالة الزيارة في خط السير',
+      data: stop
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.put('/van/route-stops/reorder', (req: Request, res: Response) => {
+  try {
+    const { driverId, orderedStopIds } = req.body;
+    if (!driverId || !Array.isArray(orderedStopIds)) {
+      return res.status(400).json({ success: false, message: 'بيانات إعادة ترتيب المسار غير مكتملة' });
+    }
+    const stops = db.reorderVanRouteStops(driverId, orderedStopIds);
+    res.json({
+      success: true,
+      message: 'تم تحديث ترتيب خط السير اليومي',
+      data: stops
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.delete('/van/route-stops/:stopId', (req: Request, res: Response) => {
+  try {
+    const { stopId } = req.params;
+    db.removeVanRouteStop(stopId);
+    res.json({
+      success: true,
+      message: 'تمت إزالة المحطة من خط السير اليومي'
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.patch('/van/driver/:driverId/availability', (req: Request, res: Response) => {
+  try {
+    const { driverId } = req.params;
+    const { availabilityStatus, busyReason } = req.body;
+    if (availabilityStatus !== 'available' && availabilityStatus !== 'busy') {
+      return res.status(400).json({ success: false, message: 'حالة التوفر غير صالحة' });
+    }
+    const driver = db.updateDriverAvailability(driverId, availabilityStatus, busyReason);
+    res.json({
+      success: true,
+      message: availabilityStatus === 'available' ? 'تم تحويل حالة الفان إلى متاح' : 'تم تحويل حالة الفان إلى مشغول',
+      data: driver
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+const handleVanReturn = (req: Request, res: Response) => {
   try {
     const { driverId, barcode, quantity, type, reason } = req.body;
     const item = db.recordVanReturnOrDamage({
@@ -376,6 +673,39 @@ apiRouter.post('/van/return', (req: Request, res: Response) => {
       reason: reason || 'طلب استرجاع من المتجر'
     });
     res.json({ success: true, message: 'تم قيد المرتجع أو التالف بنجاح', data: item });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+apiRouter.post('/van/return', handleVanReturn);
+apiRouter.post('/van/returns', handleVanReturn);
+
+apiRouter.post('/van/delivery/:orderId/confirm', (req: Request, res: Response) => {
+  try {
+    const { orderId } = req.params;
+    const { driverId, enteredPin } = req.body;
+    const order = db.subOrders.find(o => o.id === orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
+    }
+    if (order.deliveryPin && enteredPin !== order.deliveryPin) {
+      return res.status(400).json({
+        success: false,
+        message: 'رمز التحقق من الاستلام (PIN) غير صحيح! اطلب الرمز المكون من 4 أرقام من صاحب المتجر.'
+      });
+    }
+    order.status = 'delivered';
+    order.deliveredAt = new Date().toISOString();
+    if (order.paymentMethod === 'cod') {
+      order.paidAt = new Date().toISOString();
+      const driver = db.drivers.find(d => d.id === (driverId || order.assignedDriverId));
+      if (driver) {
+        driver.currentCashCollectedIQD += order.subtotalIQD;
+        driver.todayCashSalesIQD = (driver.todayCashSalesIQD || 0) + order.subtotalIQD;
+      }
+    }
+    res.json({ success: true, message: 'تم تأكيد التسليم بنجاح', data: order });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -392,6 +722,20 @@ apiRouter.post('/van/shift-close', (req: Request, res: Response) => {
     res.json({
       success: true,
       message: 'تم إغلاق الوردية اليومية بنجاح واحتساب فرق الصندوق (المتوقع مقابل الفعلي)',
+      data: report
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.patch('/van/shift-reports/:reportId/settle', (req: Request, res: Response) => {
+  try {
+    const { reportId } = req.params;
+    const report = db.settleShiftReport(reportId);
+    res.json({
+      success: true,
+      message: 'تم اعتماد تقرير إغلاق الوردية ومطابقة الصندوق بنجاح',
       data: report
     });
   } catch (error: any) {
@@ -454,6 +798,56 @@ apiRouter.post('/store/pos-sale', (req: Request, res: Response) => {
       paymentType: paymentType || 'cash'
     });
     res.json({ success: true, message: 'تم تسجيل عملية البيع وخصم المخزون', data: result });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.get('/store/pos-returns/:storeId', (req: Request, res: Response) => {
+  try {
+    const { storeId } = req.params;
+    const returns = db.getStorePOSReturns(storeId);
+    res.json({
+      success: true,
+      count: returns.length,
+      data: returns
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.post('/store/pos-return', (req: Request, res: Response) => {
+  try {
+    const {
+      storeId,
+      originalReceiptNumber,
+      customerName,
+      refundMethod,
+      reason,
+      processedBy,
+      items
+    } = req.body;
+    const result = db.recordStorePOSReturn({
+      storeId,
+      originalReceiptNumber:
+        originalReceiptNumber !== undefined && originalReceiptNumber !== ''
+          ? Number(originalReceiptNumber)
+          : undefined,
+      customerName,
+      refundMethod: refundMethod || 'cash',
+      reason,
+      processedBy,
+      items
+    });
+    res.json({
+      success: true,
+      message:
+        result.restockedUnitsCount > 0
+          ? `تم تسجيل المرتجع #${result.returnNumber} وإعادة ${result.restockedUnitsCount} وحدة إلى المخزون`
+          : `تم تسجيل المرتجع #${result.returnNumber} بنجاح`,
+      data: result
+    });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }

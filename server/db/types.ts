@@ -112,6 +112,77 @@ export interface DriverProfile {
   currentCashCollectedIQD: number;
   isActiveShift: boolean;
   shiftStartTime?: string;
+  dailyTargetIQD?: number;
+  commissionRatePercent?: number;
+  todayCashSalesIQD?: number;
+  todayCreditSalesIQD?: number;
+  todayDebtCollectedIQD?: number;
+  availabilityStatus?: 'available' | 'busy';
+  busyReason?: string;
+}
+
+export interface VanRouteStop {
+  id: string;
+  driverId: string;
+  storeId: string;
+  storeName: string;
+  district: string;
+  address: string;
+  phone: string;
+  sequence: number;
+  status: 'pending' | 'visited' | 'sold' | 'skipped';
+  lastSaleAmountIQD?: number;
+  visitedAt?: string;
+  notes?: string;
+}
+
+export interface VanTransactionRecord {
+  id: string;
+  receiptNumber: string;
+  driverId: string;
+  driverName: string;
+  supplierId: string;
+  storeId: string;
+  storeName: string;
+  type: 'direct_sale' | 'debt_collection';
+  paymentType: 'cash' | 'credit';
+  items?: {
+    barcode: string;
+    productName: string;
+    unit: string;
+    quantity: number;
+    unitPriceIQD: number;
+    totalIQD: number;
+  }[];
+  totalAmountIQD: number;
+  createdAt: string;
+  notes?: string;
+}
+
+export interface VanLoadRequestItem {
+  barcode: string;
+  productName: string;
+  unit: string;
+  requestedQuantity: number;
+  approvedQuantity: number;
+  unitPriceIQD: number;
+}
+
+export interface VanLoadRequest {
+  id: string;
+  requestNumber: string;
+  driverId: string;
+  driverName: string;
+  vanWarehouseName: string;
+  supplierId: string;
+  supplierName: string;
+  items: VanLoadRequestItem[];
+  totalEstimatedIQD: number;
+  status: 'pending_approval' | 'approved' | 'rejected';
+  notes?: string;
+  reviewedBy?: string;
+  createdAt: string;
+  reviewedAt?: string;
 }
 
 export interface VanInventoryItem {
@@ -263,6 +334,29 @@ export interface StorePOSSaleRecord {
   discountIQD: number;
   totalIQD: number;
   profitIQD: number;
+  createdAt: string;
+}
+
+export interface StorePOSReturnItem {
+  barcode: string;
+  productName: string;
+  quantity: number;
+  unitPriceIQD: number;
+  restockToShelf: boolean;
+}
+
+export interface StorePOSReturnRecord {
+  id: string;
+  returnNumber: number;
+  storeId: string;
+  originalReceiptNumber?: number;
+  customerName: string;
+  refundMethod: 'cash' | 'card' | 'credit_ledger';
+  items: StorePOSReturnItem[];
+  totalRefundIQD: number;
+  profitAdjustmentIQD: number;
+  reason: string;
+  processedBy?: string;
   createdAt: string;
 }
 

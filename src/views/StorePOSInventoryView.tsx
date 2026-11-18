@@ -35,7 +35,8 @@ import {
   QrCode,
   Eye,
   Store,
-  ShieldCheck
+  ShieldCheck,
+  RotateCcw
 } from 'lucide-react';
 import { Currency, ProductWithOffers, Language } from '../types/index.ts';
 import { formatCurrency } from '../utils/format.ts';
@@ -91,6 +92,29 @@ interface POSSaleRecord {
   createdAt: string;
 }
 
+interface POSReturnItem {
+  barcode: string;
+  productName: string;
+  quantity: number;
+  unitPriceIQD: number;
+  restockToShelf: boolean;
+}
+
+interface POSReturnRecord {
+  id: string;
+  returnNumber: number;
+  storeId: string;
+  originalReceiptNumber?: number;
+  customerName: string;
+  refundMethod: 'cash' | 'card' | 'credit_ledger';
+  items: POSReturnItem[];
+  totalRefundIQD: number;
+  profitAdjustmentIQD: number;
+  reason: string;
+  processedBy?: string;
+  createdAt: string;
+}
+
 const CATEGORY_FALLBACK_IMAGES: Record<string, string> = {
   'أرز وحبوب': '/assets/images/white_basmati_rice.jpg',
   'زيوت وسمن': '/assets/images/white_sunflower_oil.jpg',
@@ -124,11 +148,12 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
 
   // Top-level subview: 'pos' (Cashier Terminal) vs 'report' (Analytics & Inventory Thresholds)
   const [activeSubView, setActiveSubView] = useState<'pos' | 'report'>('pos');
-  const [reportTab, setReportTab] = useState<'transactions' | 'inventory'>('transactions');
+  const [reportTab, setReportTab] = useState<'transactions' | 'returns' | 'inventory'>('transactions');
 
   // Data state
   const [inventory, setInventory] = useState<any[]>([]);
   const [salesHistory, setSalesHistory] = useState<POSSaleRecord[]>([]);
+  const [posReturns, setPosReturns] = useState<POSReturnRecord[]>([]);
   const [loading, setLoading] = useState(false);
 
   // POS Catalog & Receipt state
@@ -188,6 +213,21 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
   const [tempThreshold, setTempThreshold] = useState<number>(5);
   const [updatingBarcode, setUpdatingBarcode] = useState<string | null>(null);
 
+  // Customer Return Modal state
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
+  const [returnMode, setReturnMode] = useState<'by_receipt' | 'direct_item'>('by_receipt');
+  const [selectedReceiptNo, setSelectedReceiptNo] = useState<number | ''>('');
+  const [receiptReturnQtyMap, setReceiptReturnQtyMap] = useState<Record<string, number>>({});
+  const [directReturnSearch, setDirectReturnSearch] = useState('');
+  const [directReturnBarcode, setDirectReturnBarcode] = useState('');
+  const [directReturnQty, setDirectReturnQty] = useState<number>(1);
+  const [returnRestockToShelf, setReturnRestockToShelf] = useState<boolean>(true);
+  const [returnRefundMethod, setReturnRefundMethod] = useState<'cash' | 'card' | 'credit_ledger'>('cash');
+  const [returnCustomerName, setReturnCustomerName] = useState<string>('');
+  const [returnReason, setReturnReason] = useState<string>('تبديل / تغيير رأي الزبون');
+  const [isSubmittingReturn, setIsSubmittingReturn] = useState(false);
+  const [returnError, setReturnError] = useState<string | null>(null);
+
   const resolveItemImage = (barcode: string, category: string) => {
     const matched = products.find((p) => p.barcode === barcode);
     if (matched?.imageUrl) return matched.imageUrl;
@@ -197,9 +237,10 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
   const loadData = async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const [invResult, salesResult] = await Promise.allSettled([
+      const [invResult, salesResult, returnsResult] = await Promise.allSettled([
         fetchWithRetry(`/api/store/inventory/${storeId}`, { signal, retries: 3 }),
-        fetchWithRetry(`/api/store/pos-sales/${storeId}`, { signal, retries: 3 })
+        fetchWithRetry(`/api/store/pos-sales/${storeId}`, { signal, retries: 3 }),
+        fetchWithRetry(`/api/store/pos-returns/${storeId}`, { signal, retries: 3 })
       ]);
 
       if (signal?.aborted) return;
@@ -228,6 +269,13 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
         (salesResult.reason as any)?.name !== 'AbortError'
       ) {
         hadFailure = true;
+      }
+
+      if (returnsResult.status === 'fulfilled' && returnsResult.value.ok) {
+        const retData = await returnsResult.value.json();
+        if (retData.success) {
+          setPosReturns(retData.data || []);
+        }
       }
 
       if (hadFailure && inventory.length === 0) {
@@ -652,6 +700,267 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
     }
   };
 
+  // Track previously returned quantities per receipt & barcode
+  const returnedQtyByReceipt = useMemo(() => {
+    const map: Record<number, Record<string, number>> = {};
+    for (const ret of posReturns) {
+      if (!ret.originalReceiptNumber) continue;
+      if (!map[ret.originalReceiptNumber]) {
+        map[ret.originalReceiptNumber] = {};
+      }
+      for (const it of ret.items) {
+        map[ret.originalReceiptNumber][it.barcode] =
+          (map[ret.originalReceiptNumber][it.barcode] || 0) + it.quantity;
+      }
+    }
+    return map;
+  }, [posReturns]);
+
+  const getReceiptReturnStatus = (sale: POSSaleRecord): 'none' | 'partial' | 'full' => {
+    const retMap = returnedQtyByReceipt[sale.receiptNumber];
+    if (!retMap) return 'none';
+    let anyReturned = false;
+    let allReturned = sale.items.length > 0;
+    for (const it of sale.items) {
+      const retQty = retMap[it.barcode] || 0;
+      if (retQty > 0) anyReturned = true;
+      if (retQty < it.quantity) allReturned = false;
+    }
+    if (!anyReturned) return 'none';
+    return allReturned ? 'full' : 'partial';
+  };
+
+  const openReturnModal = (prefillReceipt?: POSSaleRecord) => {
+    setReturnError(null);
+    setReturnRestockToShelf(true);
+    setReturnReason(isAr ? 'تبديل / تغيير رأي الزبون' : 'Customer changed mind / exchange');
+    setDirectReturnSearch('');
+    setDirectReturnQty(1);
+
+    if (prefillReceipt) {
+      setReturnMode('by_receipt');
+      setSelectedReceiptNo(prefillReceipt.receiptNumber);
+      setReturnCustomerName(prefillReceipt.customerName || '');
+      setReturnRefundMethod(prefillReceipt.paymentType || 'cash');
+      const retMap = returnedQtyByReceipt[prefillReceipt.receiptNumber] || {};
+      const initQtys: Record<string, number> = {};
+      let firstPicked = false;
+      for (const it of prefillReceipt.items) {
+        const remaining = Math.max(0, it.quantity - (retMap[it.barcode] || 0));
+        if (!firstPicked && remaining > 0) {
+          initQtys[it.barcode] = 1;
+          firstPicked = true;
+        } else {
+          initQtys[it.barcode] = 0;
+        }
+      }
+      setReceiptReturnQtyMap(initQtys);
+    } else if (salesHistory.length > 0) {
+      const firstReturnable =
+        salesHistory.find((s) => getReceiptReturnStatus(s) !== 'full') || salesHistory[0];
+      setReturnMode('by_receipt');
+      setSelectedReceiptNo(firstReturnable.receiptNumber);
+      setReturnCustomerName(firstReturnable.customerName || '');
+      setReturnRefundMethod(firstReturnable.paymentType || 'cash');
+      const retMap = returnedQtyByReceipt[firstReturnable.receiptNumber] || {};
+      const initQtys: Record<string, number> = {};
+      let firstPicked = false;
+      for (const it of firstReturnable.items) {
+        const remaining = Math.max(0, it.quantity - (retMap[it.barcode] || 0));
+        if (!firstPicked && remaining > 0) {
+          initQtys[it.barcode] = 1;
+          firstPicked = true;
+        } else {
+          initQtys[it.barcode] = 0;
+        }
+      }
+      setReceiptReturnQtyMap(initQtys);
+    } else {
+      setReturnMode('direct_item');
+      setSelectedReceiptNo('');
+      setReceiptReturnQtyMap({});
+      setReturnCustomerName('');
+      setReturnRefundMethod('cash');
+    }
+
+    if (inventory.length > 0 && !directReturnBarcode) {
+      setDirectReturnBarcode(inventory[0].barcode);
+    }
+
+    setIsReturnModalOpen(true);
+  };
+
+  const handleSelectReturnReceipt = (receiptNoVal: number) => {
+    setReturnError(null);
+    setSelectedReceiptNo(receiptNoVal);
+    const matched = salesHistory.find((s) => s.receiptNumber === receiptNoVal);
+    if (!matched) {
+      setReceiptReturnQtyMap({});
+      return;
+    }
+    setReturnCustomerName(matched.customerName || '');
+    setReturnRefundMethod(matched.paymentType || 'cash');
+    const retMap = returnedQtyByReceipt[matched.receiptNumber] || {};
+    const initQtys: Record<string, number> = {};
+    let firstPicked = false;
+    for (const it of matched.items) {
+      const remaining = Math.max(0, it.quantity - (retMap[it.barcode] || 0));
+      if (!firstPicked && remaining > 0) {
+        initQtys[it.barcode] = 1;
+        firstPicked = true;
+      } else {
+        initQtys[it.barcode] = 0;
+      }
+    }
+    setReceiptReturnQtyMap(initQtys);
+  };
+
+  const selectedReceiptObj = useMemo(
+    () =>
+      selectedReceiptNo !== ''
+        ? salesHistory.find((s) => s.receiptNumber === Number(selectedReceiptNo)) || null
+        : null,
+    [salesHistory, selectedReceiptNo]
+  );
+
+  const selectedReceiptLines = useMemo(() => {
+    if (!selectedReceiptObj) return [];
+    const retMap = returnedQtyByReceipt[selectedReceiptObj.receiptNumber] || {};
+    const discountRatio =
+      selectedReceiptObj.subtotalIQD > 0
+        ? Math.max(0, Math.min(1, selectedReceiptObj.totalIQD / selectedReceiptObj.subtotalIQD))
+        : 1;
+    return selectedReceiptObj.items.map((it) => {
+      const alreadyReturned = retMap[it.barcode] || 0;
+      const maxReturnable = Math.max(0, it.quantity - alreadyReturned);
+      const effectiveUnitIQD = Math.round(it.unitPriceIQD * discountRatio);
+      return {
+        ...it,
+        alreadyReturned,
+        maxReturnable,
+        effectiveUnitIQD,
+        selectedQty: Math.min(maxReturnable, receiptReturnQtyMap[it.barcode] || 0)
+      };
+    });
+  }, [selectedReceiptObj, returnedQtyByReceipt, receiptReturnQtyMap]);
+
+  const filteredDirectReturnInventory = useMemo(() => {
+    const q = directReturnSearch.trim().toLowerCase();
+    if (!q) return inventory;
+    return inventory.filter(
+      (i) =>
+        i.productName.toLowerCase().includes(q) ||
+        i.barcode.toLowerCase().includes(q) ||
+        i.category.toLowerCase().includes(q)
+    );
+  }, [inventory, directReturnSearch]);
+
+  const selectedDirectItem = useMemo(
+    () => inventory.find((i) => i.barcode === directReturnBarcode) || filteredDirectReturnInventory[0] || null,
+    [inventory, directReturnBarcode, filteredDirectReturnInventory]
+  );
+
+  const returnPayloadSummary = useMemo(() => {
+    if (returnMode === 'by_receipt') {
+      const activeItems = selectedReceiptLines
+        .filter((l) => l.selectedQty > 0)
+        .map((l) => ({
+          barcode: l.barcode,
+          productName: l.productName,
+          quantity: l.selectedQty,
+          unitPriceIQD: l.effectiveUnitIQD,
+          restockToShelf: returnRestockToShelf
+        }));
+      const totalRefundIQD = activeItems.reduce(
+        (sum, it) => sum + it.quantity * it.unitPriceIQD,
+        0
+      );
+      const totalUnits = activeItems.reduce((sum, it) => sum + it.quantity, 0);
+      return { items: activeItems, totalRefundIQD, totalUnits };
+    }
+
+    if (!selectedDirectItem || directReturnQty <= 0) {
+      return { items: [], totalRefundIQD: 0, totalUnits: 0 };
+    }
+    const qty = Math.max(1, Math.floor(directReturnQty));
+    const item = {
+      barcode: selectedDirectItem.barcode,
+      productName: selectedDirectItem.productName,
+      quantity: qty,
+      unitPriceIQD: selectedDirectItem.retailSellingPriceIQD,
+      restockToShelf: returnRestockToShelf
+    };
+    return {
+      items: [item],
+      totalRefundIQD: item.unitPriceIQD * qty,
+      totalUnits: qty
+    };
+  }, [
+    returnMode,
+    selectedReceiptLines,
+    selectedDirectItem,
+    directReturnQty,
+    returnRestockToShelf
+  ]);
+
+  const handleSubmitPOSReturn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmittingReturn || returnPayloadSummary.items.length === 0) return;
+
+    setReturnError(null);
+    setIsSubmittingReturn(true);
+
+    try {
+      const res = await fetch('/api/store/pos-return', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storeId,
+          originalReceiptNumber:
+            returnMode === 'by_receipt' && selectedReceiptObj
+              ? selectedReceiptObj.receiptNumber
+              : undefined,
+          customerName:
+            returnCustomerName.trim() ||
+            (returnMode === 'by_receipt' && selectedReceiptObj?.customerName) ||
+            (isAr ? 'زبون نقدي' : 'Walk-in Customer'),
+          refundMethod: returnRefundMethod,
+          reason: returnReason.trim() || (isAr ? 'استرجاع منتج عند الكاشير' : 'POS Customer Return'),
+          processedBy: cashierName || (isAr ? 'أمين الصندوق' : 'Cashier'),
+          items: returnPayloadSummary.items
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        const retNo = data.data?.returnNumber || '5001';
+        const restocked = data.data?.restockedUnitsCount || 0;
+        const refunded = data.data?.totalRefundIQD ?? returnPayloadSummary.totalRefundIQD;
+
+        setIsReturnModalOpen(false);
+        setFeedbackBanner({
+          type: 'success',
+          message: isAr
+            ? restocked > 0
+              ? `تم تسجيل المرتجع #${retNo} وإرجاع ${formatCurrency(refunded, currency, language)} للزبون — وأُعيدت ${restocked} وحدة إلى مخزون المحل تلقائياً.`
+              : `تم تسجيل المرتجع التالف #${retNo} بقيمة ${formatCurrency(refunded, currency, language)} (بدون إضافة لرصيد الرف الصالح).`
+            : restocked > 0
+            ? `Return #${retNo} recorded (${formatCurrency(refunded, currency, language)}) — ${restocked} unit(s) restocked to shelf.`
+            : `Damaged return #${retNo} recorded (${formatCurrency(refunded, currency, language)}).`
+        });
+
+        await loadData();
+        if (onRefreshLowStockAlerts) onRefreshLowStockAlerts();
+      } else {
+        setReturnError(data.message || (isAr ? 'تعذر تسجيل المرتجع' : 'Failed to process return'));
+      }
+    } catch (err: any) {
+      setReturnError(err?.message || (isAr ? 'تعذر الاتصال بالخادم' : 'Network error'));
+    } finally {
+      setIsSubmittingReturn(false);
+    }
+  };
+
   // Save new custom threshold
   const handleSaveThreshold = async (barcode: string) => {
     setUpdatingBarcode(barcode);
@@ -722,9 +1031,22 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
 
   // ================= ANALYTICS & CHART DATA =================
   const analyticsStats = useMemo(() => {
-    const totalRevenueIQD = salesHistory.reduce((s, r) => s + r.totalIQD, 0);
-    const totalProfitIQD = salesHistory.reduce((s, r) => s + r.profitIQD, 0);
+    const grossRevenueIQD = salesHistory.reduce((s, r) => s + r.totalIQD, 0);
+    const grossProfitIQD = salesHistory.reduce((s, r) => s + r.profitIQD, 0);
+    const totalReturnsIQD = posReturns.reduce((s, r) => s + r.totalRefundIQD, 0);
+    const totalReturnProfitAdj = posReturns.reduce((s, r) => s + (r.profitAdjustmentIQD || 0), 0);
+    const totalRevenueIQD = Math.max(0, grossRevenueIQD - totalReturnsIQD);
+    const totalProfitIQD = Math.max(0, grossProfitIQD - totalReturnProfitAdj);
     const totalOrdersCount = salesHistory.length;
+    const totalReturnsCount = posReturns.length;
+    const totalRestockedUnits = posReturns.reduce(
+      (sum, ret) =>
+        sum +
+        ret.items
+          .filter((it) => it.restockToShelf)
+          .reduce((s, it) => s + it.quantity, 0),
+      0
+    );
     const healthySKUs = inventory.filter(
       (i) => i.stockQuantity > i.reorderLevel && !i.isNearExpiry
     ).length;
@@ -732,12 +1054,16 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
       inventory.length > 0 ? Math.round((healthySKUs / inventory.length) * 100) : 100;
 
     return {
+      grossRevenueIQD,
+      totalReturnsIQD,
       totalRevenueIQD,
       totalProfitIQD,
       totalOrdersCount,
+      totalReturnsCount,
+      totalRestockedUnits,
       healthScore
     };
-  }, [salesHistory, inventory]);
+  }, [salesHistory, posReturns, inventory]);
 
   const chartSeries = useMemo(() => {
     const liveInStore = salesHistory
@@ -836,6 +1162,19 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
     );
   }, [inventory, reportSearch]);
 
+  const filteredPOSReturns = useMemo(() => {
+    const q = reportSearch.trim().toLowerCase();
+    if (!q) return posReturns;
+    return posReturns.filter(
+      (ret) =>
+        ret.customerName.toLowerCase().includes(q) ||
+        String(ret.returnNumber).includes(q) ||
+        (ret.originalReceiptNumber && String(ret.originalReceiptNumber).includes(q)) ||
+        ret.reason.toLowerCase().includes(q) ||
+        ret.items.some((it) => it.productName.toLowerCase().includes(q))
+    );
+  }, [posReturns, reportSearch]);
+
   const todayDisplay = useMemo(() => {
     try {
       return new Intl.DateTimeFormat(isAr ? 'ar-IQ' : 'en-US', {
@@ -887,6 +1226,21 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
               ? `إجمالي الفواتير: ${salesHistory.length}`
               : `Total: ${salesHistory.length} Orders`}
           </span>
+
+          {/* Quick Customer Return Button in Header */}
+          <button
+            type="button"
+            onClick={() => openReturnModal()}
+            className="px-3.5 py-2 rounded-full text-xs font-bold flex items-center gap-1.5 border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 transition cursor-pointer whitespace-nowrap shadow-2xs"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
+            <span>{isAr ? 'مرتجع زبون' : 'Return Item'}</span>
+            {posReturns.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-amber-600 text-white text-[10px] font-black tabular-nums leading-none">
+                {posReturns.length}
+              </span>
+            )}
+          </button>
 
           {/* Toggle POS Terminal vs Report & Analytics */}
           <button
@@ -973,6 +1327,15 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
             <Store className="w-3.5 h-3.5 text-[#0B5D32]" />
             <span>{isCashierMode ? (isAr ? 'أدوات الصندوق:' : 'Cashier:') : (isAr ? 'أدوات المحل:' : 'Store Tools:')}</span>
           </span>
+
+          <button
+            type="button"
+            onClick={() => openReturnModal()}
+            className="min-h-[38px] px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 text-[11.5px] font-bold flex items-center gap-1.5 transition cursor-pointer shrink-0 whitespace-nowrap"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
+            <span>{isAr ? 'إرجاع منتج / مرتجع' : 'Customer Return'}</span>
+          </button>
 
           {onOpenLowStockModal && (
             <button
@@ -2032,12 +2395,19 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
           <div className={`grid grid-cols-2 sm:grid-cols-3 ${isCashierMode ? 'lg:grid-cols-4' : 'lg:grid-cols-5'} gap-3`}>
             <div className="bg-white rounded-2xl border border-[#DCE5DC] p-3.5 space-y-1.5">
               <div className="flex items-center justify-between text-[11px] font-bold text-[#5F7164]">
-                <span>{isAr ? 'إجمالي الإيرادات' : 'Total Revenue'}</span>
+                <span>{isAr ? 'صافي الإيرادات' : 'Net Revenue'}</span>
                 <Banknote className="w-4 h-4 text-[#0B5D32]" />
               </div>
               <div className="text-base sm:text-lg font-black font-mono tabular-nums text-[#142018]">
                 {formatCurrency(analyticsStats.totalRevenueIQD, currency, language)}
               </div>
+              {analyticsStats.totalReturnsIQD > 0 && (
+                <div className="text-[10px] font-bold text-amber-700 tabular-nums">
+                  {isAr
+                    ? `خصم مرتجعات: -${formatCurrency(analyticsStats.totalReturnsIQD, currency, language)}`
+                    : `Returns: -${formatCurrency(analyticsStats.totalReturnsIQD, currency, language)}`}
+                </div>
+              )}
             </div>
 
             {!isCashierMode && (
@@ -2052,13 +2422,21 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
               </div>
             )}
 
-            <div className="bg-white rounded-2xl border border-[#DCE5DC] p-3.5 space-y-1.5">
+            <div
+              onClick={() => setReportTab('returns')}
+              className="bg-white rounded-2xl border border-[#DCE5DC] hover:border-amber-300 p-3.5 space-y-1.5 cursor-pointer transition"
+            >
               <div className="flex items-center justify-between text-[11px] font-bold text-[#5F7164]">
-                <span>{isAr ? 'فواتير اليوم' : 'Today Sales'}</span>
+                <span>{isAr ? 'فواتير / مرتجعات' : 'Sales / Returns'}</span>
                 <Receipt className="w-4 h-4 text-[#0B5D32]" />
               </div>
-              <div className="text-base sm:text-lg font-black font-mono tabular-nums text-[#142018]">
-                {analyticsStats.totalOrdersCount} {isAr ? 'فاتورة' : 'Orders'}
+              <div className="flex items-baseline gap-2">
+                <span className="text-base sm:text-lg font-black font-mono tabular-nums text-[#142018]">
+                  {analyticsStats.totalOrdersCount}
+                </span>
+                <span className="text-[11px] font-bold text-amber-700 tabular-nums">
+                  / {analyticsStats.totalReturnsCount} {isAr ? 'مرتجع' : 'ret'}
+                </span>
               </div>
             </div>
 
@@ -2380,7 +2758,7 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
           <div className="bg-white rounded-2xl border border-[#DCE5DC] p-4 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               {/* Tab Switcher */}
-              <div className="flex items-center gap-1.5 bg-[#F4F4EA] p-1 rounded-full w-fit text-xs font-bold">
+              <div className="flex items-center gap-1 bg-[#F4F4EA] p-1 rounded-full w-fit max-w-full overflow-x-auto no-scrollbar text-xs font-bold">
                 <button
                   type="button"
                   onClick={() => setReportTab('transactions')}
@@ -2391,6 +2769,18 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
                   }`}
                 >
                   {isAr ? `سجل الفواتير (${salesHistory.length})` : `Transactions (${salesHistory.length})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReportTab('returns')}
+                  className={`px-3.5 py-1.5 rounded-full transition cursor-pointer whitespace-nowrap flex items-center gap-1 ${
+                    reportTab === 'returns'
+                      ? 'bg-amber-600 text-white shadow-2xs'
+                      : 'text-[#4B6352] hover:text-[#142018]'
+                  }`}
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>{isAr ? `سجل المرتجعات (${posReturns.length})` : `Returns (${posReturns.length})`}</span>
                 </button>
                 <button
                   type="button"
@@ -2433,6 +2823,17 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
                   </div>
                 )}
 
+                {reportTab === 'returns' && (
+                  <button
+                    type="button"
+                    onClick={() => openReturnModal()}
+                    className="px-3 py-1.5 rounded-full bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold flex items-center gap-1 transition cursor-pointer whitespace-nowrap"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>{isAr ? '+ تسجيل مرتجع جديد' : '+ New Return'}</span>
+                  </button>
+                )}
+
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 text-[#5F7164] absolute start-3 top-1/2 -translate-y-1/2" />
                   <input
@@ -2460,76 +2861,196 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
                         <th className="py-2.5 px-2 text-end">{isAr ? 'الربح' : 'Profit'}</th>
                       )}
                       <th className="py-2.5 px-2 text-end">{isAr ? 'الإجمالي' : 'Value'}</th>
+                      <th className="py-2.5 px-2 text-end">{isAr ? 'إجراء' : 'Action'}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#F0F3EE]">
                     {filteredSalesHistory.length === 0 ? (
                       <tr>
-                        <td colSpan={isCashierMode ? 6 : 7} className="py-6 text-center text-[#5F7164]">
+                        <td colSpan={isCashierMode ? 7 : 8} className="py-6 text-center text-[#5F7164]">
                           {isAr ? 'لا توجد فواتير مطابقة' : 'No matching receipts'}
                         </td>
                       </tr>
                     ) : (
-                      filteredSalesHistory.map((sale) => (
-                        <tr key={sale.id} className="hover:bg-[#F9FAF6] transition">
-                          <td className="py-2.5 px-2 font-mono font-black text-[#0B5D32] tabular-nums">
-                            #{sale.receiptNumber}
-                          </td>
-                          <td className="py-2.5 px-2 font-bold text-[#142018]">
-                            {sale.customerName}
-                          </td>
-                          <td className="py-2.5 px-2 text-[#4B6352]">
-                            {sale.orderMode === 'online_order'
-                              ? isAr
-                                ? 'طلب أونلاين'
-                                : 'Online'
-                              : sale.orderMode === 'take_away'
-                              ? isAr
-                                ? 'سفري'
-                                : 'Take Away'
-                              : isAr
-                              ? 'بيع مباشر'
-                              : 'In Store'}
-                          </td>
-                          <td className="py-2.5 px-2 text-[#4B6352]">
-                            <span className="inline-flex items-center gap-1">
-                              {sale.paymentType === 'card' ? (
-                                <CreditCard className="w-3 h-3 text-[#0B5D32]" />
-                              ) : sale.paymentType === 'credit_ledger' ? (
-                                <BookOpen className="w-3 h-3 text-amber-600" />
-                              ) : (
-                                <Banknote className="w-3 h-3 text-[#0B5D32]" />
-                              )}
-                              <span>
-                                {sale.paymentType === 'card'
-                                  ? isAr
-                                    ? 'بطاقة'
-                                    : 'Card'
-                                  : sale.paymentType === 'credit_ledger'
-                                  ? isAr
-                                    ? 'آجل'
-                                    : 'Credit'
-                                  : isAr
-                                  ? 'نقدي'
-                                  : 'Cash'}
-                              </span>
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-2 text-[#4B6352] max-w-[220px] truncate">
-                            {sale.items
-                              .map((it) => `${it.productName} (×${it.quantity})`)
-                              .join(' · ')}
-                          </td>
-                          {!isCashierMode && (
-                            <td className="py-2.5 px-2 text-end font-mono font-bold text-[#008A3C] tabular-nums">
-                              +{formatCurrency(sale.profitIQD, currency, language)}
+                      filteredSalesHistory.map((sale) => {
+                        const retStatus = getReceiptReturnStatus(sale);
+                        return (
+                          <tr key={sale.id} className="hover:bg-[#F9FAF6] transition">
+                            <td className="py-2.5 px-2 font-mono font-black text-[#0B5D32] tabular-nums whitespace-nowrap">
+                              <div className="flex items-center gap-1.5">
+                                <span>#{sale.receiptNumber}</span>
+                                {retStatus === 'full' && (
+                                  <span className="text-[9.5px] font-sans font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full">
+                                    {isAr ? 'مرتجع كامل' : 'Returned'}
+                                  </span>
+                                )}
+                                {retStatus === 'partial' && (
+                                  <span className="text-[9.5px] font-sans font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full">
+                                    {isAr ? 'مرتجع جزئي' : 'Partial'}
+                                  </span>
+                                )}
+                              </div>
                             </td>
-                          )}
-                          <td className="py-2.5 px-2 text-end font-mono font-black text-[#142018] tabular-nums">
-                            {formatCurrency(sale.totalIQD, currency, language)}
-                          </td>
-                        </tr>
-                      ))
+                            <td className="py-2.5 px-2 font-bold text-[#142018]">
+                              {sale.customerName}
+                            </td>
+                            <td className="py-2.5 px-2 text-[#4B6352]">
+                              {sale.orderMode === 'online_order'
+                                ? isAr
+                                  ? 'طلب أونلاين'
+                                  : 'Online'
+                                : sale.orderMode === 'take_away'
+                                ? isAr
+                                  ? 'سفري'
+                                  : 'Take Away'
+                                : isAr
+                                ? 'بيع مباشر'
+                                : 'In Store'}
+                            </td>
+                            <td className="py-2.5 px-2 text-[#4B6352]">
+                              <span className="inline-flex items-center gap-1">
+                                {sale.paymentType === 'card' ? (
+                                  <CreditCard className="w-3 h-3 text-[#0B5D32]" />
+                                ) : sale.paymentType === 'credit_ledger' ? (
+                                  <BookOpen className="w-3 h-3 text-amber-600" />
+                                ) : (
+                                  <Banknote className="w-3 h-3 text-[#0B5D32]" />
+                                )}
+                                <span>
+                                  {sale.paymentType === 'card'
+                                    ? isAr
+                                      ? 'بطاقة'
+                                      : 'Card'
+                                    : sale.paymentType === 'credit_ledger'
+                                    ? isAr
+                                      ? 'آجل'
+                                      : 'Credit'
+                                    : isAr
+                                    ? 'نقدي'
+                                    : 'Cash'}
+                                </span>
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-2 text-[#4B6352] max-w-[220px] truncate">
+                              {sale.items
+                                .map((it) => `${it.productName} (×${it.quantity})`)
+                                .join(' · ')}
+                            </td>
+                            {!isCashierMode && (
+                              <td className="py-2.5 px-2 text-end font-mono font-bold text-[#008A3C] tabular-nums">
+                                +{formatCurrency(sale.profitIQD, currency, language)}
+                              </td>
+                            )}
+                            <td className="py-2.5 px-2 text-end font-mono font-black text-[#142018] tabular-nums">
+                              {formatCurrency(sale.totalIQD, currency, language)}
+                            </td>
+                            <td className="py-2.5 px-2 text-end">
+                              <button
+                                type="button"
+                                disabled={retStatus === 'full'}
+                                onClick={() => openReturnModal(sale)}
+                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-bold border transition whitespace-nowrap ${
+                                  retStatus === 'full'
+                                    ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
+                                    : 'border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 cursor-pointer'
+                                }`}
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                <span>{retStatus === 'full' ? (isAr ? 'مُسترجَع' : 'Done') : (isAr ? 'إرجاع' : 'Return')}</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : reportTab === 'returns' ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-start">
+                  <thead>
+                    <tr className="border-b border-[#EAEFEA] text-[#5F7164] font-bold">
+                      <th className="py-2.5 px-2 text-start">{isAr ? 'رقم المرتجع' : 'Return #'}</th>
+                      <th className="py-2.5 px-2 text-start">{isAr ? 'الفاتورة الأصلية' : 'Receipt #'}</th>
+                      <th className="py-2.5 px-2 text-start">{isAr ? 'الزبون' : 'Customer'}</th>
+                      <th className="py-2.5 px-2 text-start">{isAr ? 'الأصناف والحالة' : 'Items & Condition'}</th>
+                      <th className="py-2.5 px-2 text-start">{isAr ? 'طريقة الاسترداد' : 'Refund'}</th>
+                      <th className="py-2.5 px-2 text-start">{isAr ? 'السبب' : 'Reason'}</th>
+                      <th className="py-2.5 px-2 text-end">{isAr ? 'المبلغ المسترد' : 'Refunded'}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#F0F3EE]">
+                    {filteredPOSReturns.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-[#5F7164] space-y-2">
+                          <div>{isAr ? 'لا توجد مرتجعات زبائن مسجلة حتى الآن' : 'No customer returns recorded yet'}</div>
+                          <button
+                            type="button"
+                            onClick={() => openReturnModal()}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 font-bold text-xs cursor-pointer"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>{isAr ? 'تسجيل أول عملية إرجاع' : 'Record First Return'}</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredPOSReturns.map((ret) => {
+                        const restocked = ret.items.every((it) => it.restockToShelf);
+                        return (
+                          <tr key={ret.id} className="hover:bg-[#F9FAF6] transition">
+                            <td className="py-2.5 px-2 font-mono font-black text-amber-700 tabular-nums whitespace-nowrap">
+                              #{ret.returnNumber}
+                            </td>
+                            <td className="py-2.5 px-2 font-mono text-[#4B6352] tabular-nums whitespace-nowrap">
+                              {ret.originalReceiptNumber ? `#${ret.originalReceiptNumber}` : (isAr ? 'مرتجع مباشر' : 'Direct')}
+                            </td>
+                            <td className="py-2.5 px-2 font-bold text-[#142018]">
+                              {ret.customerName}
+                            </td>
+                            <td className="py-2.5 px-2 text-[#4B6352]">
+                              <div className="font-semibold text-[#142018] max-w-[230px] truncate">
+                                {ret.items.map((it) => `${it.productName} (×${it.quantity})`).join(' · ')}
+                              </div>
+                              <span
+                                className={`inline-block mt-0.5 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                  restocked
+                                    ? 'bg-[#ECFDF5] text-[#065F46]'
+                                    : 'bg-red-50 text-red-700'
+                                }`}
+                              >
+                                {restocked
+                                  ? isAr
+                                    ? 'سليم — أُعيد للمخزون'
+                                    : 'Restocked to Shelf'
+                                  : isAr
+                                  ? 'تالف — لم يُضف للرف'
+                                  : 'Damaged — Not Restocked'}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-2 text-[#4B6352] whitespace-nowrap">
+                              {ret.refundMethod === 'card'
+                                ? isAr
+                                  ? 'بطاقة'
+                                  : 'Card'
+                                : ret.refundMethod === 'credit_ledger'
+                                ? isAr
+                                  ? 'آجل'
+                                  : 'Ledger'
+                                : isAr
+                                ? 'نقدي'
+                                : 'Cash'}
+                            </td>
+                            <td className="py-2.5 px-2 text-[#5F7164] max-w-[160px] truncate">
+                              {ret.reason}
+                            </td>
+                            <td className="py-2.5 px-2 text-end font-mono font-black text-red-700 tabular-nums whitespace-nowrap">
+                              -{formatCurrency(ret.totalRefundIQD, currency, language)}
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -2876,6 +3397,443 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+      {/* ================= RETAIL CUSTOMER RETURN MODAL ================= */}
+      {isReturnModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden my-auto border border-[#DCE5DC] font-brand">
+            <div className="bg-[#0B5D32] text-white p-4 flex items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-400/20 border border-amber-300/30 flex items-center justify-center shrink-0">
+                  <RotateCcw className="w-5 h-5 text-[#FFE600]" />
+                </div>
+                <div>
+                  <h2 className="text-sm sm:text-base font-black">
+                    {isAr ? 'مرتجع مبيعات الزبائن وإعادة المخزون' : 'Retail Customer Return & Restock'}
+                  </h2>
+                  <p className="text-[11px] text-emerald-100">
+                    {isAr
+                      ? 'إرجاع منتج من فاتورة أو مباشرة مع تحديث رصيد الرف وإيراد الكاشير تلقائياً'
+                      : 'Return items by receipt or directly and update shelf stock automatically'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsReturnModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-black/25 hover:bg-black/40 text-white flex items-center justify-center transition cursor-pointer shrink-0"
+                aria-label={isAr ? 'إغلاق' : 'Close'}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitPOSReturn} className="p-4 space-y-4 overflow-y-auto flex-1">
+              {/* Return Mode Tabs */}
+              <div className="grid grid-cols-2 gap-1.5 bg-[#F4F4EA] p-1 rounded-2xl text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReturnMode('by_receipt');
+                    setReturnError(null);
+                  }}
+                  className={`py-2 px-3 rounded-xl transition cursor-pointer ${
+                    returnMode === 'by_receipt'
+                      ? 'bg-white text-[#0B5D32] shadow-2xs border border-[#DCE5DC]'
+                      : 'text-[#5F7164] hover:text-[#142018]'
+                  }`}
+                >
+                  {isAr ? 'إرجاع من فاتورة سابقة' : 'Return from Receipt'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReturnMode('direct_item');
+                    setReturnError(null);
+                  }}
+                  className={`py-2 px-3 rounded-xl transition cursor-pointer ${
+                    returnMode === 'direct_item'
+                      ? 'bg-white text-[#0B5D32] shadow-2xs border border-[#DCE5DC]'
+                      : 'text-[#5F7164] hover:text-[#142018]'
+                  }`}
+                >
+                  {isAr ? 'إرجاع سريع بالصنف (بدون فاتورة)' : 'Direct Product Return'}
+                </button>
+              </div>
+
+              {returnError && (
+                <div className="rounded-xl p-2.5 bg-red-50 border border-red-200 text-red-800 text-xs font-bold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{returnError}</span>
+                </div>
+              )}
+
+              {returnMode === 'by_receipt' ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold text-[#142018] mb-1.5">
+                      {isAr ? 'اختر الفاتورة الأصلية:' : 'Select Original Receipt:'}
+                    </label>
+                    {salesHistory.length === 0 ? (
+                      <div className="p-3 rounded-xl bg-[#F8FAF7] border border-[#DCE5DC] text-xs text-[#5F7164]">
+                        {isAr
+                          ? 'لا توجد فواتير مبيعات بعد — يمكنك استخدام "إرجاع سريع بالصنف" أعلاه.'
+                          : 'No sales receipts yet — switch to Direct Product Return above.'}
+                      </div>
+                    ) : (
+                      <select
+                        value={selectedReceiptNo}
+                        onChange={(e) => handleSelectReturnReceipt(Number(e.target.value))}
+                        className="w-full bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] rounded-xl px-3 py-2 text-xs font-bold text-[#142018] focus:bg-white focus:outline-hidden"
+                      >
+                        {salesHistory.map((sale) => {
+                          const status = getReceiptReturnStatus(sale);
+                          return (
+                            <option key={sale.id} value={sale.receiptNumber}>
+                              #{sale.receiptNumber} — {sale.customerName} (
+                              {formatCurrency(sale.totalIQD, currency, language)})
+                              {status === 'full'
+                                ? isAr
+                                  ? ' [مرتجع بالكامل]'
+                                  : ' [Fully Returned]'
+                                : status === 'partial'
+                                ? isAr
+                                  ? ' [مرتجع جزئي]'
+                                  : ' [Partial]'
+                                : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    )}
+                  </div>
+
+                  {selectedReceiptObj && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-[#5F7164]">
+                        <span>{isAr ? 'حدد الأصناف والكميات المرتجعة:' : 'Select items & return quantities:'}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const allMap: Record<string, number> = {};
+                            for (const l of selectedReceiptLines) {
+                              allMap[l.barcode] = l.maxReturnable;
+                            }
+                            setReceiptReturnQtyMap(allMap);
+                          }}
+                          className="text-[#0B5D32] hover:underline cursor-pointer"
+                        >
+                          {isAr ? 'تحديد كامل الكمية المتبقية' : 'Select All Remaining'}
+                        </button>
+                      </div>
+
+                      <div className="divide-y divide-[#EAEFEA] border border-[#DCE5DC] rounded-2xl bg-[#F8FAF7] max-h-48 overflow-y-auto">
+                        {selectedReceiptLines.map((line) => (
+                          <div
+                            key={line.barcode}
+                            className="p-2.5 flex items-center justify-between gap-2 text-xs"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="font-bold text-[#142018] truncate">
+                                {isAr ? line.productName : getLocalizedText(line.productName, 'en')}
+                              </div>
+                              <div className="text-[10.5px] text-[#5F7164] tabular-nums mt-0.5 flex flex-wrap gap-2">
+                                <span>
+                                  {isAr ? `مباع: ${line.quantity}` : `Sold: ${line.quantity}`}
+                                </span>
+                                {line.alreadyReturned > 0 && (
+                                  <span className="text-amber-700 font-bold">
+                                    {isAr
+                                      ? `مُرجع سابقاً: ${line.alreadyReturned}`
+                                      : `Returned: ${line.alreadyReturned}`}
+                                  </span>
+                                )}
+                                <span className="font-mono font-bold text-[#0B5D32]">
+                                  {formatCurrency(line.effectiveUnitIQD, currency, language)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {line.maxReturnable === 0 ? (
+                              <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-1 rounded-full shrink-0">
+                                {isAr ? 'مُرجع بالكامل' : 'Returned'}
+                              </span>
+                            ) : (
+                              <div className="flex items-center gap-1.5 bg-white border border-[#DCE5DC] rounded-full p-0.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setReceiptReturnQtyMap((prev) => ({
+                                      ...prev,
+                                      [line.barcode]: Math.max(0, (prev[line.barcode] || 0) - 1)
+                                    }))
+                                  }
+                                  className="w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-[#142018] cursor-pointer"
+                                >
+                                  <Minus className="w-3 h-3" />
+                                </button>
+                                <span className="w-6 text-center font-mono font-black text-xs tabular-nums">
+                                  {line.selectedQty}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setReceiptReturnQtyMap((prev) => ({
+                                      ...prev,
+                                      [line.barcode]: Math.min(
+                                        line.maxReturnable,
+                                        (prev[line.barcode] || 0) + 1
+                                      )
+                                    }))
+                                  }
+                                  className="w-6 h-6 rounded-full bg-[#0B5D32] text-white hover:bg-[#084725] flex items-center justify-center cursor-pointer"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold text-[#142018] mb-1.5">
+                      {isAr ? 'ابحث واختر المنتج المراد إرجاعه:' : 'Search & Select Product to Return:'}
+                    </label>
+                    <div className="relative mb-2">
+                      <Search className="w-3.5 h-3.5 text-[#5F7164] absolute start-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={directReturnSearch}
+                        onChange={(e) => setDirectReturnSearch(e.target.value)}
+                        placeholder={isAr ? 'اسم المنتج أو الباركود...' : 'Product name or barcode...'}
+                        className="w-full rounded-full border border-[#DCE5DC] bg-[#F8FAF7] focus:bg-white py-1.5 ps-8 pe-3 text-xs focus:outline-hidden focus:border-[#0B5D32]"
+                      />
+                    </div>
+                    <select
+                      value={selectedDirectItem?.barcode || ''}
+                      onChange={(e) => setDirectReturnBarcode(e.target.value)}
+                      className="w-full bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] rounded-xl px-3 py-2 text-xs font-bold text-[#142018] focus:bg-white focus:outline-hidden"
+                    >
+                      {filteredDirectReturnInventory.map((item) => (
+                        <option key={item.id} value={item.barcode}>
+                          {isAr ? item.productName : getLocalizedText(item.productName, 'en')} —{' '}
+                          {formatCurrency(item.retailSellingPriceIQD, currency, language)} (
+                          {isAr ? `الرف الحالي: ${item.stockQuantity}` : `Stock: ${item.stockQuantity}`})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center justify-between bg-[#F8FAF7] border border-[#DCE5DC] rounded-2xl p-3">
+                    <div>
+                      <div className="text-xs font-bold text-[#142018]">
+                        {isAr ? 'الكمية المرتجعة:' : 'Return Quantity:'}
+                      </div>
+                      <div className="text-[10.5px] text-[#5F7164]">
+                        {selectedDirectItem
+                          ? isAr
+                            ? `سعر الوحدة: ${formatCurrency(selectedDirectItem.retailSellingPriceIQD, currency, language)}`
+                            : `Unit Price: ${formatCurrency(selectedDirectItem.retailSellingPriceIQD, currency, language)}`
+                          : ''}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 bg-white border border-[#DCE5DC] rounded-full p-1">
+                      <button
+                        type="button"
+                        onClick={() => setDirectReturnQty((q) => Math.max(1, q - 1))}
+                        className="w-7 h-7 rounded-full hover:bg-gray-100 flex items-center justify-center cursor-pointer"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="w-8 text-center font-mono font-black text-sm tabular-nums">
+                        {directReturnQty}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setDirectReturnQty((q) => Math.min(100, q + 1))}
+                        className="w-7 h-7 rounded-full bg-[#0B5D32] text-white hover:bg-[#084725] flex items-center justify-center cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Condition: Restock vs Damaged */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-[#142018]">
+                  {isAr ? 'حالة البضاعة المرتجعة:' : 'Returned Item Condition:'}
+                </label>
+                <div className="grid grid-cols-2 gap-2 text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setReturnRestockToShelf(true)}
+                    className={`p-2.5 rounded-2xl border text-start transition cursor-pointer ${
+                      returnRestockToShelf
+                        ? 'bg-[#ECFDF5] border-[#0B5D32] text-[#065F46]'
+                        : 'bg-[#F8FAF7] border-[#DCE5DC] text-[#5F7164]'
+                    }`}
+                  >
+                    <div className="font-black">
+                      {isAr ? '✓ سليم — يعاد للمخزون' : '✓ Good — Restock'}
+                    </div>
+                    <div className="text-[10px] font-normal mt-0.5 opacity-85">
+                      {isAr ? 'تُضاف الكمية تلقائياً لرصيد الرف' : 'Added back to shelf stock'}
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setReturnRestockToShelf(false)}
+                    className={`p-2.5 rounded-2xl border text-start transition cursor-pointer ${
+                      !returnRestockToShelf
+                        ? 'bg-red-50 border-red-400 text-red-900'
+                        : 'bg-[#F8FAF7] border-[#DCE5DC] text-[#5F7164]'
+                    }`}
+                  >
+                    <div className="font-black">
+                      {isAr ? '✕ تالف / مفتوح — لا يعاد' : '✕ Damaged — Do Not Restock'}
+                    </div>
+                    <div className="text-[10px] font-normal mt-0.5 opacity-85">
+                      {isAr ? 'يُسجل استرداد مالي دون زيادة المخزون' : 'Refunds cash without inflating stock'}
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Refund Method & Customer Name */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-[#142018] mb-1">
+                    {isAr ? 'طريقة استرداد المبلغ:' : 'Refund Method:'}
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5 text-[11px] font-bold">
+                    {(
+                      [
+                        { id: 'cash', ar: 'نقدي', en: 'Cash' },
+                        { id: 'card', ar: 'بطاقة', en: 'Card' },
+                        { id: 'credit_ledger', ar: 'دفتر', en: 'Ledger' }
+                      ] as const
+                    ).map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setReturnRefundMethod(m.id)}
+                        className={`py-2 rounded-xl border transition cursor-pointer ${
+                          returnRefundMethod === m.id
+                            ? 'bg-[#0B5D32] text-white border-[#0B5D32]'
+                            : 'bg-[#F8FAF7] text-[#4B6352] border-[#DCE5DC]'
+                        }`}
+                      >
+                        {isAr ? m.ar : m.en}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#142018] mb-1">
+                    {isAr ? 'اسم الزبون (اختياري):' : 'Customer Name (Optional):'}
+                  </label>
+                  <input
+                    type="text"
+                    value={returnCustomerName}
+                    onChange={(e) => setReturnCustomerName(e.target.value)}
+                    placeholder={isAr ? 'زبون نقدي' : 'Walk-in Customer'}
+                    className="w-full bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] rounded-xl px-3 py-1.5 text-xs text-[#142018] focus:bg-white focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              {/* Quick Reason Chips + Input */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-[#142018]">
+                  {isAr ? 'سبب الإرجاع:' : 'Return Reason:'}
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {(isAr
+                    ? ['تبديل / تغيير رأي الزبون', 'تلف أو فتح العبوة', 'قرب انتهاء الصلاحية', 'خطأ في السعر أو المسح']
+                    : ['Customer changed mind', 'Damaged packaging', 'Near expiry', 'Pricing/scan error']
+                  ).map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        setReturnReason(preset);
+                        if (preset.includes('تلف') || preset.toLowerCase().includes('damaged')) {
+                          setReturnRestockToShelf(false);
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-full text-[10.5px] font-bold border transition cursor-pointer ${
+                        returnReason === preset
+                          ? 'bg-amber-100 border-amber-400 text-amber-900'
+                          : 'bg-[#F8FAF7] border-[#DCE5DC] text-[#5F7164] hover:text-[#142018]'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value)}
+                  placeholder={isAr ? 'اكتب سبب الإرجاع...' : 'Enter return reason...'}
+                  className="w-full bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] rounded-xl px-3 py-1.5 text-xs text-[#142018] focus:bg-white focus:outline-hidden"
+                />
+              </div>
+
+              {/* Refund Summary & Submit */}
+              <div className="rounded-2xl bg-[#F4F4EA] border border-[#DCE5DC] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="text-[11px] font-bold text-[#5F7164]">
+                    {isAr ? 'إجمالي المبلغ الواجب إرجاعه للزبون:' : 'Total Refund Amount:'}
+                  </div>
+                  <div className="text-lg font-black font-mono tabular-nums text-[#0B5D32]">
+                    {formatCurrency(returnPayloadSummary.totalRefundIQD, currency, language)}
+                  </div>
+                  <div className="text-[10.5px] text-[#4B6352] font-semibold">
+                    {returnPayloadSummary.totalUnits > 0
+                      ? returnRestockToShelf
+                        ? isAr
+                          ? `سيتم إعادة ${returnPayloadSummary.totalUnits} وحدة إلى المخزون فور التأكيد`
+                          : `${returnPayloadSummary.totalUnits} unit(s) will return to stock`
+                        : isAr
+                        ? `${returnPayloadSummary.totalUnits} وحدة تالفة — لن تُعاد للمخزون`
+                        : `${returnPayloadSummary.totalUnits} damaged unit(s) — no restock`
+                      : isAr
+                      ? 'يرجى تحديد كمية للإرجاع'
+                      : 'Select at least 1 unit to return'}
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmittingReturn || returnPayloadSummary.items.length === 0}
+                  className="px-5 py-2.5 rounded-full bg-[#0B5D32] hover:bg-[#084725] disabled:bg-gray-300 text-white text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap shadow-sm"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>
+                    {isSubmittingReturn
+                      ? isAr
+                        ? 'جاري التنفيذ...'
+                        : 'Processing...'
+                      : isAr
+                      ? 'تأكيد الإرجاع'
+                      : 'Confirm Return'}
+                  </span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

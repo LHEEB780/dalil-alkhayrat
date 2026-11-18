@@ -16,7 +16,14 @@ import {
   Lock, 
   Unlock,
   PackageCheck,
-  Send
+  Send,
+  Package,
+  Navigation,
+  Award,
+  RefreshCw,
+  MapPin,
+  Wallet,
+  X
 } from 'lucide-react';
 import { CreditAccountItem, CreditUpgradeRequestItem, LedgerEntryItem, Currency, OrderItem, Language } from '../types/index.ts';
 import { formatCurrency, formatDate } from '../utils/format.ts';
@@ -55,6 +62,128 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
   const [upgradeRequests, setUpgradeRequests] = useState<CreditUpgradeRequestItem[]>([]);
   const [resolvingReqId, setResolvingReqId] = useState<string | null>(null);
 
+  // Van Fleet Command Center state
+  const [fleetData, setFleetData] = useState<any[]>([]);
+  const [shiftReports, setShiftReports] = useState<any[]>([]);
+  const [fleetStores, setFleetStores] = useState<any[]>([]);
+  const [fleetCatalog, setFleetCatalog] = useState<any[]>([]);
+  const [vanLoadRequests, setVanLoadRequests] = useState<any[]>([]);
+  const [adjustedLoadQty, setAdjustedLoadQty] = useState<Record<string, Record<string, number>>>({});
+  const [processingLoadReqId, setProcessingLoadReqId] = useState<string | null>(null);
+  const [selectedDriverId, setSelectedDriverId] = useState<string>('drv_ahmed_baghdad');
+  const [loadingFleet, setLoadingFleet] = useState(false);
+
+  // Morning Load-Out form
+  const [loadBarcode, setLoadBarcode] = useState('6281007000123');
+  const [loadQuantity, setLoadQuantity] = useState('15');
+  const [isLoadingStock, setIsLoadingStock] = useState(false);
+
+  // Add Route Stop form
+  const [newStopStoreId, setNewStopStoreId] = useState('store_almansoor');
+  const [newStopNotes, setNewStopNotes] = useState('');
+
+  // Add Driver/Van Modal
+  const [showAddDriverModal, setShowAddDriverModal] = useState(false);
+  const [newDriverName, setNewDriverName] = useState('');
+  const [newDriverPhone, setNewDriverPhone] = useState('');
+  const [newDriverPlate, setNewDriverPlate] = useState('');
+  const [newDriverModel, setNewDriverModel] = useState('تويوتا هايس 2024');
+  const [newDriverSector, setNewDriverSector] = useState('');
+  const [newDriverTarget, setNewDriverTarget] = useState('2000000');
+  const [newDriverCommission, setNewDriverCommission] = useState('1.5');
+
+  const loadFleetData = async () => {
+    setLoadingFleet(true);
+    try {
+      const res = await fetch('/api/van/fleet/supp_rafidain');
+      const data = await res.json();
+      if (data.success) {
+        setFleetData(data.fleet || []);
+        setShiftReports(data.shiftReports || []);
+        setFleetStores(data.stores || []);
+        setFleetCatalog(data.catalogProducts || []);
+        const reqs = data.loadRequests || [];
+        setVanLoadRequests(reqs);
+        setAdjustedLoadQty((prev) => {
+          const next = { ...prev };
+          for (const r of reqs) {
+            if (r.status === 'pending_approval' && !next[r.id]) {
+              const map: Record<string, number> = {};
+              for (const item of r.items || []) {
+                map[item.barcode] = item.requestedQuantity;
+              }
+              next[r.id] = map;
+            }
+          }
+          return next;
+        });
+        if (data.fleet?.length > 0 && !data.fleet.some((f: any) => f.driver.id === selectedDriverId)) {
+          setSelectedDriverId(data.fleet[0].driver.id);
+        }
+        if (data.catalogProducts?.length > 0 && !loadBarcode) {
+          setLoadBarcode(data.catalogProducts[0].barcode);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingFleet(false);
+    }
+  };
+
+  const handleApproveLoadRequest = async (reqId: string) => {
+    if (processingLoadReqId) return;
+    setProcessingLoadReqId(reqId);
+    try {
+      const res = await fetch(`/api/van/load-requests/${reqId}/approve`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          approvedBy: isAr ? 'محاسب شركة الرافدين' : 'Al-Rafidain Accountant',
+          adjustedQuantities: adjustedLoadQty[reqId] || {},
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage(
+          isAr
+            ? `تم اعتماد طلب التجهيز وإضافة الأصناف تلقائياً إلى كاشير ومخزون الفان.`
+            : 'Load request approved and items automatically synced to Van Cashier.'
+        );
+        await loadFleetData();
+      } else {
+        setStatusMessage(data.error || (isAr ? 'تعذر اعتماد طلب التجهيز.' : 'Failed to approve load request.'));
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setProcessingLoadReqId(null);
+    }
+  };
+
+  const handleRejectLoadRequest = async (reqId: string) => {
+    if (processingLoadReqId) return;
+    setProcessingLoadReqId(reqId);
+    try {
+      const res = await fetch(`/api/van/load-requests/${reqId}/reject`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: isAr ? 'تم الرفض من قبل المحاسب' : 'Rejected by accountant',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage(isAr ? 'تم رفض طلب تجهيز الفان.' : 'Van load request rejected.');
+        await loadFleetData();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setProcessingLoadReqId(null);
+    }
+  };
+
   // Fetch accounts and platform upgrade recommendations on load
   const loadCreditAccounts = async () => {
     try {
@@ -80,7 +209,115 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
 
   useEffect(() => {
     loadCreditAccounts();
+    loadFleetData();
   }, []);
+
+  const handleLoadStockToVan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedDriverId || !loadBarcode || !loadQuantity || isLoadingStock) return;
+    setIsLoadingStock(true);
+    try {
+      const res = await fetch('/api/van/load-stock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          driverId: selectedDriverId,
+          barcode: loadBarcode,
+          quantity: Number(loadQuantity)
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage(
+          isAr
+            ? `تم تحميل ${loadQuantity} وحدة بنجاح في عهدة الفان وتحديث المخزون المتنقل.`
+            : `Loaded ${loadQuantity} units into van inventory.`
+        );
+        await loadFleetData();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoadingStock(false);
+    }
+  };
+
+  const handleAssignRouteStop = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedDriverId || !newStopStoreId) return;
+    try {
+      const res = await fetch('/api/van/route-stops', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          driverId: selectedDriverId,
+          storeId: newStopStoreId,
+          notes: newStopNotes
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewStopNotes('');
+        setStatusMessage(
+          isAr ? 'تمت جدولة المتجر ضمن خط السير اليومي للسائق.' : 'Store added to driver daily route.'
+        );
+        await loadFleetData();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCreateDriver = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDriverName.trim() || !newDriverPlate.trim()) return;
+    try {
+      const res = await fetch('/api/van/drivers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supplierId: 'supp_rafidain',
+          name: newDriverName,
+          phone: newDriverPhone,
+          vehiclePlate: newDriverPlate,
+          vehicleModel: newDriverModel,
+          vanWarehouseName: newDriverSector || `فان ${fleetData.length + 1} - بغداد`,
+          dailyTargetIQD: Number(newDriverTarget) || 2000000,
+          commissionRatePercent: Number(newDriverCommission) || 1.5
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setShowAddDriverModal(false);
+        setNewDriverName('');
+        setNewDriverPhone('');
+        setNewDriverPlate('');
+        setNewDriverSector('');
+        setSelectedDriverId(data.data.id);
+        setStatusMessage(isAr ? 'تم تسجيل الفان والسائق الجديد في أسطول المورد بنجاح.' : 'New van driver registered.');
+        await loadFleetData();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleSettleShiftReport = async (reportId: string) => {
+    try {
+      const res = await fetch(`/api/van/shift-reports/${reportId}/settle`, {
+        method: 'PATCH'
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage(
+          isAr ? 'تم اعتماد تقرير إغلاق الوردية ومطابقة الصندوق بنجاح.' : 'Shift report approved and settled.'
+        );
+        await loadFleetData();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   // Fetch ledger when selected account changes
   useEffect(() => {
@@ -271,11 +508,20 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
           </button>
           <button
             onClick={() => setActiveSubTab('vans')}
-            className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
               activeSubTab === 'vans' ? 'bg-[#00A046] text-white shadow-xs' : 'text-[#6B7280] hover:text-[#1F2328]'
             }`}
           >
-            {isAr ? 'أسطول الفانات والمناديب' : 'Van Fleet & Reps'}
+            <span>{isAr ? 'أسطول الفانات والمناديب' : 'Van Fleet & Reps'}</span>
+            {vanLoadRequests.filter((r) => r.status === 'pending_approval').length > 0 && (
+              <span
+                className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-full ${
+                  activeSubTab === 'vans' ? 'bg-amber-400 text-[#1F2328]' : 'bg-amber-100 text-amber-800'
+                }`}
+              >
+                {vanLoadRequests.filter((r) => r.status === 'pending_approval').length}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -778,39 +1024,561 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
         </div>
       )}
 
-      {/* SUB-TAB 3: VANS AND DRIVERS */}
-      {activeSubTab === 'vans' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-white rounded-xl border border-[#E5E7EB] p-4 shadow-xs space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-emerald-50 text-[#00A046] flex items-center justify-center">
-                <Truck className="w-5 h-5" />
+      {/* SUB-TAB 3: VAN FLEET COMMAND CENTER (إدارة أسطول الفانات والتحميل الصباحي) */}
+      {activeSubTab === 'vans' && (() => {
+        const totalFleetCash = fleetData.reduce((s, f) => s + (f.driver.currentCashCollectedIQD || 0), 0);
+        const totalFleetSales = fleetData.reduce((s, f) => s + (f.commissionSummary?.totalAchievedIQD || 0), 0);
+        const totalFleetCommissions = fleetData.reduce((s, f) => s + (f.commissionSummary?.estimatedCommissionIQD || 0), 0);
+        const activeFleetCount = fleetData.filter((f) => f.driver.isActiveShift).length;
+        const selectedFleet = fleetData.find((f) => f.driver.id === selectedDriverId) || fleetData[0];
+
+        return (
+          <div className="space-y-4">
+            {/* Fleet KPI Summary Strip */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="bg-white rounded-xl border border-[#E5E7EB] p-3.5">
+                <div className="text-[11px] font-bold text-[#6B7280]">{isAr ? 'الفانات النشطة' : 'Active Vans'}</div>
+                <div className="text-lg font-black font-mono tabular-nums text-[#00A046] mt-1">
+                  {activeFleetCount} / {fleetData.length}
+                </div>
               </div>
-              <div>
-                <h4 className="font-bold text-sm text-[#1F2328]">
-                  {isAr ? 'أحمد كاظم البغدادي' : 'Ahmed Kazem Al-Baghdadi'}
-                </h4>
-                <p className="text-xs text-[#6B7280]">
-                  {isAr 
-                    ? 'فان رقم 1 - تويوتا هايس (قاطع الكرخ والمنصور)' 
-                    : 'Van #1 - Toyota Hiace (Karkh & Mansoor Sector)'}
-                </p>
+              <div className="bg-white rounded-xl border border-[#E5E7EB] p-3.5">
+                <div className="text-[11px] font-bold text-[#6B7280]">{isAr ? 'الكاش الميداني بالعهدة' : 'Field Cash Custody'}</div>
+                <div className="text-lg font-black font-mono tabular-nums text-[#1F2328] mt-1">
+                  {formatCurrency(totalFleetCash, currency, language)}
+                </div>
+              </div>
+              <div className="bg-white rounded-xl border border-[#E5E7EB] p-3.5">
+                <div className="text-[11px] font-bold text-[#6B7280]">{isAr ? 'مبيعات وتحصيلات اليوم' : "Today's Fleet Volume"}</div>
+                <div className="text-lg font-black font-mono tabular-nums text-[#00A046] mt-1">
+                  {formatCurrency(totalFleetSales, currency, language)}
+                </div>
+              </div>
+              <div className="bg-white rounded-xl border border-[#E5E7EB] p-3.5">
+                <div className="text-[11px] font-bold text-[#6B7280]">{isAr ? 'عمولات المناديب المستحقة' : 'Estimated Commissions'}</div>
+                <div className="text-lg font-black font-mono tabular-nums text-amber-700 mt-1">
+                  {formatCurrency(totalFleetCommissions, currency, language)}
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-[#E5E7EB]">
-              <div>
-                {isAr ? 'الكاش المحصل حالياً: ' : 'Current Custody Cash: '}
-                <strong className="font-mono text-[#00A046]">{formatCurrency(1450000, currency, language)}</strong>
+            {/* Pending Van Restock / Load Requests Approval Queue */}
+            {vanLoadRequests.length > 0 && (() => {
+              const pendingReqs = vanLoadRequests.filter((r) => r.status === 'pending_approval');
+              const recentResolvedReqs = vanLoadRequests.filter((r) => r.status !== 'pending_approval').slice(0, 3);
+              return (
+                <div className="bg-white rounded-2xl border border-amber-200 shadow-xs overflow-hidden">
+                  <div className="bg-amber-50/80 border-b border-amber-200 px-4 py-3 flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <Package className="w-4 h-4 text-amber-700" />
+                      <h3 className="text-sm font-black text-[#1F2328]">
+                        {isAr ? 'طلبات تجهيز الفانات (موافقة المورد / المحاسب)' : 'Van Restock Requests (Supplier / Accountant Approval)'}
+                      </h3>
+                      {pendingReqs.length > 0 && (
+                        <span className="text-[10.5px] font-black px-2 py-0.5 rounded-full bg-amber-500 text-white font-mono">
+                          {pendingReqs.length} {isAr ? 'بانتظار الموافقة' : 'Pending'}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] text-[#6B7280]">
+                      {isAr ? 'عند الموافقة تُضاف الأصناف تلقائياً إلى كاشير السائق' : 'Approved items sync automatically to the Van Cashier'}
+                    </span>
+                  </div>
+
+                  <div className="p-4 space-y-3">
+                    {pendingReqs.map((req: any) => {
+                      const adjMap = adjustedLoadQty[req.id] || {};
+                      const dynamicTotal = (req.items || []).reduce((sum: number, item: any) => {
+                        const qty = adjMap[item.barcode] ?? item.requestedQuantity;
+                        return sum + qty * item.unitPriceIQD;
+                      }, 0);
+                      return (
+                        <div key={req.id} className="rounded-xl border border-[#E5E7EB] bg-[#F7F8FA] p-3.5 space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-black text-xs text-[#1F2328]">{req.driverName}</span>
+                                <span className="text-[10.5px] text-[#6B7280]">({req.vanWarehouseName})</span>
+                                <span className="text-[10px] font-mono text-[#6B7280]">{req.id}</span>
+                              </div>
+                              {req.notes && (
+                                <p className="text-[11px] text-amber-800 mt-0.5">{req.notes}</p>
+                              )}
+                            </div>
+                            <div className="text-end">
+                              <div className="text-[10px] text-[#6B7280]">{isAr ? 'إجمالي قيمة التجهيز' : 'Estimated Load Value'}</div>
+                              <div className="text-sm font-black font-mono text-[#00A046] tabular-nums">
+                                {formatCurrency(dynamicTotal, currency, language)}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="bg-white rounded-lg border border-[#E5E7EB] divide-y divide-[#F1F3F5]">
+                            {(req.items || []).map((item: any) => {
+                              const currentQty = adjMap[item.barcode] ?? item.requestedQuantity;
+                              return (
+                                <div key={item.barcode} className="px-3 py-2 flex items-center justify-between gap-3 text-xs">
+                                  <div className="min-w-0">
+                                    <div className="font-bold text-[#1F2328] truncate">{item.productName}</div>
+                                    <div className="text-[10.5px] text-[#6B7280]">
+                                      {item.unit} · {formatCurrency(item.unitPriceIQD, currency, language)}
+                                      {' · '}
+                                      {isAr ? `المطلوب: ${item.requestedQuantity}` : `Req: ${item.requestedQuantity}`}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <label className="text-[10.5px] font-bold text-[#6B7280]">
+                                      {isAr ? 'الكمية المعتمدة:' : 'Approved Qty:'}
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      value={currentQty}
+                                      onChange={(e) => {
+                                        const val = Math.max(0, Number(e.target.value) || 0);
+                                        setAdjustedLoadQty((prev) => ({
+                                          ...prev,
+                                          [req.id]: { ...(prev[req.id] || {}), [item.barcode]: val },
+                                        }));
+                                      }}
+                                      className="w-16 bg-[#F7F8FA] border border-[#E5E7EB] rounded-lg px-2 py-1 text-center font-mono font-bold text-xs"
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              disabled={processingLoadReqId === req.id}
+                              onClick={() => handleRejectLoadRequest(req.id)}
+                              className="px-3.5 py-2 rounded-lg border border-red-200 bg-white hover:bg-red-50 text-red-700 text-xs font-bold cursor-pointer disabled:opacity-50"
+                            >
+                              {isAr ? 'رفض الطلب' : 'Reject'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={processingLoadReqId === req.id}
+                              onClick={() => handleApproveLoadRequest(req.id)}
+                              className="px-4 py-2 rounded-lg bg-[#00A046] hover:bg-[#008a3c] text-white text-xs font-black shadow-xs cursor-pointer disabled:opacity-50"
+                            >
+                              {processingLoadReqId === req.id
+                                ? isAr ? 'جاري التحميل...' : 'Approving...'
+                                : isAr ? 'موافقة وتحميل تلقائي لكاشير الفان' : 'Approve & Auto-Load to Van POS'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {recentResolvedReqs.length > 0 && (
+                      <div className="pt-2 border-t border-[#F1F3F5] space-y-1.5">
+                        <div className="text-[11px] font-bold text-[#6B7280]">
+                          {isAr ? 'آخر طلبات التجهيز المعالجة:' : 'Recently Processed Load Requests:'}
+                        </div>
+                        {recentResolvedReqs.map((req: any) => (
+                          <div key={req.id} className="flex items-center justify-between text-xs bg-[#F7F8FA] px-3 py-2 rounded-lg">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-[#1F2328]">{req.driverName}</span>
+                              <span className="text-[10.5px] text-[#6B7280]">
+                                ({(req.items || []).length} {isAr ? 'أصناف' : 'items'})
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-[#1F2328] tabular-nums">
+                                {formatCurrency(req.totalValueIQD || 0, currency, language)}
+                              </span>
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                  req.status === 'approved'
+                                    ? 'bg-emerald-50 text-[#00A046]'
+                                    : 'bg-red-50 text-red-700'
+                                }`}
+                              >
+                                {req.status === 'approved'
+                                  ? isAr ? 'تم الاعتماد والتحميل' : 'Approved & Loaded'
+                                  : isAr ? 'مرفوض' : 'Rejected'}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Fleet Selector & Add Van Button */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+                {fleetData.map((item) => {
+                  const isSelected = selectedFleet?.driver.id === item.driver.id;
+                  return (
+                    <button
+                      key={item.driver.id}
+                      type="button"
+                      onClick={() => setSelectedDriverId(item.driver.id)}
+                      className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-2 transition cursor-pointer shrink-0 ${
+                        isSelected
+                          ? 'bg-[#00A046] text-white border-[#00A046] shadow-xs'
+                          : 'bg-white text-[#1F2328] border-[#E5E7EB] hover:border-[#00A046]/50'
+                      }`}
+                    >
+                      <Truck className="w-4 h-4" />
+                      <span>{item.driver.name}</span>
+                      <span className={`text-[10px] font-mono ${isSelected ? 'text-emerald-100' : 'text-[#6B7280]'}`}>
+                        ({item.totalRemainingUnits} {isAr ? 'وحدة' : 'u'})
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-              <div>
-                {isAr ? 'حالة الوردية: ' : 'Shift Status: '}
-                <strong className="text-[#15803D]">{isAr ? 'نشطة' : 'Active'}</strong>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => loadFleetData()}
+                  className="p-2 rounded-xl bg-white border border-[#E5E7EB] hover:border-[#00A046] text-[#6B7280] cursor-pointer"
+                  title={isAr ? 'تحديث بيانات الأسطول' : 'Refresh Fleet'}
+                >
+                  <RefreshCw className={`w-4 h-4 ${loadingFleet ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddDriverModal(true)}
+                  className="px-3.5 py-2 rounded-xl bg-[#1F2328] hover:bg-black text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{isAr ? 'إضافة فان / سائق جديد' : 'Add Van / Driver'}</span>
+                </button>
               </div>
             </div>
+
+            {/* Selected Van Detailed Management Workspace */}
+            {selectedFleet && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+                {/* Left 7 Cols: Driver Info + Morning Load-Out + Van Inventory */}
+                <div className="lg:col-span-7 space-y-4">
+                  {/* Driver & Target Card */}
+                  <div className="bg-white rounded-xl border border-[#E5E7EB] p-4 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-xl bg-emerald-50 text-[#00A046] flex items-center justify-center shrink-0">
+                          <Truck className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="font-black text-sm text-[#1F2328]">{selectedFleet.driver.name}</h4>
+                            <span className="text-[10.5px] font-mono text-[#6B7280]">{selectedFleet.driver.vehiclePlate}</span>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                selectedFleet.driver.isActiveShift
+                                  ? 'bg-emerald-50 text-[#00A046]'
+                                  : 'bg-amber-50 text-amber-700'
+                              }`}
+                            >
+                              {selectedFleet.driver.isActiveShift
+                                ? isAr ? 'وردية نشطة' : 'Active Shift'
+                                : isAr ? 'وردية مغلقة' : 'Shift Closed'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-[#6B7280] mt-0.5">
+                            {selectedFleet.driver.vanWarehouseName} · {selectedFleet.driver.vehicleModel}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="text-end">
+                        <div className="text-[10.5px] text-[#6B7280]">{isAr ? 'الكاش بالعهدة الآن' : 'Cash Custody'}</div>
+                        <div className="text-base font-black font-mono tabular-nums text-[#00A046]">
+                          {formatCurrency(selectedFleet.driver.currentCashCollectedIQD || 0, currency, language)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {selectedFleet.commissionSummary && (
+                      <div className="pt-2.5 border-t border-[#E5E7EB] grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                        <div className="sm:col-span-2 space-y-1">
+                          <div className="flex justify-between font-bold">
+                            <span className="text-[#6B7280]">{isAr ? 'نسبة إنجاز الهدف اليومي' : 'Daily Target Progress'}</span>
+                            <span className="font-mono text-[#00A046] tabular-nums">
+                              {selectedFleet.commissionSummary.targetProgressPercent}%
+                            </span>
+                          </div>
+                          <div className="w-full h-2 rounded-full bg-gray-100 overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-[#00A046]"
+                              style={{ width: `${selectedFleet.commissionSummary.targetProgressPercent}%` }}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 sm:justify-end">
+                          <Award className="w-4 h-4 text-amber-600 shrink-0" />
+                          <div>
+                            <div className="text-[10px] text-[#6B7280]">
+                              {isAr ? `العمولة (${selectedFleet.commissionSummary.commissionRatePercent}%)` : 'Commission'}
+                            </div>
+                            <div className="font-mono font-black text-amber-700 tabular-nums">
+                              {formatCurrency(selectedFleet.commissionSummary.estimatedCommissionIQD, currency, language)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Morning Load-Out Form (تحميل بضاعة للفان) */}
+                  <div className="bg-white rounded-xl border border-[#E5E7EB] p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-black text-sm text-[#1F2328] flex items-center gap-1.5">
+                        <Package className="w-4 h-4 text-[#00A046]" />
+                        <span>{isAr ? 'التحميل الصباحي ومخزون الفان المتنقل' : 'Morning Load-Out & Van Stock'}</span>
+                      </h4>
+                      <span className="text-xs font-mono font-bold text-[#6B7280] tabular-nums">
+                        {isAr
+                          ? `محمّل ${selectedFleet.totalLoadedUnits} · مباع ${selectedFleet.totalSoldUnits} · متبقي ${selectedFleet.totalRemainingUnits}`
+                          : `Loaded ${selectedFleet.totalLoadedUnits} · Sold ${selectedFleet.totalSoldUnits} · Left ${selectedFleet.totalRemainingUnits}`}
+                      </span>
+                    </div>
+
+                    <form onSubmit={handleLoadStockToVan} className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs bg-[#F7F8FA] p-3 rounded-xl border border-[#E5E7EB]">
+                      <div className="sm:col-span-7">
+                        <label className="text-[11px] font-bold text-[#6B7280] block mb-1">
+                          {isAr ? 'اختر الصنف لتحميله في الفان:' : 'Select Product to Load:'}
+                        </label>
+                        <select
+                          value={loadBarcode}
+                          onChange={(e) => setLoadBarcode(e.target.value)}
+                          className="w-full bg-white border border-[#E5E7EB] rounded-lg px-2.5 py-2 text-xs font-bold"
+                        >
+                          {fleetCatalog.map((prod) => (
+                            <option key={prod.barcode} value={prod.barcode}>
+                              {prod.nameAr} — {prod.unit} ({prod.defaultPriceIQD.toLocaleString()} د.ع)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="text-[11px] font-bold text-[#6B7280] block mb-1">
+                          {isAr ? 'الكمية:' : 'Qty:'}
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          required
+                          value={loadQuantity}
+                          onChange={(e) => setLoadQuantity(e.target.value)}
+                          className="w-full bg-white border border-[#E5E7EB] rounded-lg px-2.5 py-2 font-mono font-bold text-xs"
+                        />
+                      </div>
+                      <div className="sm:col-span-3 flex items-end">
+                        <button
+                          type="submit"
+                          disabled={isLoadingStock}
+                          className="w-full py-2 px-3 rounded-lg bg-[#00A046] hover:bg-[#008a3c] disabled:bg-gray-300 text-white font-bold text-xs cursor-pointer"
+                        >
+                          {isAr ? '+ تحميل للفان' : '+ Load Van'}
+                        </button>
+                      </div>
+                    </form>
+
+                    {/* Van Inventory Table */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-[#E5E7EB] text-[#6B7280] text-[11px]">
+                            <th className="py-2 text-start font-bold">{isAr ? 'الصنف' : 'Product'}</th>
+                            <th className="py-2 text-center font-bold">{isAr ? 'محمّل' : 'Loaded'}</th>
+                            <th className="py-2 text-center font-bold">{isAr ? 'مباع' : 'Sold'}</th>
+                            <th className="py-2 text-center font-bold">{isAr ? 'متبقي' : 'Left'}</th>
+                            <th className="py-2 text-end font-bold">{isAr ? 'السعر' : 'Price'}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#F1F3F5] tabular-nums">
+                          {selectedFleet.inventory.map((inv: any) => (
+                            <tr key={inv.id}>
+                              <td className="py-2.5 font-bold text-[#1F2328]">
+                                <div>{inv.productName}</div>
+                                <div className="text-[10px] text-[#6B7280] font-normal">{inv.unit}</div>
+                              </td>
+                              <td className="py-2.5 text-center font-mono">{inv.loadedQuantity}</td>
+                              <td className="py-2.5 text-center font-mono text-[#00A046] font-bold">{inv.soldQuantity}</td>
+                              <td className="py-2.5 text-center font-mono font-black">{inv.remainingQuantity}</td>
+                              <td className="py-2.5 text-end font-mono font-bold">
+                                {formatCurrency(inv.unitPriceIQD, currency, language)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right 5 Cols: Route Stops + Recent Field Transactions + Shift Approvals */}
+                <div className="lg:col-span-5 space-y-4">
+                  {/* Daily Route Assignment */}
+                  <div className="bg-white rounded-xl border border-[#E5E7EB] p-4 space-y-3">
+                    <h4 className="font-black text-sm text-[#1F2328] flex items-center gap-1.5">
+                      <Navigation className="w-4 h-4 text-[#00A046]" />
+                      <span>{isAr ? 'خط السير اليومي للفان' : 'Daily Route Stops'}</span>
+                    </h4>
+
+                    <form onSubmit={handleAssignRouteStop} className="space-y-2 text-xs bg-[#F7F8FA] p-3 rounded-xl border border-[#E5E7EB]">
+                      <div className="flex gap-2">
+                        <select
+                          value={newStopStoreId}
+                          onChange={(e) => setNewStopStoreId(e.target.value)}
+                          className="flex-1 bg-white border border-[#E5E7EB] rounded-lg px-2.5 py-2 text-xs font-bold"
+                        >
+                          {fleetStores.map((st) => (
+                            <option key={st.id} value={st.id}>
+                              {st.name} ({st.district})
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="submit"
+                          className="px-3 py-2 rounded-lg bg-[#00A046] hover:bg-[#008a3c] text-white font-bold text-xs cursor-pointer shrink-0"
+                        >
+                          {isAr ? '+ إضافة' : '+ Add'}
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={newStopNotes}
+                        onChange={(e) => setNewStopNotes(e.target.value)}
+                        placeholder={isAr ? 'توجيه للسائق (مثال: تحصيل آجل أو عرض خاص)...' : 'Driver instruction...'}
+                        className="w-full bg-white border border-[#E5E7EB] rounded-lg px-2.5 py-1.5 text-xs"
+                      />
+                    </form>
+
+                    <div className="divide-y divide-[#F1F3F5] text-xs">
+                      {selectedFleet.routeStops.map((st: any) => (
+                        <div key={st.id} className="py-2.5 flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-bold text-[#1F2328] truncate">
+                              {st.sequence}. {st.storeName}
+                            </div>
+                            <div className="text-[10.5px] text-[#6B7280] flex items-center gap-1">
+                              <MapPin className="w-3 h-3" />
+                              <span className="truncate">{st.district}</span>
+                            </div>
+                          </div>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0 ${
+                              st.status === 'sold'
+                                ? 'bg-emerald-50 text-[#00A046]'
+                                : st.status === 'visited'
+                                ? 'bg-blue-50 text-blue-700'
+                                : 'bg-amber-50 text-amber-700'
+                            }`}
+                          >
+                            {st.status === 'sold'
+                              ? isAr ? 'تم البيع' : 'Sold'
+                              : st.status === 'visited'
+                              ? isAr ? 'تمت الزيارة' : 'Visited'
+                              : isAr ? 'بانتظار الزيارة' : 'Pending'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Shift Close Reports Pending Approval */}
+                  {shiftReports.length > 0 && (
+                    <div className="bg-white rounded-xl border border-[#E5E7EB] p-4 space-y-3">
+                      <h4 className="font-black text-sm text-[#1F2328] flex items-center gap-1.5">
+                        <Wallet className="w-4 h-4 text-amber-600" />
+                        <span>{isAr ? 'تقارير إغلاق الوردية ومطابقة الصندوق' : 'Shift Reconciliation Reports'}</span>
+                      </h4>
+                      <div className="space-y-2.5 text-xs">
+                        {shiftReports.map((rep) => (
+                          <div key={rep.id} className="p-3 rounded-xl border border-[#E5E7EB] bg-[#F7F8FA] space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-[#1F2328]">{rep.driverName}</span>
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                  rep.status === 'settled'
+                                    ? 'bg-emerald-50 text-[#00A046]'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {rep.status === 'settled'
+                                  ? isAr ? 'معتمد ومسوى' : 'Settled'
+                                  : isAr ? 'بانتظار الاعتماد' : 'Pending Approval'}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 font-mono text-[11px] tabular-nums">
+                              <div>
+                                <span className="text-[#6B7280] block">{isAr ? 'المتوقع' : 'Expected'}</span>
+                                <strong>{formatCurrency(rep.expectedCashIQD, currency, language)}</strong>
+                              </div>
+                              <div>
+                                <span className="text-[#6B7280] block">{isAr ? 'الفعلي' : 'Actual'}</span>
+                                <strong>{formatCurrency(rep.actualCashIQD, currency, language)}</strong>
+                              </div>
+                              <div>
+                                <span className="text-[#6B7280] block">{isAr ? 'الفرق' : 'Variance'}</span>
+                                <strong className={rep.cashVarianceIQD < 0 ? 'text-red-600' : 'text-[#00A046]'}>
+                                  {formatCurrency(rep.cashVarianceIQD, currency, language)}
+                                </strong>
+                              </div>
+                            </div>
+                            {rep.status !== 'settled' && (
+                              <button
+                                type="button"
+                                onClick={() => handleSettleShiftReport(rep.id)}
+                                className="w-full py-2 rounded-lg bg-[#00A046] hover:bg-[#008a3c] text-white font-bold text-xs cursor-pointer"
+                              >
+                                {isAr ? 'اعتماد ومطابقة الصندوق وفتح وردية جديدة' : 'Approve & Settle Shift'}
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Recent Van Transactions */}
+                  <div className="bg-white rounded-xl border border-[#E5E7EB] p-4 space-y-2.5">
+                    <h4 className="font-black text-sm text-[#1F2328]">
+                      {isAr ? 'آخر الحركات الميدانية للفان' : 'Recent Van Transactions'}
+                    </h4>
+                    {selectedFleet.transactions.length === 0 ? (
+                      <div className="text-xs text-[#6B7280] py-4 text-center">
+                        {isAr ? 'لا توجد حركات مسجلة لهذا الفان اليوم' : 'No transactions logged today'}
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-[#F1F3F5] text-xs">
+                        {selectedFleet.transactions.slice(0, 5).map((tx: any) => (
+                          <div key={tx.id} className="py-2 flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="font-bold text-[#1F2328] truncate">{tx.storeName}</div>
+                              <div className="text-[10.5px] text-[#6B7280] font-mono">
+                                {tx.receiptNumber} ·{' '}
+                                {tx.type === 'debt_collection'
+                                  ? isAr ? 'تحصيل آجل' : 'Collection'
+                                  : isAr ? 'بيع مباشر' : 'Direct Sale'}
+                              </div>
+                            </div>
+                            <span className="font-mono font-black text-[#00A046] tabular-nums shrink-0">
+                              {formatCurrency(tx.totalAmountIQD, currency, language)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* MODAL: Record Payment Receipt */}
       {showPaymentModal && (
@@ -922,6 +1690,125 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
                   className="px-4 py-2 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700 cursor-pointer"
                 >
                   {isAr ? 'تأكيد تسجيل القيد العكسي' : 'Confirm Reversal Entry'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Register New Van / Driver */}
+      {showAddDriverModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 text-right shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-black text-base text-[#1F2328] flex items-center gap-2">
+                <Truck className="w-5 h-5 text-[#00A046]" />
+                <span>{isAr ? 'إضافة فان ومندوب جديد للأسطول' : 'Register New Van & Driver'}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowAddDriverModal(false)}
+                className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateDriver} className="space-y-3 text-xs">
+              <div>
+                <label className="text-[#6B7280] font-bold block mb-1">{isAr ? 'اسم السائق / المندوب:' : 'Driver Name:'}</label>
+                <input
+                  type="text"
+                  required
+                  value={newDriverName}
+                  onChange={(e) => setNewDriverName(e.target.value)}
+                  placeholder={isAr ? 'مثال: حيدر عباس العبيدي' : 'Driver full name'}
+                  className="w-full bg-[#F7F8FA] border border-[#E5E7EB] rounded-lg p-2.5"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[#6B7280] font-bold block mb-1">{isAr ? 'رقم الهاتف:' : 'Phone:'}</label>
+                  <input
+                    type="text"
+                    value={newDriverPhone}
+                    onChange={(e) => setNewDriverPhone(e.target.value)}
+                    placeholder="+964 770 ..."
+                    className="w-full bg-[#F7F8FA] border border-[#E5E7EB] rounded-lg p-2.5 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-[#6B7280] font-bold block mb-1">{isAr ? 'رقم لوحة المركبة:' : 'Plate Number:'}</label>
+                  <input
+                    type="text"
+                    required
+                    value={newDriverPlate}
+                    onChange={(e) => setNewDriverPlate(e.target.value)}
+                    placeholder={isAr ? 'بغداد 74512 أ' : 'Baghdad 74512'}
+                    className="w-full bg-[#F7F8FA] border border-[#E5E7EB] rounded-lg p-2.5"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[#6B7280] font-bold block mb-1">{isAr ? 'نوع المركبة:' : 'Vehicle Model:'}</label>
+                  <input
+                    type="text"
+                    value={newDriverModel}
+                    onChange={(e) => setNewDriverModel(e.target.value)}
+                    className="w-full bg-[#F7F8FA] border border-[#E5E7EB] rounded-lg p-2.5"
+                  />
+                </div>
+                <div>
+                  <label className="text-[#6B7280] font-bold block mb-1">{isAr ? 'اسم القاطع / الفان:' : 'Sector / Van Name:'}</label>
+                  <input
+                    type="text"
+                    value={newDriverSector}
+                    onChange={(e) => setNewDriverSector(e.target.value)}
+                    placeholder={isAr ? 'فان 3 - الأعظمية' : 'Van #3 - Sector'}
+                    className="w-full bg-[#F7F8FA] border border-[#E5E7EB] rounded-lg p-2.5"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[#6B7280] font-bold block mb-1">{isAr ? 'الهدف اليومي (د.ع):' : 'Daily Target (IQD):'}</label>
+                  <input
+                    type="number"
+                    value={newDriverTarget}
+                    onChange={(e) => setNewDriverTarget(e.target.value)}
+                    className="w-full bg-[#F7F8FA] border border-[#E5E7EB] rounded-lg p-2.5 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-[#6B7280] font-bold block mb-1">{isAr ? 'نسبة العمولة (%):' : 'Commission (%):'}</label>
+                  <input
+                    type="number"
+                    step="0.25"
+                    value={newDriverCommission}
+                    onChange={(e) => setNewDriverCommission(e.target.value)}
+                    className="w-full bg-[#F7F8FA] border border-[#E5E7EB] rounded-lg p-2.5 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddDriverModal(false)}
+                  className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-bold cursor-pointer"
+                >
+                  {isAr ? 'إلغاء' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-[#00A046] hover:bg-[#008a3c] text-white font-bold cursor-pointer"
+                >
+                  {isAr ? 'حفظ وتسجيل الفان' : 'Save & Register Van'}
                 </button>
               </div>
             </form>
