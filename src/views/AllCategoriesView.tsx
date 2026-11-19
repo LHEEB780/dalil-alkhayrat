@@ -1,7 +1,7 @@
 import React from 'react';
 import { ArrowRight, ArrowLeft, LayoutGrid, ShoppingBag } from 'lucide-react';
 import { Language, ProductWithOffers } from '../types/index.ts';
-import { WHOLESALE_CATEGORIES, WholesaleCategoryItem } from '../data/categories.ts';
+import { GROCERY_DEPARTMENTS, WholesaleCategoryItem, resolveCategoryKey } from '../data/categories.ts';
 
 interface AllCategoriesViewProps {
   products: ProductWithOffers[];
@@ -23,11 +23,13 @@ export const AllCategoriesView: React.FC<AllCategoriesViewProps> = ({
   const isAr = language === 'ar';
 
   const getCategoryCount = (cat: WholesaleCategoryItem) => {
+    const targetKey = resolveCategoryKey(cat.categoryKey);
     return products.filter((p) => {
+      const prodKey = resolveCategoryKey(p.category);
       if (cat.subCategoryKey) {
-        return p.category === cat.categoryKey && p.subCategory === cat.subCategoryKey;
+        return prodKey === targetKey && p.subCategory === cat.subCategoryKey;
       }
-      return p.category === cat.categoryKey;
+      return prodKey === targetKey;
     }).length;
   };
 
@@ -50,7 +52,7 @@ export const AllCategoriesView: React.FC<AllCategoriesViewProps> = ({
 
         <div className="flex items-center gap-2.5">
           <span className="text-xs font-semibold text-[#6B7280]">
-            {isAr ? `${WHOLESALE_CATEGORIES.length} قسماً متاحاً` : `${WHOLESALE_CATEGORIES.length} Categories`}
+            {isAr ? `${GROCERY_DEPARTMENTS.length} قسماً متاحاً` : `${GROCERY_DEPARTMENTS.length} Categories`}
           </span>
 
           {onOpenCart && (
@@ -92,7 +94,7 @@ export const AllCategoriesView: React.FC<AllCategoriesViewProps> = ({
 
         {/* 3-Column Mobile / Multi-Column Desktop Category Tiles Grid with LARGER Product Images */}
         <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-4">
-          {WHOLESALE_CATEGORIES.map((cat) => {
+          {GROCERY_DEPARTMENTS.map((cat) => {
             const count = getCategoryCount(cat);
             return (
               <button

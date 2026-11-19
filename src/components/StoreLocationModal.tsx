@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   MapPin, 
   X, 
@@ -7,11 +7,39 @@ import {
   Building2, 
   Check, 
   Search,
-  CheckCircle2,
-  AlertCircle
+  CheckCircle2
 } from 'lucide-react';
 import { StoreDistrict, BAGHDAD_DISTRICTS } from '../data/nearbySuppliers.ts';
 import { Language } from '../types/index.ts';
+import { translations } from '../utils/translations.ts';
+
+interface GeoAreaNode {
+  id: string;
+  districtId: string;
+  governorateId: string;
+  deliveryZoneId: string;
+  deliveryZoneNameAr?: string;
+  deliveryZoneNameEn?: string;
+  nameAr: string;
+  nameEn: string;
+  lat: number;
+  lng: number;
+}
+
+interface GeoDistrictNode {
+  id: string;
+  governorateId: string;
+  nameAr: string;
+  nameEn: string;
+  areas: GeoAreaNode[];
+}
+
+interface GeoGovernorateNode {
+  id: string;
+  nameAr: string;
+  nameEn: string;
+  districts: GeoDistrictNode[];
+}
 
 interface StoreLocationModalProps {
   isOpen: boolean;
@@ -29,17 +57,112 @@ export const StoreLocationModal: React.FC<StoreLocationModalProps> = ({
   language = 'ar'
 }) => {
   const isAr = language === 'ar';
+  const t = translations[language];
   const [searchQuery, setSearchQuery] = useState('');
   const [isDetectingGPS, setIsDetectingGPS] = useState(false);
   const [gpsMessage, setGpsMessage] = useState<string | null>(null);
 
+  const [governorates, setGovernorates] = useState<GeoGovernorateNode[]>([]);
+  const [selectedGovId, setSelectedGovId] = useState<string>(currentDistrict.governorateId || 'gov_baghdad');
+  const [selectedDistId, setSelectedDistId] = useState<string>(currentDistrict.districtId || '');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    fetch('/api/geo/governorates')
+      .then((res) => res.json())
+      .then((json) => {
+        if (cancelled || !json?.success || !Array.isArray(json.data)) return;
+        setGovernorates(json.data);
+        const matchedGov = json.data.find((g: GeoGovernorateNode) => g.id === currentDistrict.governorateId)
+          || json.data.find((g: GeoGovernorateNode) => g.districts.some((d) => d.areas.some((a) => a.id === currentDistrict.id)))
+          || json.data[0];
+        if (matchedGov) {
+          setSelectedGovId(matchedGov.id);
+          const matchedDist = matchedGov.districts.find((d: GeoDistrictNode) => d.id === currentDistrict.districtId)
+            || matchedGov.districts.find((d: GeoDistrictNode) => d.areas.some((a) => a.id === currentDistrict.id))
+            || matchedGov.districts[0];
+          setSelectedDistId(matchedDist ? matchedDist.id : '');
+        }
+      })
+      .catch(() => {
+        // Fallback to BAGHDAD_DISTRICTS if API is unavailable
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, currentDistrict.id, currentDistrict.governorateId, currentDistrict.districtId]);
+
+  const allMappedAreas = useMemo<StoreDistrict[]>(() => {
+    if (governorates.length === 0) return BAGHDAD_DISTRICTS;
+    const list: StoreDistrict[] = [];
+    for (const gov of governorates) {
+      for (const dist of gov.districts) {
+        for (const area of dist.areas) {
+          list.push({
+            id: area.id,
+            nameAr: area.nameAr,
+            nameEn: area.nameEn,
+            cityAr: gov.nameAr,
+            cityEn: gov.nameEn,
+            lat: area.lat,
+            lng: area.lng,
+            governorateId: gov.id,
+            districtId: dist.id,
+            deliveryZoneId: area.deliveryZoneId,
+            deliveryZoneNameAr: area.deliveryZoneNameAr,
+            deliveryZoneNameEn: area.deliveryZoneNameEn
+          });
+        }
+      }
+    }
+    return list.length > 0 ? list : BAGHDAD_DISTRICTS;
+  }, [governorates]);
+
+  const activeGov = useMemo(
+    () => governorates.find((g) => g.id === selectedGovId) || governorates[0],
+    [governorates, selectedGovId]
+  );
+
+  const activeDist = useMemo(
+    () => activeGov?.districts.find((d) => d.id === selectedDistId) || activeGov?.districts[0],
+    [activeGov, selectedDistId]
+  );
+
   if (!isOpen) return null;
 
-  const filteredDistricts = BAGHDAD_DISTRICTS.filter(d => 
-    d.nameAr.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    d.nameEn.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    d.cityAr.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const displayedAreas: StoreDistrict[] = trimmedQuery
+    ? allMappedAreas.filter(
+        (d) =>
+          d.nameAr.toLowerCase().includes(trimmedQuery) ||
+          d.nameEn.toLowerCase().includes(trimmedQuery) ||
+          d.cityAr.toLowerCase().includes(trimmedQuery) ||
+          d.cityEn.toLowerCase().includes(trimmedQuery) ||
+          (d.deliveryZoneNameAr || '').toLowerCase().includes(trimmedQuery)
+      )
+    : activeGov && activeDist
+    ? activeDist.areas.map((area) => ({
+        id: area.id,
+        nameAr: area.nameAr,
+        nameEn: area.nameEn,
+        cityAr: activeGov.nameAr,
+        cityEn: activeGov.nameEn,
+        lat: area.lat,
+        lng: area.lng,
+        governorateId: activeGov.id,
+        districtId: activeDist.id,
+        deliveryZoneId: area.deliveryZoneId,
+        deliveryZoneNameAr: area.deliveryZoneNameAr,
+        deliveryZoneNameEn: area.deliveryZoneNameEn
+      }))
+    : BAGHDAD_DISTRICTS;
+
+  const handleSelectGov = (govId: string) => {
+    setSelectedGovId(govId);
+    const gov = governorates.find((g) => g.id === govId);
+    setSelectedDistId(gov?.districts[0]?.id || '');
+  };
 
   const handleDetectGPS = () => {
     setIsDetectingGPS(true);
@@ -54,14 +177,13 @@ export const StoreLocationModal: React.FC<StoreLocationModalProps> = ({
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setIsDetectingGPS(false);
-        // Find closest district in Baghdad
         const userLat = position.coords.latitude;
         const userLng = position.coords.longitude;
         
-        let closest = BAGHDAD_DISTRICTS[0];
+        let closest = allMappedAreas[0] || BAGHDAD_DISTRICTS[0];
         let minDiff = 999999;
 
-        BAGHDAD_DISTRICTS.forEach(dist => {
+        allMappedAreas.forEach(dist => {
           const diff = Math.hypot(dist.lat - userLat, dist.lng - userLng);
           if (diff < minDiff) {
             minDiff = diff;
@@ -75,9 +197,8 @@ export const StoreLocationModal: React.FC<StoreLocationModalProps> = ({
           onClose();
         }, 1200);
       },
-      (error) => {
+      () => {
         setIsDetectingGPS(false);
-        // Graceful fallback to default Mansoor district if denied
         setGpsMessage(isAr ? 'تم استخدام موقع متجرك الافتراضي في المنصور، بغداد' : 'Used default store location in Mansoor, Baghdad');
       },
       { timeout: 7000, enableHighAccuracy: true }
@@ -139,12 +260,12 @@ export const StoreLocationModal: React.FC<StoreLocationModalProps> = ({
           </div>
         )}
 
-        {/* District Search & Selection */}
-        <div className="p-4 border-b border-[#E5E7EB]">
+        {/* District Search & Hierarchical Selectors (Governorate -> District -> Area) */}
+        <div className="p-4 border-b border-[#E5E7EB] space-y-3">
           <div className="relative">
             <input
               type="text"
-              placeholder={isAr ? 'ابحث عن منطقتك: المنصور، الكرادة، الشورجة، جميلة...' : 'Search district: Mansoor, Karrada, Shorja...'}
+              placeholder={isAr ? 'ابحث عن منطقتك: النجف، كربلاء، الحلة، المنصور، الكرادة...' : 'Search area: Najaf, Karbala, Hilla, Mansoor, Karrada...'}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className={`w-full bg-[#F7F8FA] border border-[#E5E7EB] rounded-xl py-2.5 ${
@@ -153,11 +274,49 @@ export const StoreLocationModal: React.FC<StoreLocationModalProps> = ({
             />
             <Search className={`w-4 h-4 text-[#6B7280] absolute ${isAr ? 'right-3' : 'left-3'} top-3`} />
           </div>
+
+          {!trimmedQuery && governorates.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-[11px] font-bold text-[#6B7280] mb-1">
+                  {t.geoGovernorate}
+                </label>
+                <select
+                  value={activeGov?.id || ''}
+                  onChange={(e) => handleSelectGov(e.target.value)}
+                  className="w-full bg-[#F7F8FA] border border-[#E5E7EB] rounded-xl px-3 py-2 text-xs font-bold text-[#1F2328] focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#00A046]"
+                >
+                  {governorates.map((gov) => (
+                    <option key={gov.id} value={gov.id}>
+                      {isAr ? gov.nameAr : gov.nameEn}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-[#6B7280] mb-1">
+                  {t.geoDistrict}
+                </label>
+                <select
+                  value={activeDist?.id || ''}
+                  onChange={(e) => setSelectedDistId(e.target.value)}
+                  className="w-full bg-[#F7F8FA] border border-[#E5E7EB] rounded-xl px-3 py-2 text-xs font-bold text-[#1F2328] focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#00A046]"
+                >
+                  {(activeGov?.districts || []).map((dist) => (
+                    <option key={dist.id} value={dist.id}>
+                      {isAr ? dist.nameAr : dist.nameEn}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Districts List */}
+        {/* Areas List */}
         <div className="p-4 overflow-y-auto space-y-2 flex-1 max-h-72">
-          {filteredDistricts.map((district) => {
+          {displayedAreas.map((district) => {
             const isSelected = district.id === currentDistrict.id;
 
             return (
@@ -184,7 +343,10 @@ export const StoreLocationModal: React.FC<StoreLocationModalProps> = ({
                       {isAr ? district.nameAr : district.nameEn}
                     </h4>
                     <span className="text-[11px] text-[#6B7280]">
-                      {isAr ? district.cityAr : district.cityEn} • العراق
+                      {isAr ? district.cityAr : district.cityEn}
+                      {district.deliveryZoneNameAr
+                        ? ` • ${isAr ? district.deliveryZoneNameAr : district.deliveryZoneNameEn}`
+                        : ` • ${isAr ? 'العراق' : 'Iraq'}`}
                     </span>
                   </div>
                 </div>
@@ -221,3 +383,4 @@ export const StoreLocationModal: React.FC<StoreLocationModalProps> = ({
     </div>
   );
 };
+

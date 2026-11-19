@@ -23,7 +23,12 @@ import {
   StorePOSReturnRecord,
   CreditUpgradeRequest,
   SupplierReview,
-  SupplierReviewSummary
+  SupplierReviewSummary,
+  Governorate,
+  District,
+  Area,
+  DeliveryZone,
+  Brand
 } from './types.ts';
 import {
   initialProducts,
@@ -40,10 +45,32 @@ import {
   initialSubOrders,
   initialCollectivePools,
   initialPosters,
-  initialStorePOSSales
+  initialStorePOSSales,
+  initialGovernorates,
+  initialDistricts,
+  initialAreas,
+  initialDeliveryZones,
+  initialBrands
 } from './seed.ts';
 
+const SERVER_CATEGORY_ALIASES: Record<string, string> = {
+  'قهوة ومشروبات ساخنة': 'شاي وقهوة',
+  'أرز وحبوب': 'مواد غذائية أساسية',
+  'زيوت وسمن': 'زيوت وسمن ودهون',
+  'ألبان وأجبان': 'ألبان وبيض',
+  'منظفات وعناية': 'منظفات',
+  'معلبات ومخللات': 'معلبات وأغذية محفوظة',
+  'سكر ومحليات': 'مواد غذائية أساسية',
+  'مشروبات وشاي': 'مشروبات',
+  'مكرونة وشعرية': 'مواد غذائية أساسية'
+};
+
 class AppDataStore {
+  governorates: Governorate[] = [...initialGovernorates];
+  districts: District[] = [...initialDistricts];
+  areas: Area[] = [...initialAreas];
+  deliveryZones: DeliveryZone[] = [...initialDeliveryZones];
+  brands: Brand[] = [...initialBrands];
   products: UnifiedProduct[] = [...initialProducts];
   suppliers: SupplierProfile[] = [...initialSuppliers];
   offers: SupplierOffer[] = [...initialOffers];
@@ -187,27 +214,107 @@ class AppDataStore {
     }
   ];
 
+  // ================= GEOGRAPHIC HIERARCHY & ZONES =================
+  getGovernoratesHierarchy() {
+    return this.governorates.map(gov => {
+      const govZones = this.deliveryZones.filter(z => z.governorateId === gov.id);
+      const govDistricts = this.districts
+        .filter(d => d.governorateId === gov.id)
+        .map(dist => {
+          const distAreas = this.areas
+            .filter(a => a.districtId === dist.id)
+            .map(area => {
+              const zone = govZones.find(z => z.id === area.deliveryZoneId);
+              return {
+                ...area,
+                deliveryZoneNameAr: zone?.nameAr || '',
+                deliveryZoneNameEn: zone?.nameEn || ''
+              };
+            });
+          return {
+            ...dist,
+            areas: distAreas
+          };
+        });
+      return {
+        ...gov,
+        districts: govDistricts,
+        deliveryZones: govZones
+      };
+    });
+  }
+
+  getDeliveryZones(governorateId?: string): DeliveryZone[] {
+    if (governorateId) {
+      return this.deliveryZones.filter(z => z.governorateId === governorateId);
+    }
+    return this.deliveryZones;
+  }
+
+  getSuppliersByZone(deliveryZoneId?: string): SupplierProfile[] {
+    if (!deliveryZoneId) return this.suppliers;
+    return this.suppliers.filter(s => s.serviceZoneIds.includes(deliveryZoneId));
+  }
+
   // ================= PRODUCTS & OFFERS =================
-  getProductsWithOffers(params?: { category?: string; query?: string; barcode?: string }) {
+  getProductsWithOffers(params?: { category?: string; query?: string; barcode?: string; deliveryZoneId?: string }) {
     let result = this.products;
 
     if (params?.barcode) {
       result = result.filter(p => p.barcode === params.barcode);
     }
     if (params?.category && params.category !== 'الكل') {
-      result = result.filter(p => p.category === params.category);
+      const resolvedCat = SERVER_CATEGORY_ALIASES[params.category] || params.category;
+      result = result.filter(p => p.category === params.category || p.category === resolvedCat);
     }
     if (params?.query) {
       const q = params.query.toLowerCase().trim();
-      result = result.filter(p => 
-        p.nameAr.toLowerCase().includes(q) ||
-        p.brand.toLowerCase().includes(q) ||
-        p.barcode.includes(q)
-      );
+      const BILINGUAL_SUBCATEGORY_KEYWORDS: Record<string, string[]> = {
+        'أرز': ['rice', 'basmati', 'anbar', 'long grain', 'mahmood rice'],
+        'سكر ومحليات': ['sugar', 'white sugar', 'cane sugar', 'sweeteners', 'brown sugar', 'stevia'],
+        'طحين ونشويات': ['flour', 'wheat flour', 'starch', 'cornstarch'],
+        'بقوليات': ['lentils', 'chickpeas', 'beans', 'pulses', 'legumes'],
+        'مكرونة وشعرية ونودلز': ['pasta', 'spaghetti', 'vermicelli', 'noodles', 'macaroni', 'barilla', 'indomie'],
+        'زيت دوار الشمس': ['sunflower oil', 'cooking oil', 'afia', 'vegetable oil', 'oil'],
+        'معجون وصلصة الطماطم': ['tomato paste', 'tomato sauce', 'crushed tomatoes'],
+        'حليب بودرة ومبخر ومكثف': ['milk powder', 'nido', 'evaporated milk', 'condensed milk', 'milk', 'dairy'],
+        'أجبان': ['cheese', 'mozzarella', 'cheddar', 'feta', 'kiri', 'puck', 'dairy'],
+        'بطاطا مجمدة': ['french fries', 'frozen potatoes', 'fries', 'wedges', 'frozen'],
+        'مياه معدنية': ['mineral water', 'water', 'bottled water', 'al-waha', 'aquafina', 'beverages', 'drinks'],
+        'شاي أسود': ['black tea', 'ceylon tea', 'tea', 'mahmood tea', 'ahmad tea'],
+        'قهوة عربية وتركية': ['arabic coffee', 'turkish coffee', 'coffee', 'cardamom', 'al-ameed'],
+        'حبوب كاملة': ['ground coffee', 'coffee beans', 'whole beans', 'espresso', 'lavazza', 'coffee'],
+        'القهوة المقطرة': ['drip coffee', 'filter coffee', 'pour over', 'coffee'],
+        'أرابيكا': ['arabica', 'arabica beans', 'coffee'],
+        'سريعة التحضير': ['instant coffee', 'nescafe', '3 in 1', 'coffee'],
+        'كبسولات سريعة': ['coffee capsules', 'coffee pods', 'nespresso', 'dolce gusto', 'espresso', 'coffee'],
+        'منظفات الغسيل': ['laundry', 'detergent', 'washing powder', 'tide', 'ariel', 'cleaning'],
+        'منظفات الأطباق': ['dishwashing', 'dish soap', 'fairy', 'pril', 'cleaning']
+      };
+      result = result.filter(p => {
+        const subKws = p.subCategory ? (BILINGUAL_SUBCATEGORY_KEYWORDS[p.subCategory] || []) : [];
+        return (
+          p.nameAr.toLowerCase().includes(q) ||
+          (p.nameEn ? p.nameEn.toLowerCase().includes(q) : false) ||
+          p.brand.toLowerCase().includes(q) ||
+          p.category.toLowerCase().includes(q) ||
+          (p.subCategory ? p.subCategory.toLowerCase().includes(q) : false) ||
+          p.barcode.includes(q) ||
+          subKws.some(kw => kw.includes(q))
+        );
+      });
     }
 
-    return result.map(product => {
-      const productOffers = this.offers.filter(o => o.barcode === product.barcode);
+    const eligibleSupplierIds = params?.deliveryZoneId
+      ? new Set(this.getSuppliersByZone(params.deliveryZoneId).map(s => s.id))
+      : null;
+
+    const mapped = result.map(product => {
+      const productOffers = this.offers.filter(o => {
+        if (o.barcode !== product.barcode) return false;
+        if (eligibleSupplierIds && !eligibleSupplierIds.has(o.supplierId)) return false;
+        return true;
+      });
       // Sort offers: lowest price first
       productOffers.sort((a, b) => a.priceIQD - b.priceIQD);
 
@@ -229,6 +336,11 @@ class AppDataStore {
         fastestDeliveryDays
       };
     });
+
+    if (eligibleSupplierIds) {
+      return mapped.filter(p => p.offers.length > 0);
+    }
+    return mapped;
   }
 
   // ================= CREDIT & LEDGER =================
@@ -437,9 +549,23 @@ class AppDataStore {
     }[];
     paymentMethod: PaymentMethod;
     notes?: string;
+    deliveryZoneId?: string;
   }): ParentOrder {
     const store = this.stores.find(s => s.id === params.storeId);
     if (!store) throw new Error('Store profile not found');
+
+    // Validate delivery zone coverage before deducting any stock
+    if (params.deliveryZoneId) {
+      for (const reqItem of params.items) {
+        const offer = this.offers.find(o => o.id === reqItem.offerId);
+        if (offer) {
+          const supplier = this.suppliers.find(s => s.id === offer.supplierId);
+          if (supplier && !supplier.serviceZoneIds.includes(params.deliveryZoneId)) {
+            throw new Error(`المورد (${supplier.companyName}) لا يغطي منطقة التوصيل المختارة حالياً`);
+          }
+        }
+      }
+    }
 
     // Group items by supplier
     const supplierGroups: Record<string, {

@@ -14,8 +14,9 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { CartItem, Currency, Language } from '../types/index.ts';
+import { StoreDistrict } from '../data/nearbySuppliers.ts';
 import { formatCurrency } from '../utils/format.ts';
-import { getLocalizedText } from '../utils/translations.ts';
+import { translations } from '../utils/translations.ts';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -27,6 +28,8 @@ interface CartDrawerProps {
   onClearCart: () => void;
   onOrderSuccess: (orderData: any) => void;
   language?: Language;
+  currentDistrict?: StoreDistrict;
+  suppliers?: { id: string; serviceZoneIds?: string[] }[];
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
@@ -38,9 +41,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onRemoveItem,
   onClearCart,
   onOrderSuccess,
-  language = 'ar'
+  language = 'ar',
+  currentDistrict,
+  suppliers = []
 }) => {
   const isAr = language === 'ar';
+  const t = translations[language];
   const [paymentMethod, setPaymentMethod] = useState<'cod' | 'credit' | 'wallet' | 'online'>('credit');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -78,8 +84,29 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const supplierGroups = Object.values(groupedBySupplier);
   const totalAmountIQD = cartItems.reduce((sum, item) => sum + item.offer.priceIQD * item.quantity, 0);
 
+  const isSupplierServingZone = (supplierId: string): boolean => {
+    const activeZoneId = currentDistrict?.deliveryZoneId;
+    if (!activeZoneId) return true;
+    const supp = suppliers.find((s) => s.id === supplierId);
+    if (!supp || !Array.isArray(supp.serviceZoneIds)) return true;
+    return supp.serviceZoneIds.includes(activeZoneId);
+  };
+
+  const unsupportedSupplierIds = new Set(
+    supplierGroups
+      .filter((g) => !isSupplierServingZone(g.supplierId))
+      .map((g) => g.supplierId)
+  );
+  const hasUnsupportedSuppliers = unsupportedSupplierIds.size > 0;
+
+  const handleRemoveSupplierItems = (supplierId: string) => {
+    cartItems
+      .filter((item) => item.offer.supplierId === supplierId)
+      .forEach((item) => onRemoveItem(item.offer.id));
+  };
+
   const handleCheckout = async () => {
-    if (cartItems.length === 0) return;
+    if (cartItems.length === 0 || hasUnsupportedSuppliers) return;
     setIsSubmitting(true);
     setErrorMessage(null);
 
@@ -92,7 +119,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           quantity: item.quantity
         })),
         paymentMethod,
-        notes
+        notes,
+        deliveryZoneId: currentDistrict?.deliveryZoneId
       };
 
       const res = await fetch('/api/orders', {
@@ -180,19 +208,37 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </div>
 
               {/* Grouped Supplier Orders */}
-              {supplierGroups.map((group) => (
-                <div key={group.supplierId} className="border border-[#E5E7EB] rounded-xl overflow-hidden bg-white shadow-xs">
+              {supplierGroups.map((group) => {
+                const isUnsupported = unsupportedSupplierIds.has(group.supplierId);
+                return (
+                <div key={group.supplierId} className={`border rounded-xl overflow-hidden bg-white shadow-xs ${isUnsupported ? 'border-red-300' : 'border-[#E5E7EB]'}`}>
                   
                   {/* Supplier Sub-Header */}
                   <div className="bg-[#F7F8FA] px-3.5 py-2.5 border-b border-[#E5E7EB] flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Building2 className="w-4 h-4 text-[#00A046]" />
+                      <Building2 className={`w-4 h-4 ${isUnsupported ? 'text-[#B91C1C]' : 'text-[#00A046]'}`} />
                       <span className="font-bold text-xs sm:text-sm text-[#1F2328]">{group.supplierName}</span>
                     </div>
                     <span className="text-xs font-bold text-[#00A046]">
                       {formatCurrency(group.subtotalIQD, currency)}
                     </span>
                   </div>
+
+                  {isUnsupported && (
+                    <div className="px-3.5 py-2.5 bg-red-50 border-b border-red-200 text-red-700 text-xs flex items-center justify-between gap-2">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[#B91C1C]" />
+                        <span>{t.geoSupplierNotServingZone}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveSupplierItems(group.supplierId)}
+                        className="shrink-0 px-2.5 py-1 rounded-lg bg-white border border-red-200 text-red-700 font-bold text-[11px] hover:bg-red-100 transition cursor-pointer"
+                      >
+                        {t.geoRemoveSupplierItems}
+                      </button>
+                    </div>
+                  )}
 
                   {/* Items in this supplier's sub-order */}
                   <div className="divide-y divide-[#E5E7EB] p-3 space-y-3">
@@ -250,7 +296,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   </div>
 
                 </div>
-              ))}
+                );
+              })}
 
               {/* Payment Methods Section */}
               <div className="border border-[#E5E7EB] rounded-xl p-4 bg-white">
@@ -370,10 +417,17 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </span>
             </div>
 
+            {hasUnsupportedSuppliers && (
+              <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[#B91C1C]" />
+                <span>{t.geoCartZoneBlockedNotice}</span>
+              </div>
+            )}
+
             <button
               onClick={handleCheckout}
-              disabled={isSubmitting}
-              className="w-full py-3 px-4 rounded-xl bg-[#00A046] text-white font-bold text-sm hover:bg-[#008a3c] disabled:bg-gray-400 transition shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isSubmitting || hasUnsupportedSuppliers}
+              className="w-full py-3 px-4 rounded-xl bg-[#00A046] text-white font-bold text-sm hover:bg-[#008a3c] disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-sm flex items-center justify-center gap-2 cursor-pointer"
             >
               {isSubmitting ? (
                 <span>{isAr ? 'جارٍ المعالجة والتحقق من الأرصدة...' : 'Processing & Verifying Balances...'}</span>

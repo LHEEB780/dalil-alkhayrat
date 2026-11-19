@@ -52,12 +52,16 @@ export interface ProductWithOffers {
   nameAr: string;
   nameEn?: string;
   brand: string;
+  brandId?: string;
   category: string;
   unit: string;
+  packSize?: string;
   packageQuantity: number;
   imageUrl?: string;
   descriptionAr?: string;
   isPerishable: boolean;
+  storageType?: 'ambient' | 'chilled' | 'frozen' | 'dry' | 'controlled';
+  countryOfOrigin?: string;
   standardBarcodeFormat: 'EAN-13' | 'GTIN-14' | 'UPC-A';
   offers: SupplierOfferItem[];
   minPrice: number;

@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react';
 import { LayoutGrid } from 'lucide-react';
 import {
-  WHOLESALE_CATEGORIES,
+  GROCERY_DEPARTMENTS,
   CATEGORY_BRANCHES_MAP,
   CategoryBranchItem,
+  resolveCategoryKey,
 } from '../data/categories';
 import { Language } from '../types';
 
@@ -27,14 +28,16 @@ export function matchesSupplierCategoryAndBranch(
   if (!selectedCategory || selectedCategory === 'الكل') {
     return true;
   }
-  if (item.category !== selectedCategory) {
+  const resolvedSelected = resolveCategoryKey(selectedCategory);
+  const resolvedItemCat = resolveCategoryKey(item.category || '');
+  if (resolvedItemCat !== resolvedSelected) {
     return false;
   }
   if (!selectedBranchId || selectedBranchId === 'all') {
     return true;
   }
 
-  const branches = CATEGORY_BRANCHES_MAP[selectedCategory] || [];
+  const branches = CATEGORY_BRANCHES_MAP[resolvedSelected] || CATEGORY_BRANCHES_MAP[selectedCategory] || [];
   const branch = branches.find((b) => b.id === selectedBranchId);
   if (!branch) return true;
 
@@ -83,15 +86,16 @@ export const SupplierCategorySlider: React.FC<SupplierCategorySliderProps> = ({
     const firstImageByCat = new Map<string, string>();
     for (const item of items) {
       if (item.category) {
-        presentCats.add(item.category);
-        if (!firstImageByCat.has(item.category) && item.imageUrl) {
-          firstImageByCat.set(item.category, item.imageUrl);
+        const resolved = resolveCategoryKey(item.category);
+        presentCats.add(resolved);
+        if (!firstImageByCat.has(resolved) && item.imageUrl) {
+          firstImageByCat.set(resolved, item.imageUrl);
         }
       }
     }
 
-    const uniqueMain = WHOLESALE_CATEGORIES.filter(
-      (c) => !c.subCategoryKey && presentCats.has(c.categoryKey)
+    const uniqueMain = GROCERY_DEPARTMENTS.filter(
+      (c) => presentCats.has(c.categoryKey)
     );
 
     const matchedKeys = new Set(uniqueMain.map((c) => c.categoryKey));
@@ -113,8 +117,9 @@ export const SupplierCategorySlider: React.FC<SupplierCategorySliderProps> = ({
     if (!selectedCategory || selectedCategory === 'الكل') {
       return [];
     }
-    const catItems = items.filter((i) => i.category === selectedCategory);
-    const mapped = CATEGORY_BRANCHES_MAP[selectedCategory] || [];
+    const resolvedSelected = resolveCategoryKey(selectedCategory);
+    const catItems = items.filter((i) => resolveCategoryKey(i.category || '') === resolvedSelected);
+    const mapped = CATEGORY_BRANCHES_MAP[resolvedSelected] || CATEGORY_BRANCHES_MAP[selectedCategory] || [];
     if (mapped.length === 0) {
       // Fallback: build dynamic sub-branches from item.subCategory if available
       const dynamicSubs = Array.from(

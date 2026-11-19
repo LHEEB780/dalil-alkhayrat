@@ -176,6 +176,18 @@ export interface TranslationDictionary {
   oneClickLogin: string;
   fillForm: string;
   formFilled: string;
+
+  // Geographic Hierarchy & Delivery Zones
+  geoGovernorate: string;
+  geoDistrict: string;
+  geoArea: string;
+  geoDeliveryZone: string;
+  geoSelectGovernorate: string;
+  geoSelectDistrict: string;
+  geoSelectArea: string;
+  geoSupplierNotServingZone: string;
+  geoCartZoneBlockedNotice: string;
+  geoRemoveSupplierItems: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -354,7 +366,19 @@ export const translations: Record<Language, TranslationDictionary> = {
     demoAccountsSubtitle: 'بيانات اعتماد واقعية مع أرصدة ومخزون وسجلات لتجربة كل صفة تجارية بنقرة واحدة دون تعبئة يدوي:',
     oneClickLogin: 'دخول بنقرة واحدة',
     fillForm: 'تعبئة النموذج',
-    formFilled: 'تمت التعبئة!'
+    formFilled: 'تمت التعبئة!',
+
+    // Geographic Hierarchy & Delivery Zones
+    geoGovernorate: 'المحافظة',
+    geoDistrict: 'القضاء',
+    geoArea: 'المنطقة',
+    geoDeliveryZone: 'منطقة التوصيل',
+    geoSelectGovernorate: 'اختر المحافظة',
+    geoSelectDistrict: 'اختر القضاء',
+    geoSelectArea: 'اختر المنطقة',
+    geoSupplierNotServingZone: 'هذا المورد لا يغطي منطقة التوصيل المختارة حالياً',
+    geoCartZoneBlockedNotice: 'لا يمكن إرسال الطلب لوجود مورد لا يخدم منطقة التوصيل الحالية. يرجى إزالة منتجاته أو تغيير منطقة التوصيل.',
+    geoRemoveSupplierItems: 'إزالة منتجات هذا المورد'
   },
   en: {
     // Brand & General
@@ -531,7 +555,19 @@ export const translations: Record<Language, TranslationDictionary> = {
     demoAccountsSubtitle: 'Realistic business profiles with active ledgers, inventory, and balances. Test each role in one click without typing:',
     oneClickLogin: 'One-Click Login',
     fillForm: 'Fill Form',
-    formFilled: 'Form Filled!'
+    formFilled: 'Form Filled!',
+
+    // Geographic Hierarchy & Delivery Zones
+    geoGovernorate: 'Governorate',
+    geoDistrict: 'District',
+    geoArea: 'Area',
+    geoDeliveryZone: 'Delivery Zone',
+    geoSelectGovernorate: 'Select Governorate',
+    geoSelectDistrict: 'Select District',
+    geoSelectArea: 'Select Area',
+    geoSupplierNotServingZone: 'This supplier does not serve your selected delivery zone',
+    geoCartZoneBlockedNotice: 'Cannot submit order because one or more suppliers do not serve your delivery zone. Please remove their items or change your delivery zone.',
+    geoRemoveSupplierItems: 'Remove supplier items'
   }
 };
 
@@ -567,16 +603,49 @@ export const itemTranslations: Record<string, string> = {
   'كرتون (12 × 200 غم)': 'Carton (12 × 200g)',
   'كرتون (6 × 1 كغم)': 'Carton (6 × 1kg)',
 
-  // Categories
+  // Categories (Legacy + Full 22-Department Tree)
   'الكل': 'All',
   'أرز وحبوب': 'Rice & Grains',
   'زيوت وسمن': 'Oils & Ghee',
   'ألبان وأجبان': 'Dairy & Cheese',
   'معلبات وبقوليات': 'Canned Goods & Legumes',
+  'معلبات ومخللات': 'Canned & Pickles',
   'شاي ومشروبات': 'Tea & Drinks',
+  'مشروبات وشاي': 'Tea & Beverages',
   'سكر ومحليات': 'Sugar & Sweeteners',
   'معكرونة وباستا': 'Pasta & Noodles',
+  'مكرونة وشعرية': 'Pasta & Noodles',
   'قهوة ومشروبات ساخنة': 'Coffee & Hot Beverages',
+  'منظفات وعناية': 'Cleaning & Care',
+  'مواد غذائية أساسية': 'Pantry Staples',
+  'زيوت وسمن ودهون': 'Oils, Ghee & Fats',
+  'معلبات وأغذية محفوظة': 'Canned & Preserved Foods',
+  'صلصات وتوابل': 'Sauces, Spices & Seasonings',
+  'ألبان وبيض': 'Dairy & Eggs',
+  'مجمدات': 'Frozen Foods',
+  'لحوم ودواجن وأسماك': 'Meat, Poultry & Seafood',
+  'مشروبات': 'Beverages',
+  'شاي وقهوة': 'Tea & Coffee',
+  'حلويات وشوكولاتة': 'Confectionery & Chocolate',
+  'بسكويت ومخبوزات جافة': 'Biscuits & Dry Bakery',
+  'سناكات ومكسرات': 'Snacks & Nuts',
+  'الإفطار والمربى': 'Breakfast & Spreads',
+  'منتجات الأطفال': 'Baby Products',
+  'مواد المخابز والحلويات التجارية': 'Bakery & Pastry Supplies',
+  'مواد المطاعم والمطابخ التجارية': 'Foodservice & Commercial Kitchen',
+  'منظفات': 'Cleaning Products',
+  'عناية شخصية': 'Personal Care',
+  'ورقيات': 'Paper Products',
+  'تعبئة وتغليف': 'Packaging & Disposables',
+  'مستلزمات السوبر ماركت': 'Supermarket Supplies',
+  'مستلزمات المقاهي والمطاعم': 'Café & Restaurant Supplies',
+
+  // Storage Types
+  'ambient': 'Ambient Storage',
+  'chilled': 'Chilled Storage',
+  'frozen': 'Frozen Storage',
+  'dry': 'Dry Storage',
+  'controlled': 'Temperature Controlled',
 
   // Cities
   'بغداد': 'Baghdad',

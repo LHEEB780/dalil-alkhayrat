@@ -36,6 +36,7 @@ import {
   calculateDistanceKm
 } from '../data/nearbySuppliers.ts';
 import { StoreLocationModal } from '../components/StoreLocationModal.tsx';
+import { resolveCategoryKey } from '../data/categories.ts';
 
 interface StoreMarketplaceViewProps {
   products: ProductWithOffers[];
@@ -201,7 +202,13 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
   };
 
   const dynamicSuppliers = useMemo(() => {
-    return WHOLESALE_SUPPLIERS.map((s) => {
+    const eligible = currentDistrict.deliveryZoneId
+      ? WHOLESALE_SUPPLIERS.filter(
+          (s) => !s.serviceZoneIds || s.serviceZoneIds.includes(currentDistrict.deliveryZoneId!)
+        )
+      : WHOLESALE_SUPPLIERS;
+
+    return eligible.map((s) => {
       const dist = calculateDistanceKm(currentDistrict.lat, currentDistrict.lng, s.lat, s.lng);
       return {
         ...s,
@@ -243,36 +250,52 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
   }, [products]);
 
   const coffeeProducts = useMemo(() => {
-    return products.filter((p) => p.category === 'قهوة ومشروبات ساخنة').slice(0, 8);
+    return products
+      .filter((p) => ['شاي وقهوة', 'قهوة ومشروبات ساخنة'].includes(p.category))
+      .slice(0, 8);
   }, [products]);
 
   const pantryStapleProducts = useMemo(() => {
     return products
       .filter((p) =>
-        ['أرز وحبوب', 'زيوت وسمن', 'سكر ومحليات', 'مكرونة وشعرية'].includes(p.category)
+        [
+          'مواد غذائية أساسية',
+          'زيوت وسمن ودهون',
+          'أرز وحبوب',
+          'زيوت وسمن',
+          'سكر ومحليات',
+          'مكرونة وشعرية'
+        ].includes(p.category)
       )
       .slice(0, 8);
   }, [products]);
 
   const teaAndBeverageProducts = useMemo(() => {
-    return products.filter((p) => p.category === 'مشروبات وشاي').slice(0, 8);
+    return products
+      .filter((p) => ['مشروبات', 'مشروبات وشاي'].includes(p.category) || p.subCategory === 'شاي أسود')
+      .slice(0, 8);
   }, [products]);
 
   const dairyAndCannedProducts = useMemo(() => {
     return products
-      .filter((p) => ['ألبان وأجبان', 'معلبات ومخللات'].includes(p.category))
+      .filter((p) =>
+        ['ألبان وبيض', 'معلبات وأغذية محفوظة', 'ألبان وأجبان', 'معلبات ومخللات'].includes(p.category)
+      )
       .slice(0, 8);
   }, [products]);
 
   const cleaningProducts = useMemo(() => {
-    return products.filter((p) => p.category === 'منظفات وعناية').slice(0, 8);
+    return products
+      .filter((p) => ['منظفات', 'منظفات وعناية'].includes(p.category))
+      .slice(0, 8);
   }, [products]);
 
   // Count products per category for the clean All Categories grid
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const p of products) {
-      counts[p.category] = (counts[p.category] || 0) + 1;
+      const canonical = resolveCategoryKey(p.category);
+      counts[canonical] = (counts[canonical] || 0) + 1;
     }
     return counts;
   }, [products]);
@@ -1161,7 +1184,7 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
 
         <div className="grid grid-cols-3 gap-2.5 sm:gap-3.5">
           {allCategoryTiles.map((tile) => {
-            const count = categoryCounts[tile.key] || 0;
+            const count = categoryCounts[resolveCategoryKey(tile.key)] || 0;
             return (
               <button
                 key={tile.key}

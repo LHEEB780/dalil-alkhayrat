@@ -4,14 +4,35 @@ import { askStoreAssistant } from '../services/aiAssistantService.ts';
 
 export const apiRouter = Router();
 
+// ================= 0. GEOGRAPHIC HIERARCHY & DELIVERY ZONES =================
+apiRouter.get('/geo/governorates', (_req: Request, res: Response) => {
+  try {
+    const data = db.getGovernoratesHierarchy();
+    res.json({ success: true, count: data.length, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.get('/geo/zones', (req: Request, res: Response) => {
+  try {
+    const { governorateId } = req.query;
+    const zones = db.getDeliveryZones(governorateId as string | undefined);
+    res.json({ success: true, count: zones.length, data: zones });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // ================= 1. UNIFIED CATALOG & OFFERS =================
 apiRouter.get('/products', (req: Request, res: Response) => {
   try {
-    const { category, query, barcode } = req.query;
+    const { category, query, barcode, deliveryZoneId } = req.query;
     const products = db.getProductsWithOffers({
       category: category as string,
       query: query as string,
-      barcode: barcode as string
+      barcode: barcode as string,
+      deliveryZoneId: deliveryZoneId as string
     });
     res.json({ success: true, count: products.length, data: products });
   } catch (error: any) {
@@ -22,7 +43,8 @@ apiRouter.get('/products', (req: Request, res: Response) => {
 apiRouter.get('/products/:barcode', (req: Request, res: Response) => {
   try {
     const { barcode } = req.params;
-    const items = db.getProductsWithOffers({ barcode });
+    const { deliveryZoneId } = req.query;
+    const items = db.getProductsWithOffers({ barcode, deliveryZoneId: deliveryZoneId as string });
     if (items.length === 0) {
       return res.status(404).json({ success: false, message: 'المنتج غير موجود' });
     }
@@ -32,8 +54,14 @@ apiRouter.get('/products/:barcode', (req: Request, res: Response) => {
   }
 });
 
-apiRouter.get('/suppliers', (_req: Request, res: Response) => {
-  res.json({ success: true, data: db.suppliers });
+apiRouter.get('/suppliers', (req: Request, res: Response) => {
+  try {
+    const { deliveryZoneId } = req.query;
+    const suppliers = db.getSuppliersByZone(deliveryZoneId as string | undefined);
+    res.json({ success: true, count: suppliers.length, data: suppliers });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 });
 
 apiRouter.get('/suppliers/reviews/summary', (_req: Request, res: Response) => {
@@ -88,7 +116,7 @@ apiRouter.get('/stores', (_req: Request, res: Response) => {
 // ================= 2. CART & MULTI-SUPPLIER ORDER SPLIT =================
 apiRouter.post('/orders', (req: Request, res: Response) => {
   try {
-    const { storeId, items, paymentMethod, notes } = req.body;
+    const { storeId, items, paymentMethod, notes, deliveryZoneId } = req.body;
     if (!storeId || !items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ success: false, message: 'بيانات الطلب غير مكتملة' });
     }
@@ -97,7 +125,8 @@ apiRouter.post('/orders', (req: Request, res: Response) => {
       storeId,
       items,
       paymentMethod: paymentMethod || 'cod',
-      notes
+      notes,
+      deliveryZoneId
     });
 
     res.status(201).json({

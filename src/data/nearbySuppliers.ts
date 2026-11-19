@@ -30,6 +30,7 @@ export interface WholesaleSupplier {
   brandsDistributed?: string[];
   category?: string;
   minOrderUSD?: number;
+  serviceZoneIds?: string[];
 }
 
 export interface StoreDistrict {
@@ -40,6 +41,11 @@ export interface StoreDistrict {
   cityEn: string;
   lat: number;
   lng: number;
+  governorateId?: string;
+  districtId?: string;
+  deliveryZoneId?: string;
+  deliveryZoneNameAr?: string;
+  deliveryZoneNameEn?: string;
 }
 
 export const BAGHDAD_DISTRICTS: StoreDistrict[] = [
@@ -50,7 +56,12 @@ export const BAGHDAD_DISTRICTS: StoreDistrict[] = [
     cityAr: 'بغداد',
     cityEn: 'Baghdad',
     lat: 33.3152,
-    lng: 44.3540
+    lng: 44.3540,
+    governorateId: 'gov_baghdad',
+    districtId: 'dist_baghdad_karkh',
+    deliveryZoneId: 'zone_baghdad_karkh',
+    deliveryZoneNameAr: 'نطاق بغداد - الكرخ والمنصور',
+    deliveryZoneNameEn: 'Baghdad - Karkh & Mansoor Zone'
   },
   {
     id: 'karkh_yarmouk',
@@ -59,7 +70,12 @@ export const BAGHDAD_DISTRICTS: StoreDistrict[] = [
     cityAr: 'بغداد',
     cityEn: 'Baghdad',
     lat: 33.3080,
-    lng: 44.3420
+    lng: 44.3420,
+    governorateId: 'gov_baghdad',
+    districtId: 'dist_baghdad_karkh',
+    deliveryZoneId: 'zone_baghdad_karkh',
+    deliveryZoneNameAr: 'نطاق بغداد - الكرخ والمنصور',
+    deliveryZoneNameEn: 'Baghdad - Karkh & Mansoor Zone'
   },
   {
     id: 'shorja',
@@ -68,7 +84,12 @@ export const BAGHDAD_DISTRICTS: StoreDistrict[] = [
     cityAr: 'بغداد',
     cityEn: 'Baghdad',
     lat: 33.3400,
-    lng: 44.3900
+    lng: 44.3900,
+    governorateId: 'gov_baghdad',
+    districtId: 'dist_baghdad_rusafa',
+    deliveryZoneId: 'zone_baghdad_rusafa',
+    deliveryZoneNameAr: 'نطاق بغداد - الرصافة والكرادة',
+    deliveryZoneNameEn: 'Baghdad - Rusafa & Karrada Zone'
   },
   {
     id: 'karrada',
@@ -77,7 +98,12 @@ export const BAGHDAD_DISTRICTS: StoreDistrict[] = [
     cityAr: 'بغداد',
     cityEn: 'Baghdad',
     lat: 33.2980,
-    lng: 44.4250
+    lng: 44.4250,
+    governorateId: 'gov_baghdad',
+    districtId: 'dist_baghdad_rusafa',
+    deliveryZoneId: 'zone_baghdad_rusafa',
+    deliveryZoneNameAr: 'نطاق بغداد - الرصافة والكرادة',
+    deliveryZoneNameEn: 'Baghdad - Rusafa & Karrada Zone'
   },
   {
     id: 'jamila',
@@ -86,7 +112,12 @@ export const BAGHDAD_DISTRICTS: StoreDistrict[] = [
     cityAr: 'بغداد',
     cityEn: 'Baghdad',
     lat: 33.3750,
-    lng: 44.4420
+    lng: 44.4420,
+    governorateId: 'gov_baghdad',
+    districtId: 'dist_baghdad_rusafa',
+    deliveryZoneId: 'zone_baghdad_rusafa',
+    deliveryZoneNameAr: 'نطاق بغداد - الرصافة والكرادة',
+    deliveryZoneNameEn: 'Baghdad - Rusafa & Karrada Zone'
   },
   {
     id: 'bayaa',
@@ -95,7 +126,12 @@ export const BAGHDAD_DISTRICTS: StoreDistrict[] = [
     cityAr: 'بغداد',
     cityEn: 'Baghdad',
     lat: 33.2650,
-    lng: 44.3450
+    lng: 44.3450,
+    governorateId: 'gov_baghdad',
+    districtId: 'dist_baghdad_karkh',
+    deliveryZoneId: 'zone_baghdad_karkh',
+    deliveryZoneNameAr: 'نطاق بغداد - الكرخ والمنصور',
+    deliveryZoneNameEn: 'Baghdad - Karkh & Mansoor Zone'
   },
   {
     id: 'adhamiya',
@@ -104,7 +140,12 @@ export const BAGHDAD_DISTRICTS: StoreDistrict[] = [
     cityAr: 'بغداد',
     cityEn: 'Baghdad',
     lat: 33.3700,
-    lng: 44.3750
+    lng: 44.3750,
+    governorateId: 'gov_baghdad',
+    districtId: 'dist_baghdad_rusafa',
+    deliveryZoneId: 'zone_baghdad_rusafa',
+    deliveryZoneNameAr: 'نطاق بغداد - الرصافة والكرادة',
+    deliveryZoneNameEn: 'Baghdad - Rusafa & Karrada Zone'
   },
   {
     id: 'doura',
@@ -113,7 +154,12 @@ export const BAGHDAD_DISTRICTS: StoreDistrict[] = [
     cityAr: 'بغداد',
     cityEn: 'Baghdad',
     lat: 33.2500,
-    lng: 44.3850
+    lng: 44.3850,
+    governorateId: 'gov_baghdad',
+    districtId: 'dist_baghdad_karkh',
+    deliveryZoneId: 'zone_baghdad_karkh',
+    deliveryZoneNameAr: 'نطاق بغداد - الكرخ والمنصور',
+    deliveryZoneNameEn: 'Baghdad - Karkh & Mansoor Zone'
   },
   {
     id: 'basra_ashar',
@@ -167,7 +213,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     category: 'ألبان وأجبان تبريد',
     logoUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=150&q=80',
     storeImageUrl: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=600&q=80',
-    brandsDistributed: ['بريزيدن', 'لونا', 'المراعي', 'الروابي', 'سنان']
+    brandsDistributed: ['بريزيدن', 'لونا', 'المراعي', 'الروابي', 'سنان'],
+    serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_najaf_center', 'zone_babil_hilla']
   },
   {
     id: 'supp_rafidain',
@@ -200,7 +247,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     category: 'أرز وحبوب',
     logoUrl: 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?auto=format&fit=crop&w=150&q=80',
     storeImageUrl: 'https://images.unsplash.com/photo-1553413077-190dd305871c?auto=format&fit=crop&w=600&q=80',
-    brandsDistributed: ['عافية', 'أرز العنبر العراقي', 'شكر الاتحاد', 'نيدو', 'ألتونسا']
+    brandsDistributed: ['عافية', 'أرز العنبر العراقي', 'شكر الاتحاد', 'نيدو', 'ألتونسا'],
+    serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_najaf_center', 'zone_najaf_kufa', 'zone_karbala_center']
   },
   {
     id: 'supp_nahrain',
@@ -233,7 +281,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     category: 'قهوة وشاي',
     logoUrl: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=150&q=80',
     storeImageUrl: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=600&q=80',
-    brandsDistributed: ['شاي الكوزي', 'قهوة العميد', 'نسكافيه', 'لافازا', 'ديلما']
+    brandsDistributed: ['شاي الكوزي', 'قهوة العميد', 'نسكافيه', 'لافازا', 'ديلما'],
+    serviceZoneIds: ['zone_baghdad_rusafa', 'zone_najaf_center', 'zone_karbala_center', 'zone_karbala_hindiya']
   },
   {
     id: 'supp_babylon',
@@ -266,7 +315,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     category: 'زيوت ودهون',
     logoUrl: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&w=150&q=80',
     storeImageUrl: 'https://images.unsplash.com/photo-1578575437130-527eed3abbec?auto=format&fit=crop&w=600&q=80',
-    brandsDistributed: ['عافية', 'زيت الذرة الشهبندر', 'تونة ألوها', 'معجون المزرعة', 'سمنة شوكة وملعقة']
+    brandsDistributed: ['عافية', 'زيت الذرة الشهبندر', 'تونة ألوها', 'معجون المزرعة', 'سمنة شوكة وملعقة'],
+    serviceZoneIds: ['zone_baghdad_karkh', 'zone_babil_hilla', 'zone_babil_musayyib', 'zone_karbala_hindiya']
   },
   {
     id: 'supp_jamila',
@@ -299,7 +349,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     category: 'أرز وحبوب',
     logoUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=150&q=80',
     storeImageUrl: 'https://images.unsplash.com/photo-1605371924599-2d0365da1ae0?auto=format&fit=crop&w=600&q=80',
-    brandsDistributed: ['أرز محمود', 'طحين صفر تركي', 'سكر الاتحاد', 'عدس كندي', 'فاصولياء بيضاء']
+    brandsDistributed: ['أرز محمود', 'طحين صفر تركي', 'سكر الاتحاد', 'عدس كندي', 'فاصولياء بيضاء'],
+    serviceZoneIds: ['zone_baghdad_rusafa', 'zone_baghdad_karkh', 'zone_babil_hilla', 'zone_babil_musayyib', 'zone_karbala_center']
   },
   {
     id: 'supp_baghdad_canned',
@@ -332,7 +383,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     category: 'معلبات ومؤن',
     logoUrl: 'https://images.unsplash.com/photo-1534723452862-4c874018d66d?auto=format&fit=crop&w=150&q=80',
     storeImageUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80',
-    brandsDistributed: ['حدائق كاليفورنيا', 'أمريكانا', 'لونا', 'المداح', 'بسكويت أولكر']
+    brandsDistributed: ['حدائق كاليفورنيا', 'أمريكانا', 'لونا', 'المداح', 'بسكويت أولكر'],
+    serviceZoneIds: ['zone_baghdad_karkh', 'zone_najaf_center', 'zone_najaf_kufa']
   }
 ];
 

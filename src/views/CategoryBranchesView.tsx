@@ -21,8 +21,10 @@ import {
 } from '../types/index.ts';
 import {
   CATEGORY_BRANCHES_MAP,
-  WHOLESALE_CATEGORIES,
-  CategoryBranchItem
+  GROCERY_DEPARTMENTS,
+  CategoryBranchItem,
+  resolveCategoryKey,
+  matchesProductCategoryKeywords
 } from '../data/categories.ts';
 import { StoreDistrict } from '../data/nearbySuppliers.ts';
 import { getLocalizedText } from '../utils/translations.ts';
@@ -149,25 +151,24 @@ export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
     dragStateRef.current.row = null;
   };
 
-  // Unique main categories for Slider 1
-  const mainCategories = useMemo(() => {
-    const seen = new Set<string>();
-    return WHOLESALE_CATEGORIES.filter((cat) => {
-      if (cat.subCategoryKey || seen.has(cat.categoryKey)) return false;
-      seen.add(cat.categoryKey);
-      return true;
-    });
-  }, []);
+  const resolvedSelectedCategory = useMemo(
+    () => resolveCategoryKey(selectedCategory),
+    [selectedCategory]
+  );
+
+  // Unique main departments for Slider 1 (all 22 departments)
+  const mainCategories = useMemo(() => GROCERY_DEPARTMENTS, []);
 
   const categoryMeta = useMemo(() => {
     return (
-      mainCategories.find((c) => c.categoryKey === selectedCategory) ||
+      mainCategories.find((c) => c.categoryKey === resolvedSelectedCategory) ||
       mainCategories[0]
     );
-  }, [mainCategories, selectedCategory]);
+  }, [mainCategories, resolvedSelectedCategory]);
 
   const branches: CategoryBranchItem[] = useMemo(() => {
     return (
+      CATEGORY_BRANCHES_MAP[resolvedSelectedCategory] ||
       CATEGORY_BRANCHES_MAP[selectedCategory] || [
         {
           id: 'all',
@@ -177,7 +178,7 @@ export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
         }
       ]
     );
-  }, [selectedCategory, categoryMeta.imageUrl]);
+  }, [resolvedSelectedCategory, selectedCategory, categoryMeta.imageUrl]);
 
   const [activeBranchId, setActiveBranchId] = useState<string>(() => {
     if (selectedSubCategory && selectedSubCategory !== 'الكل') {
@@ -231,8 +232,8 @@ export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
     branches.find((b) => b.id === activeBranchId) || branches[0];
 
   const categoryProducts = useMemo(() => {
-    return products.filter((p) => p.category === selectedCategory);
-  }, [products, selectedCategory]);
+    return products.filter((p) => resolveCategoryKey(p.category) === resolvedSelectedCategory);
+  }, [products, resolvedSelectedCategory]);
 
   const displayedProducts = useMemo(() => {
     let list = [...categoryProducts];
@@ -258,7 +259,8 @@ export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
         (p) =>
           p.nameAr.toLowerCase().includes(q) ||
           (p.nameEn && p.nameEn.toLowerCase().includes(q)) ||
-          p.brand.toLowerCase().includes(q)
+          p.brand.toLowerCase().includes(q) ||
+          matchesProductCategoryKeywords(p.category, p.subCategory, q)
       );
     }
 
@@ -405,7 +407,7 @@ export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
             className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none touch-pan-x cursor-grab active:cursor-grabbing"
           >
             {mainCategories.map((cat) => {
-              const isActive = cat.categoryKey === selectedCategory;
+              const isActive = cat.categoryKey === resolvedSelectedCategory;
               return (
                 <button
                   key={cat.id}

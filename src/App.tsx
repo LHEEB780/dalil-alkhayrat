@@ -79,17 +79,33 @@ export default function App() {
       : 'Dalil Al-Khairat | B2B Food & Wholesale Iraq';
   }, [language]);
   
-  // Isolated user session state - defaults to null to show Welcome / Login screen first!
+  const DEFAULT_PLATFORM_ADMIN_SESSION: UserSession = {
+    role: 'admin',
+    name: 'فريق تكامل الأنظمة و API',
+    entityName: 'بوابة المطورين - REST OpenAPI',
+    city: 'بغداد - المقر الرئيسي',
+    badge: 'الإدارة (Admin & API)',
+    phone: 'admin@dalilalkhairat.iq',
+    avatarColor: 'bg-purple-600',
+    entityId: 'admin_platform'
+  };
+
+  // Isolated user session state
   const [userSession, setUserSession] = useState<UserSession | null>(() => {
     try {
+      if (!localStorage.getItem('dalil_switched_to_admin_v1')) {
+        localStorage.setItem('dalil_switched_to_admin_v1', '1');
+        localStorage.setItem('souq_user_session', JSON.stringify(DEFAULT_PLATFORM_ADMIN_SESSION));
+        return DEFAULT_PLATFORM_ADMIN_SESSION;
+      }
       const saved = localStorage.getItem('souq_user_session');
       return saved ? JSON.parse(saved) : null;
     } catch {
-      return null;
+      return DEFAULT_PLATFORM_ADMIN_SESSION;
     }
   });
 
-  const [activeTab, setActiveTabState] = useState<AppTab>('marketplace');
+  const [activeTab, setActiveTabState] = useState<AppTab>('api_docs');
   const [workspaceMode, setWorkspaceMode] = useState<StoreWorkspaceMode>('b2b');
   const [isStoreOpsEnabled, setIsStoreOpsEnabled] = useState<boolean>(() => {
     try {
@@ -247,6 +263,11 @@ export default function App() {
   // Global Store Delivery District & Saved Branches
   const [currentDistrict, setCurrentDistrict] = useState<StoreDistrict>(() => {
     try {
+      const savedObj = localStorage.getItem('dalil_district_obj');
+      if (savedObj) {
+        const parsed = JSON.parse(savedObj) as StoreDistrict;
+        if (parsed?.id && parsed?.nameAr) return parsed;
+      }
       const savedId = localStorage.getItem('dalil_district_id');
       return BAGHDAD_DISTRICTS.find((d) => d.id === savedId) || BAGHDAD_DISTRICTS[0];
     } catch {
@@ -306,6 +327,7 @@ export default function App() {
     setCurrentDistrict(dist);
     try {
       localStorage.setItem('dalil_district_id', dist.id);
+      localStorage.setItem('dalil_district_obj', JSON.stringify(dist));
     } catch {
       // ignore
     }
@@ -350,6 +372,7 @@ export default function App() {
 
   // Data state
   const [products, setProducts] = useState<ProductWithOffers[]>([]);
+  const [allSuppliers, setAllSuppliers] = useState<{ id: string; serviceZoneIds?: string[] }[]>([]);
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('الكل');
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('الكل');
@@ -425,6 +448,9 @@ export default function App() {
       if (searchQuery.trim() && !isCatalogOverviewTab) {
         params.append('query', searchQuery.trim());
       }
+      if (currentDistrict.deliveryZoneId) {
+        params.append('deliveryZoneId', currentDistrict.deliveryZoneId);
+      }
       
       const res = await fetchWithRetry(`/api/products?${params.toString()}`, { signal, retries: 3 });
       if (!res.ok) return;
@@ -477,12 +503,20 @@ export default function App() {
     const controller = new AbortController();
     fetchProducts(controller.signal);
     return () => controller.abort();
-  }, [selectedCategory, searchQuery, activeTab]);
+  }, [selectedCategory, searchQuery, activeTab, currentDistrict.deliveryZoneId]);
 
   useEffect(() => {
     const controller = new AbortController();
     fetchOrders(controller.signal);
     fetchLowStockAlerts(controller.signal);
+    fetchWithRetry('/api/suppliers', { signal: controller.signal, retries: 2 })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (json?.success && Array.isArray(json.data)) {
+          setAllSuppliers(json.data);
+        }
+      })
+      .catch(() => {});
     return () => controller.abort();
   }, [userSession?.entityId]);
 
@@ -754,7 +788,24 @@ export default function App() {
               setActiveTab('category_branches');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            onBackToMarketplace={handleGoBack}
+            onBackToMarketplace={() => {
+              const nextHistory = [...tabHistory];
+              while (
+                nextHistory.length > 0 &&
+                (nextHistory[nextHistory.length - 1] === 'all_categories' ||
+                  nextHistory[nextHistory.length - 1] === 'category_branches')
+              ) {
+                nextHistory.pop();
+              }
+              const targetTab: AppTab =
+                nextHistory.length > 0 ? (nextHistory.pop() as AppTab) : 'marketplace';
+              setTabHistory(nextHistory);
+              setSelectedCategory('الكل');
+              setSelectedSubCategory('الكل');
+              syncWorkspaceForTab(targetTab);
+              setActiveTabState(targetTab);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
           />
         )}
 
@@ -780,11 +831,27 @@ export default function App() {
                 setSelectedCategory('الكل');
                 setSelectedSubCategory('الكل');
               }
-              setActiveTab(branchesReturnTab);
+              setTabHistory((prev) => {
+                const next = [...prev];
+                while (
+                  next.length > 0 &&
+                  (next[next.length - 1] === 'category_branches' ||
+                    next[next.length - 1] === branchesReturnTab)
+                ) {
+                  next.pop();
+                }
+                return next;
+              });
+              syncWorkspaceForTab(branchesReturnTab);
+              setActiveTabState(branchesReturnTab);
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onOpenAllCategories={() => {
-              setActiveTab('all_categories');
+              setTabHistory((prev) =>
+                prev.filter((t) => t !== 'category_branches' && t !== 'all_categories')
+              );
+              syncWorkspaceForTab('all_categories');
+              setActiveTabState('all_categories');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
           />
@@ -1037,6 +1104,8 @@ export default function App() {
           cartItems={cartItems}
           currency={currency}
           language={language}
+          currentDistrict={currentDistrict}
+          suppliers={allSuppliers}
           onUpdateQuantity={handleUpdateCartQuantity}
           onRemoveItem={handleRemoveCartItem}
           onClearCart={handleClearCart}

@@ -23,17 +23,29 @@ export interface CurrencyConfig {
   usdExchangeRate: number; // e.g. 1 USD = 1530 IQD
 }
 
+export type StorageType = 'ambient' | 'chilled' | 'frozen' | 'dry' | 'controlled';
+
+export interface Brand {
+  id: string;
+  nameAr: string;
+  nameEn: string;
+}
+
 export interface UnifiedProduct {
   barcode: string; // Primary Key: EAN/GTIN
   nameAr: string;
   nameEn?: string;
   brand: string;
+  brandId?: string;
   category: string;
   unit: string; // e.g., 'كرتون (12 علبة)', 'شوال (50 كغم)'
+  packSize?: string;
   packageQuantity: number;
   imageUrl?: string;
   descriptionAr?: string;
   isPerishable: boolean;
+  storageType?: StorageType;
+  countryOfOrigin?: string;
   standardBarcodeFormat: 'EAN-13' | 'GTIN-14' | 'UPC-A';
   oldPrice?: number;
   discountPercent?: number;
@@ -85,6 +97,44 @@ export interface StoreProfile {
   createdAt: string;
 }
 
+export interface Governorate {
+  id: string;
+  nameAr: string;
+  nameEn: string;
+  code: string;
+  lat: number;
+  lng: number;
+}
+
+export interface District {
+  id: string;
+  governorateId: string;
+  nameAr: string;
+  nameEn: string;
+  lat: number;
+  lng: number;
+}
+
+export interface Area {
+  id: string;
+  districtId: string;
+  governorateId: string;
+  deliveryZoneId: string;
+  nameAr: string;
+  nameEn: string;
+  lat: number;
+  lng: number;
+}
+
+export interface DeliveryZone {
+  id: string;
+  governorateId: string;
+  nameAr: string;
+  nameEn: string;
+  areaIds: string[];
+  estimatedDeliveryHours: number;
+}
+
 export interface SupplierProfile {
   id: string;
   companyName: string;
@@ -97,6 +147,7 @@ export interface SupplierProfile {
   totalVans: number;
   activeCreditLinesCount: number;
   isVerified: boolean;
+  serviceZoneIds: string[];
   createdAt: string;
 }
 
