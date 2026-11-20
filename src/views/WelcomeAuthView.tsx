@@ -60,7 +60,7 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [selectedRole, setSelectedRole] = useState<Role>('store');
   const [phoneNumber, setPhoneNumber] = useState('0771 555 8899');
-  const [password, setPassword] = useState('mansoor2026');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   
   // Registration specific fields
@@ -290,7 +290,7 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
   const handleSelectRoleForForm = (roleItem: typeof unifiedRoles[0]) => {
     setSelectedRole(roleItem.role);
     setPhoneNumber(roleItem.phone);
-    setPassword(roleItem.pass);
+    setPassword('');
     setShowCustomAuth(true);
   };
 

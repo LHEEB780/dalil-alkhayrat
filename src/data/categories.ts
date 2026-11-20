@@ -634,8 +634,109 @@ export const CATEGORY_BRANCHES_MAP: Record<string, CategoryBranchItem[]> = (() =
 })();
 
 /**
+ * Normalizes text for bilingual search: lowercases English and strips Arabic diacritics/tatweel.
+ */
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
+    .trim();
+}
+
+function tokenizeSearchWords(value: string): string[] {
+  const normalized = normalizeSearchText(value);
+  if (!normalized) return [];
+  return normalized.split(/[\s\-_/&،,()+.]+/).filter(Boolean);
+}
+
+function stripArabicAl(word: string): string {
+  return word.length > 2 && word.startsWith('ال') ? word.slice(2) : word;
+}
+
+/**
+ * Scores how well a single field text matches a normalized query:
+ * - 3: exact full-field match (or Arabic ال-stripped full match)
+ * - 2: every query token matches a whole word in the field
+ * - 1: every query token matches the start of a word in the field (never mid-word)
+ * - 0: no match
+ */
+function scoreFieldMatch(fieldText: string | undefined, normalizedQuery: string, queryTokens: string[]): 0 | 1 | 2 | 3 {
+  if (!fieldText || queryTokens.length === 0) return 0;
+  const normalizedField = normalizeSearchText(fieldText);
+  if (!normalizedField) return 0;
+
+  if (
+    normalizedField === normalizedQuery ||
+    stripArabicAl(normalizedField) === stripArabicAl(normalizedQuery)
+  ) {
+    return 3;
+  }
+
+  const words = tokenizeSearchWords(normalizedField);
+  if (words.length === 0) return 0;
+
+  let minTokenScore: 0 | 1 | 2 = 2;
+  for (const qt of queryTokens) {
+    const qtBare = stripArabicAl(qt);
+    let bestWordScore: 0 | 1 | 2 = 0;
+
+    for (const w of words) {
+      const wBare = stripArabicAl(w);
+      if (w === qt || wBare === qt || w === qtBare || wBare === qtBare) {
+        bestWordScore = 2;
+        break;
+      }
+      if (w.startsWith(qt) || (w !== wBare && wBare.startsWith(qt))) {
+        bestWordScore = 1;
+      }
+    }
+
+    if (bestWordScore === 0) return 0;
+    if (bestWordScore < minTokenScore) {
+      minTokenScore = bestWordScore;
+    }
+  }
+
+  return minTokenScore;
+}
+
+function scoreDepartmentDirect(dept: GroceryDepartment, normalizedQuery: string, queryTokens: string[]): 0 | 1 | 2 | 3 {
+  let best: 0 | 1 | 2 | 3 = 0;
+  const candidates = [dept.labelAr, dept.labelEn, dept.categoryKey, ...(dept.aliases || [])];
+  for (const text of candidates) {
+    const score = scoreFieldMatch(text, normalizedQuery, queryTokens);
+    if (score > best) best = score;
+    if (best === 3) break;
+  }
+  return best;
+}
+
+function scoreBranchMatch(branch: CategoryBranchItem, normalizedQuery: string, queryTokens: string[]): 0 | 1 | 2 | 3 {
+  let best: 0 | 1 | 2 | 3 = 0;
+  const candidates = [branch.labelAr, branch.labelEn, branch.subCategoryKey, ...(branch.keywords || [])];
+  for (const text of candidates) {
+    const score = scoreFieldMatch(text, normalizedQuery, queryTokens);
+    if (score > best) best = score;
+    if (best === 3) break;
+  }
+  return best;
+}
+
+function hasAnyExactWordTaxonomyMatch(normalizedQuery: string, queryTokens: string[]): boolean {
+  for (const dept of GROCERY_DEPARTMENTS) {
+    if (scoreDepartmentDirect(dept, normalizedQuery, queryTokens) >= 2) return true;
+    for (const b of dept.branches) {
+      if (b.id === 'all') continue;
+      if (scoreBranchMatch(b, normalizedQuery, queryTokens) >= 2) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Case-insensitive bilingual (Arabic & English) search across all 22 departments and 153 branches.
- * Matches labelAr, labelEn, aliases, subCategoryKey, and keywords.
+ * Matches labelAr, labelEn, aliases, subCategoryKey, and keywords using whole-word and word-start matching.
+ * Prioritizes exact whole-word matches over prefix matches.
  */
 export interface CategorySearchMatch {
   department: GroceryDepartment;
@@ -644,59 +745,69 @@ export interface CategorySearchMatch {
 }
 
 export function searchCategoriesAndBranches(query: string): CategorySearchMatch[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
+  const normalizedQuery = normalizeSearchText(query);
+  const queryTokens = tokenizeSearchWords(normalizedQuery);
+  if (!normalizedQuery || queryTokens.length === 0) return [];
 
-  const matches: CategorySearchMatch[] = [];
+  const minRequiredScore: 1 | 2 = hasAnyExactWordTaxonomyMatch(normalizedQuery, queryTokens) ? 2 : 1;
+
+  const scoredMatches: Array<CategorySearchMatch & { topScore: number }> = [];
+
   for (const dept of GROCERY_DEPARTMENTS) {
-    const deptMatch =
-      dept.labelAr.toLowerCase().includes(q) ||
-      dept.labelEn.toLowerCase().includes(q) ||
-      dept.categoryKey.toLowerCase().includes(q) ||
-      (dept.aliases?.some((a) => a.toLowerCase().includes(q)) ?? false);
+    const deptScore = scoreDepartmentDirect(dept, normalizedQuery, queryTokens);
+    const deptMatch = deptScore >= minRequiredScore;
 
-    const matchedBranches = dept.branches.filter((b) => {
-      if (b.id === 'all') return false;
-      return (
-        b.labelAr.toLowerCase().includes(q) ||
-        b.labelEn.toLowerCase().includes(q) ||
-        (b.subCategoryKey?.toLowerCase().includes(q) ?? false) ||
-        (b.keywords?.some((kw) => kw.toLowerCase().includes(q)) ?? false)
-      );
-    });
+    const scoredBranches: Array<{ branch: CategoryBranchItem; score: number }> = [];
+    for (const b of dept.branches) {
+      if (b.id === 'all') continue;
+      const bScore = scoreBranchMatch(b, normalizedQuery, queryTokens);
+      if (bScore >= minRequiredScore) {
+        scoredBranches.push({ branch: b, score: bScore });
+      }
+    }
 
-    if (deptMatch || matchedBranches.length > 0) {
-      matches.push({
+    scoredBranches.sort((a, b) => b.score - a.score);
+
+    if (deptMatch || scoredBranches.length > 0) {
+      const topBranchScore = scoredBranches.length > 0 ? scoredBranches[0].score : 0;
+      scoredMatches.push({
         department: dept,
-        matchedBranches,
-        matchedDepartmentDirect: deptMatch
+        matchedBranches: scoredBranches.map((item) => item.branch),
+        matchedDepartmentDirect: deptMatch,
+        topScore: Math.max(deptMatch ? deptScore : 0, topBranchScore)
       });
     }
   }
-  return matches;
+
+  scoredMatches.sort((a, b) => b.topScore - a.topScore);
+
+  return scoredMatches.map(({ department, matchedBranches, matchedDepartmentDirect }) => ({
+    department,
+    matchedBranches,
+    matchedDepartmentDirect
+  }));
 }
 
 /**
  * Checks whether a product's department or sub-category matches a bilingual search query
- * via labelAr, labelEn, aliases, or branch keywords (case-insensitive).
+ * via labelAr, labelEn, aliases, or branch keywords using whole-word and word-start matching.
  */
 export function matchesProductCategoryKeywords(
   category: string,
   subCategory: string | undefined,
   query: string
 ): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return false;
+  const normalizedQuery = normalizeSearchText(query);
+  const queryTokens = tokenizeSearchWords(normalizedQuery);
+  if (!normalizedQuery || queryTokens.length === 0) return false;
 
   const canonical = resolveCategoryKey(category);
   const dept = GROCERY_DEPARTMENTS.find((d) => d.categoryKey === canonical);
   if (!dept) return false;
 
-  if (
-    dept.labelAr.toLowerCase().includes(q) ||
-    dept.labelEn.toLowerCase().includes(q) ||
-    (dept.aliases?.some((a) => a.toLowerCase().includes(q)) ?? false)
-  ) {
+  const minRequiredScore: 1 | 2 = hasAnyExactWordTaxonomyMatch(normalizedQuery, queryTokens) ? 2 : 1;
+
+  if (scoreDepartmentDirect(dept, normalizedQuery, queryTokens) >= minRequiredScore) {
     return true;
   }
 
@@ -704,12 +815,8 @@ export function matchesProductCategoryKeywords(
     const branch = dept.branches.find(
       (b) => b.id !== 'all' && b.subCategoryKey === subCategory
     );
-    if (branch) {
-      return (
-        branch.labelAr.toLowerCase().includes(q) ||
-        branch.labelEn.toLowerCase().includes(q) ||
-        (branch.keywords?.some((kw) => kw.toLowerCase().includes(q)) ?? false)
-      );
+    if (branch && scoreBranchMatch(branch, normalizedQuery, queryTokens) >= minRequiredScore) {
+      return true;
     }
   }
 

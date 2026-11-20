@@ -1086,28 +1086,40 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
       {/* ================= 10. NEAREST VERIFIED WHOLESALE SUPPLIERS SLIDER ================= */}
       <section
         id="nearest-suppliers-section"
-        className="bg-white rounded-3xl border border-[#EAECEF] p-3.5 sm:p-5 shadow-[0_1px_4px_rgba(15,23,42,0.03)] space-y-3"
+        className="bg-white rounded-3xl border border-[#EAECEF] p-4 sm:p-5 shadow-[0_2px_10px_rgba(15,23,42,0.04)] space-y-4"
       >
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Building2 className="w-4.5 h-4.5 text-[#00A046] shrink-0" />
-            <h2 className="font-black text-sm sm:text-base text-[#111827] truncate">
-              {isAr ? 'شركات وموردو الجملة الأقرب لموقعك' : 'Nearest Wholesale Suppliers'}
-            </h2>
+        <div className="flex items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#EFFAF3] border border-[#BBF7D0] flex items-center justify-center text-[#00A046] shrink-0">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="font-black text-base sm:text-lg text-[#111827] leading-snug">
+                {isAr ? 'شركات وموردو الجملة الأقرب لموقعك' : 'Nearest Wholesale Suppliers'}
+              </h2>
+              <p className="text-xs text-[#6B7280] font-medium mt-0.5">
+                {isAr
+                  ? `${dynamicSuppliers.length} موردين معتمدين · توريد مباشر لمتجرك`
+                  : `${dynamicSuppliers.length} verified suppliers · Direct wholesale delivery`}
+              </p>
+            </div>
           </div>
-          <span className="text-xs font-bold text-[#008A3C] shrink-0 tabular-nums">
-            {dynamicSuppliers.length} {isAr ? 'موردين معتمدين' : 'Verified'}
+          <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#EFFAF3] border border-[#BBF7D0] text-xs font-extrabold text-[#008A3C] shrink-0 tabular-nums">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>
+              {dynamicSuppliers.length} {isAr ? 'مورد معتمد' : 'Verified'}
+            </span>
           </span>
         </div>
 
-        <HorizontalScrollRow isAr={isAr} className="py-0.5">
+        <HorizontalScrollRow isAr={isAr} className="py-1 gap-3 sm:gap-4">
           {dynamicSuppliers.map((supplier) => (
             <div
               key={supplier.id}
               onClick={() => onOpenSupplierStore?.(supplier)}
-              className="w-[210px] sm:w-[238px] shrink-0 snap-start rounded-2xl border border-[#EAECEF] bg-white hover:border-[#00A046]/60 hover:shadow-md transition-all overflow-hidden flex flex-col justify-between cursor-pointer group"
+              className="w-[272px] sm:w-[304px] shrink-0 snap-start rounded-2xl border border-[#E5E7EB] bg-white hover:border-[#00A046] hover:shadow-lg transition-all overflow-hidden flex flex-col justify-between cursor-pointer group"
             >
-              <div className="relative h-24 w-full bg-slate-900 overflow-hidden">
+              <div className="relative h-36 sm:h-40 w-full bg-slate-900 overflow-hidden">
                 <img
                   src={supplier.storeImageUrl || supplier.logoUrl}
                   alt={isAr ? supplier.nameAr : supplier.nameEn}
@@ -1115,42 +1127,67 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   loading="lazy"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
-                <div className="absolute top-2 inset-x-2 flex items-center justify-between gap-1">
-                  <span className="bg-white/95 text-[#00A046] font-black text-[10px] px-2 py-0.5 rounded-md shadow-2xs tabular-nums">
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/25 to-transparent" />
+                <div className="absolute top-2.5 inset-x-2.5 flex items-center justify-between gap-1.5">
+                  <span className="bg-white/95 text-[#00A046] font-black text-[11px] px-2.5 py-1 rounded-lg shadow-xs tabular-nums">
                     {supplier.distanceKm} {isAr ? 'كم' : 'km'}
                   </span>
                   {supplier.isExpress24h && (
-                    <span className="flex items-center gap-0.5 bg-[#FFE600] text-[#111827] font-black text-[9px] px-1.5 py-0.5 rounded-md">
-                      <Zap className="w-2.5 h-2.5 fill-current" />
-                      <span>{isAr ? '< 24س' : '< 24h'}</span>
+                    <span className="flex items-center gap-1 bg-[#FFE600] text-[#111827] font-black text-[10px] px-2 py-1 rounded-lg shadow-xs">
+                      <Zap className="w-3 h-3 fill-current" />
+                      <span>{isAr ? 'توصيل < 24س' : '< 24h'}</span>
                     </span>
                   )}
                 </div>
-                {supplier.isVerified && (
-                  <div className="absolute bottom-2 start-2 flex items-center gap-0.5 bg-[#00A046] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md">
-                    <ShieldCheck className="w-2.5 h-2.5" />
-                    <span>{isAr ? 'معتمد' : 'Verified'}</span>
-                  </div>
-                )}
+                <div className="absolute bottom-2.5 inset-x-2.5 flex items-center justify-between gap-2">
+                  {supplier.isVerified ? (
+                    <div className="flex items-center gap-1 bg-[#00A046] text-white text-[10.5px] font-bold px-2 py-0.5 rounded-lg shadow-xs">
+                      <ShieldCheck className="w-3 h-3" />
+                      <span>{isAr ? 'مورد معتمد' : 'Verified'}</span>
+                    </div>
+                  ) : (
+                    <span />
+                  )}
+                  <span className="inline-flex items-center gap-1 bg-black/65 backdrop-blur-xs text-white text-[11px] font-black px-2 py-0.5 rounded-lg tabular-nums">
+                    <Star className="w-3 h-3 fill-[#FFA800] text-[#FFA800]" />
+                    <span>{supplier.rating}</span>
+                  </span>
+                </div>
               </div>
 
-              <div className="p-2.5 flex-1 flex flex-col justify-between space-y-2">
-                <div>
-                  <div className="flex items-start justify-between gap-1 mb-0.5">
-                    <h3 className="font-black text-xs text-[#111827] group-hover:text-[#00A046] line-clamp-1">
-                      {isAr ? supplier.nameAr : supplier.nameEn}
-                    </h3>
-                    <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-[#111827] shrink-0 tabular-nums">
-                      <Star className="w-2.5 h-2.5 fill-[#FFA800] text-[#FFA800]" />
-                      {supplier.rating}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1 text-[10px] text-[#6B7280] line-clamp-1">
-                    <Truck className="w-3 h-3 text-[#00A046] shrink-0" />
-                    <span className="truncate">
-                      {isAr ? supplier.deliveryTimeAr : supplier.deliveryTimeEn}
-                    </span>
+              <div className="p-3.5 sm:p-4 flex-1 flex flex-col justify-between space-y-3">
+                <div className="space-y-1.5">
+                  <h3 className="font-black text-sm sm:text-[15px] text-[#111827] group-hover:text-[#00A046] leading-snug line-clamp-2 min-h-[2.4rem]">
+                    {isAr ? supplier.nameAr : supplier.nameEn}
+                  </h3>
+
+                  {(supplier.specialtiesAr || supplier.specialtiesEn) && (
+                    <p className="text-xs text-[#4B5563] font-medium line-clamp-1">
+                      {isAr ? supplier.specialtiesAr : supplier.specialtiesEn}
+                    </p>
+                  )}
+
+                  <div className="pt-1 space-y-1 border-t border-[#F1F5F9]">
+                    <div className="flex items-center gap-1.5 text-xs text-[#374151] font-semibold">
+                      <Truck className="w-3.5 h-3.5 text-[#00A046] shrink-0" />
+                      <span className="truncate">
+                        {isAr ? supplier.deliveryTimeAr : supplier.deliveryTimeEn}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-[11.5px] text-[#6B7280]">
+                      <span className="inline-flex items-center gap-1 truncate">
+                        <MapPin className="w-3.5 h-3.5 text-[#6B7280] shrink-0" />
+                        <span className="truncate">
+                          {isAr ? supplier.districtAr : supplier.districtEn}
+                        </span>
+                      </span>
+                      {supplier.minOrderIQD > 0 && (
+                        <span className="shrink-0 font-bold text-[#0F3D24] tabular-nums">
+                          {isAr ? 'الحد الأدنى:' : 'Min:'}{' '}
+                          {formatCurrency(supplier.minOrderIQD, currency, language)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -1160,9 +1197,9 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
                     e.stopPropagation();
                     onOpenSupplierStore?.(supplier);
                   }}
-                  className="w-full py-1.5 px-2 rounded-xl text-[11px] font-black bg-[#F7F8FA] border border-[#E5E7EB] text-[#111827] group-hover:bg-[#00A046] group-hover:text-white group-hover:border-transparent flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap"
+                  className="w-full py-2.5 px-3 rounded-xl text-xs sm:text-[13px] font-black bg-[#EFFAF3] border border-[#BBF7D0] text-[#0F3D24] group-hover:bg-[#00A046] group-hover:text-white group-hover:border-transparent flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap"
                 >
-                  <Store className="w-3.5 h-3.5" />
+                  <Store className="w-4 h-4" />
                   <span>{isAr ? 'دخول لصفحة المتجر' : 'Visit Storefront'}</span>
                 </button>
               </div>

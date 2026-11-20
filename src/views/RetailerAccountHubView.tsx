@@ -59,6 +59,7 @@ import {
 import { formatCurrency } from '../utils/format.ts';
 import { getLocalizedText } from '../utils/translations.ts';
 import { SupplierRatingModal } from '../components/SupplierRatingSection.tsx';
+import { SupplierLedgerDetailView } from '../components/SupplierLedgerDetailView.tsx';
 
 interface ChatThreadMessage {
   id: string;
@@ -159,6 +160,7 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
   // 2B. Buyer-Side Credit & Ledger state (Read-only for this store's supplier credit lines)
   const [storeCreditAccounts, setStoreCreditAccounts] = useState<CreditAccountItem[]>([]);
   const [selectedCreditAccountId, setSelectedCreditAccountId] = useState<string | null>(null);
+  const [openedSupplierLedgerId, setOpenedSupplierLedgerId] = useState<string | null>(null);
   const [storeLedgerEntries, setStoreLedgerEntries] = useState<LedgerEntryItem[]>([]);
   const [loadingCreditData, setLoadingCreditData] = useState(false);
 
@@ -194,6 +196,9 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
 
   useEffect(() => {
     loadStoreCreditData();
+    if (activeSection !== 'credit_ledger') {
+      setOpenedSupplierLedgerId(null);
+    }
   }, [userSession.entityName, activeSection]);
 
   useEffect(() => {
@@ -1039,6 +1044,29 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
       {/* =================== SECTION 2B: BUYER CREDIT LEDGER (READ-ONLY) =================== */}
       {activeSection === 'credit_ledger' && (
         <div className="space-y-4">
+        {openedSupplierLedgerId && selectedCreditAccount ? (
+          <SupplierLedgerDetailView
+            account={selectedCreditAccount}
+            ledgerEntries={storeLedgerEntries}
+            supplierOrders={orders.filter(
+              (o) =>
+                o.supplierId === selectedCreditAccount.supplierId ||
+                (selectedCreditAccount.supplierName && o.supplierName === selectedCreditAccount.supplierName)
+            )}
+            upgradeRequests={upgradeRequests}
+            reliabilityScore={selectedReliabilityScore}
+            currency={currency}
+            language={language}
+            storeName={userSession.entityName}
+            onBack={() => {
+              setOpenedSupplierLedgerId(null);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onOpenSupplierStore={onOpenSupplierStore}
+            onOpenCreditUpgradeModal={openCreditUpgradeModal}
+          />
+        ) : (
+        <div className="space-y-4">
           {/* Store Summary KPI Header */}
           <div className="bg-white rounded-2xl border border-[#DCE5DC] p-4 sm:p-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#DCE5DC] pb-3">
@@ -1053,8 +1081,8 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
                 </h2>
                 <p className="text-[11px] text-[#5F7164] mt-0.5">
                   {isAr
-                    ? 'متابعة سقوف الائتمان، الفواتير الآجلة، والدفعات المسددة مع موردي الجملة (عرض فقط)'
-                    : 'Track approved wholesale credit limits, deferred invoices, and settlements per supplier (Read-Only)'}
+                    ? 'اختر أي مورد لفتح صفحة كشف الحساب التفصيلية (آجل ونقدي) وسجل الفواتير والدفعات'
+                    : 'Select any supplier to open their dedicated statement page (Credit & Cash breakdown)'}
                 </p>
               </div>
 
@@ -1125,44 +1153,49 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              {/* Supplier Credit Lines List */}
-              <div className="lg:col-span-1 space-y-2.5">
-                <div className="flex items-center justify-between px-1">
-                  <h3 className="text-xs font-black text-[#142018]">
-                    {isAr ? 'خطوط الائتمان مع الموردين' : 'Your Supplier Credit Lines'}
-                  </h3>
-                  <span className="text-[11px] text-[#5F7164] tabular-nums">
-                    {storeCreditAccounts.length} {isAr ? 'موردين' : 'suppliers'}
-                  </span>
-                </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <h3 className="text-xs sm:text-sm font-black text-[#142018]">
+                  {isAr ? 'حساباتك مع الموردين (اختر مورداً لفتح التفاصيل)' : 'Your Supplier Accounts (Select to open statement)'}
+                </h3>
+                <span className="text-[11px] font-bold text-[#5F7164] tabular-nums">
+                  {storeCreditAccounts.length} {isAr ? 'موردين' : 'suppliers'}
+                </span>
+              </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                 {storeCreditAccounts.map((acc) => {
-                  const isSelected = selectedCreditAccount?.id === acc.id;
                   const supplierLabel = acc.supplierName || acc.supplierId;
                   const usedPct =
                     acc.creditLimitIQD > 0
                       ? Math.min(100, Math.round((acc.currentUsedCreditIQD / acc.creditLimitIQD) * 100))
                       : 0;
+                  const supplierCashOrders = orders.filter(
+                    (o) =>
+                      (o.supplierId === acc.supplierId || (acc.supplierName && o.supplierName === acc.supplierName)) &&
+                      o.paymentMethod !== 'credit' &&
+                      o.status !== 'cancelled'
+                  );
+                  const supplierCashTotalIQD = supplierCashOrders.reduce((s, o) => s + (o.subtotalIQD || 0), 0);
 
                   return (
                     <button
                       key={acc.id}
                       type="button"
-                      onClick={() => setSelectedCreditAccountId(acc.id)}
-                      className={`w-full text-start p-3.5 rounded-2xl border transition cursor-pointer space-y-2 ${
-                        isSelected
-                          ? 'bg-white border-[#0B5D32] ring-1 ring-[#0B5D32] shadow-xs'
-                          : 'bg-white border-[#DCE5DC] hover:border-[#0B5D32]/50'
-                      }`}
+                      onClick={() => {
+                        setSelectedCreditAccountId(acc.id);
+                        setOpenedSupplierLedgerId(acc.id);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className="w-full text-start p-4 rounded-2xl bg-white border border-[#DCE5DC] hover:border-[#0B5D32] hover:shadow-md transition cursor-pointer space-y-3 group"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="font-black text-xs text-[#142018] line-clamp-1">
+                          <div className="font-black text-sm text-[#142018] group-hover:text-[#0B5D32] transition line-clamp-1">
                             {isAr ? supplierLabel : getLocalizedText(supplierLabel, 'en')}
                           </div>
-                          <span className="text-[10.5px] text-[#5F7164]">
-                            {isAr ? `مهلة السداد: ${acc.paymentTermDays} يوماً` : `Term: ${acc.paymentTermDays} days`}
+                          <span className="text-[11px] text-[#5F7164]">
+                            {isAr ? `مهلة السداد: ${acc.paymentTermDays} يوماً` : `Payment Term: ${acc.paymentTermDays} days`}
                           </span>
                         </div>
 
@@ -1179,18 +1212,35 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
                         )}
                       </div>
 
-                      <div className="space-y-1 text-[11px] tabular-nums">
-                        <div className="flex justify-between text-[#5F7164]">
-                          <span>{isAr ? 'المستخدم:' : 'Used:'}</span>
-                          <strong className="text-[#142018]">
+                      {/* Quick Cash vs Credit Breakdown */}
+                      <div className="grid grid-cols-2 gap-2 text-[11px] tabular-nums">
+                        <div className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200/70">
+                          <span className="text-[#92400E] font-bold block">
+                            {isAr ? 'ذمة الآجل الحالية' : 'Credit Payable'}
+                          </span>
+                          <strong className="text-xs sm:text-sm font-black text-[#B45309] block mt-0.5">
                             {formatCurrency(acc.currentUsedCreditIQD, currency, language)}
                           </strong>
                         </div>
-                        <div className="flex justify-between text-[#5F7164]">
-                          <span>{isAr ? 'المتاح:' : 'Available:'}</span>
-                          <strong className="text-[#0B5D32]">
-                            {formatCurrency(acc.availableCreditIQD, currency, language)}
+                        <div className="p-2.5 rounded-xl bg-[#EFF7F1] border border-[#CBE0D0]">
+                          <span className="text-[#0B5D32] font-bold block">
+                            {isAr ? `مشتريات نقدية (${supplierCashOrders.length})` : `Cash (${supplierCashOrders.length})`}
+                          </span>
+                          <strong className="text-xs sm:text-sm font-black text-[#0B5D32] block mt-0.5">
+                            {formatCurrency(supplierCashTotalIQD, currency, language)}
                           </strong>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5 text-[11px] tabular-nums">
+                        <div className="flex justify-between text-[#5F7164]">
+                          <span>
+                            {isAr ? 'المتاح للآجل:' : 'Available Credit:'}{' '}
+                            <strong className="text-[#0B5D32]">
+                              {formatCurrency(acc.availableCreditIQD, currency, language)}
+                            </strong>
+                          </span>
+                          <span className="font-bold">{usedPct}%</span>
                         </div>
                         <div className="w-full h-1.5 bg-[#E5E7EB] rounded-full overflow-hidden">
                           <div
@@ -1201,293 +1251,19 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
                           />
                         </div>
                       </div>
+
+                      <div className="pt-2 border-t border-[#F1F5F9] flex items-center justify-between text-xs font-black text-[#0B5D32]">
+                        <span>{isAr ? 'فتح كشف الحساب التفصيلي (آجل / نقدي)' : 'Open Detailed Statement'}</span>
+                        {isAr ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                      </div>
                     </button>
                   );
                 })}
               </div>
-
-              {/* Selected Supplier Account Statement & Append-Only Ledger (Read-Only) */}
-              <div className="lg:col-span-2 space-y-4">
-                {selectedCreditAccount && (
-                  <div className="bg-white rounded-2xl border border-[#DCE5DC] p-4 sm:p-5 space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#DCE5DC] pb-3.5">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-sm sm:text-base font-black text-[#142018]">
-                            {isAr
-                              ? selectedCreditAccount.supplierName || selectedCreditAccount.supplierId
-                              : getLocalizedText(
-                                  selectedCreditAccount.supplierName || selectedCreditAccount.supplierId,
-                                  'en'
-                                )}
-                          </h3>
-                          <span className="text-[10.5px] font-bold bg-[#F4F4EA] border border-[#DCE5DC] text-[#3D5244] px-2 py-0.5 rounded-full">
-                            {isAr ? 'كشف حساب للمتجر · عرض فقط' : 'Retailer Statement · Read Only'}
-                          </span>
-                        </div>
-                        <p className="text-xs text-[#5F7164] mt-1 tabular-nums">
-                          {isAr
-                            ? `سقف الائتمان: ${formatCurrency(selectedCreditAccount.creditLimitIQD, currency, language)} | فترة السداد: ${selectedCreditAccount.paymentTermDays} يوماً`
-                            : `Credit Limit: ${formatCurrency(selectedCreditAccount.creditLimitIQD, currency, language)} | Payment Term: ${selectedCreditAccount.paymentTermDays} days`}
-                        </p>
-                      </div>
-
-                      {(() => {
-                        const matchedSupplier = WHOLESALE_SUPPLIERS.find(
-                          (s) => s.id === selectedCreditAccount.supplierId
-                        );
-                        return matchedSupplier ? (
-                          <button
-                            type="button"
-                            onClick={() => onOpenSupplierStore(matchedSupplier)}
-                            className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white text-xs font-black flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
-                          >
-                            <Building2 className="w-3.5 h-3.5" />
-                            <span>{isAr ? 'زيارة متجر المورد' : 'Visit Supplier Store'}</span>
-                          </button>
-                        ) : null;
-                      })()}
-                    </div>
-
-                    {selectedCreditAccount.isBlocked && selectedCreditAccount.blockReason && (
-                      <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-[#B91C1C] flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                        <span>{selectedCreditAccount.blockReason}</span>
-                      </div>
-                    )}
-
-                    {/* Aging Buckets */}
-                    <div>
-                      <h4 className="text-xs font-bold text-[#5F7164] mb-2 flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5 text-[#0B5D32]" />
-                        <span>
-                          {isAr
-                            ? 'توزيع أعمار الفواتير المستحقة (Aging):'
-                            : 'Payable Aging Breakdown:'}
-                        </span>
-                      </h4>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs tabular-nums">
-                        <div className="bg-[#F4F4EA] border border-[#DCE5DC] p-2.5 rounded-xl">
-                          <span className="text-[10.5px] text-[#5F7164] block">
-                            {isAr ? '0 - 30 يوماً (جاري)' : '0 - 30 Days'}
-                          </span>
-                          <strong className="text-sm font-black text-[#0B5D32]">
-                            {formatCurrency(selectedCreditAccount.aging.bucket0_30, currency, language)}
-                          </strong>
-                        </div>
-                        <div className="bg-[#F4F4EA] border border-[#DCE5DC] p-2.5 rounded-xl">
-                          <span className="text-[10.5px] text-[#5F7164] block">
-                            {isAr ? '31 - 60 يوماً' : '31 - 60 Days'}
-                          </span>
-                          <strong className="text-sm font-black text-[#B45309]">
-                            {formatCurrency(selectedCreditAccount.aging.bucket31_60, currency, language)}
-                          </strong>
-                        </div>
-                        <div className="bg-[#F4F4EA] border border-[#DCE5DC] p-2.5 rounded-xl">
-                          <span className="text-[10.5px] text-[#5F7164] block">
-                            {isAr ? '61 - 90 يوماً' : '61 - 90 Days'}
-                          </span>
-                          <strong className="text-sm font-black text-red-600">
-                            {formatCurrency(selectedCreditAccount.aging.bucket61_90, currency, language)}
-                          </strong>
-                        </div>
-                        <div className="bg-[#F4F4EA] border border-[#DCE5DC] p-2.5 rounded-xl">
-                          <span className="text-[10.5px] text-[#5F7164] block">
-                            {isAr ? '+90 يوماً' : '+90 Days'}
-                          </span>
-                          <strong className="text-sm font-black text-[#B91C1C]">
-                            {formatCurrency(selectedCreditAccount.aging.bucket90Plus, currency, language)}
-                          </strong>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Store Ledger Entries Table */}
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <h4 className="text-xs font-black text-[#142018] flex items-center gap-1.5">
-                          <FileText className="w-3.5 h-3.5 text-[#0B5D32]" />
-                          <span>
-                            {isAr
-                              ? 'دفتر الأستاذ المالي للمتجر (سجل تراكمي موثق):'
-                              : 'Store Financial Ledger (Immutable Statement):'}
-                          </span>
-                        </h4>
-                        <span className="text-[10.5px] text-[#5F7164]">
-                          {isAr
-                            ? 'تُسجل سندات القبض والتسوية من قِبل المورد'
-                            : 'Payments & adjustments are posted by the supplier'}
-                        </span>
-                      </div>
-
-                      <div className="border border-[#DCE5DC] rounded-xl overflow-hidden text-xs">
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-start">
-                            <thead className="bg-[#F4F4EA] text-[#5F7164] font-bold border-b border-[#DCE5DC]">
-                              <tr>
-                                <th className="p-2.5 whitespace-nowrap">{isAr ? 'التاريخ' : 'Date'}</th>
-                                <th className="p-2.5 whitespace-nowrap">{isAr ? 'المرجع' : 'Ref'}</th>
-                                <th className="p-2.5">{isAr ? 'البيان' : 'Description'}</th>
-                                <th className="p-2.5 whitespace-nowrap">{isAr ? 'علينا (فاتورة)' : 'Debit'}</th>
-                                <th className="p-2.5 whitespace-nowrap">{isAr ? 'سددنا (دفعة)' : 'Credit'}</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-[#DCE5DC]">
-                              {storeLedgerEntries.length === 0 ? (
-                                <tr>
-                                  <td colSpan={5} className="p-4 text-center text-[#5F7164]">
-                                    {isAr ? 'لا توجد قيود مسجلة بعد لهذا الحساب' : 'No ledger entries recorded yet'}
-                                  </td>
-                                </tr>
-                              ) : (
-                                storeLedgerEntries.map((entry) => (
-                                  <tr
-                                    key={entry.id}
-                                    className={`hover:bg-[#F4F4EA]/50 transition ${
-                                      entry.isReversed ? 'bg-red-50/40 text-gray-400 line-through' : ''
-                                    }`}
-                                  >
-                                    <td className="p-2.5 whitespace-nowrap font-mono text-[11px] tabular-nums">
-                                      {entry.entryDate}
-                                    </td>
-                                    <td className="p-2.5 whitespace-nowrap">
-                                      <span
-                                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                          entry.referenceType === 'INVOICE'
-                                            ? 'bg-blue-100 text-blue-800'
-                                            : entry.referenceType === 'PAYMENT'
-                                            ? 'bg-emerald-100 text-[#0B5D32]'
-                                            : entry.referenceType === 'REVERSAL'
-                                            ? 'bg-purple-100 text-purple-800'
-                                            : 'bg-gray-100 text-gray-800'
-                                        }`}
-                                      >
-                                        {entry.referenceType}
-                                      </span>
-                                      <span className="ms-1.5 font-mono text-[11px] text-[#5F7164]">
-                                        {entry.referenceId}
-                                      </span>
-                                    </td>
-                                    <td className="p-2.5 max-w-xs">
-                                      {isAr
-                                        ? entry.descriptionAr
-                                        : getLocalizedText(entry.descriptionAr, 'en')}
-                                    </td>
-                                    <td className="p-2.5 whitespace-nowrap font-mono font-bold text-[#142018] tabular-nums">
-                                      {entry.debitIQD > 0
-                                        ? formatCurrency(entry.debitIQD, currency, language)
-                                        : '-'}
-                                    </td>
-                                    <td className="p-2.5 whitespace-nowrap font-mono font-bold text-[#0B5D32] tabular-nums">
-                                      {entry.creditIQD > 0
-                                        ? formatCurrency(entry.creditIQD, currency, language)
-                                        : '-'}
-                                    </td>
-                                  </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Platform Automatic Reliability Score & Eligibility Rules */}
-                    <div className="rounded-xl border border-[#CBE0D0] bg-[#EFF7F1]/70 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="inline-flex items-center gap-1 text-[11px] font-black text-[#0B5D32]">
-                            <ShieldCheck className="w-4 h-4" />
-                            <span>
-                              {isAr
-                                ? 'تقييم الالتزام الائتماني بالمنصة:'
-                                : 'Platform Credit Reliability Score:'}
-                            </span>
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-[#0B5D32] text-white text-[11px] font-black tabular-nums">
-                            {selectedReliabilityScore} / 100
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-[#3D5244] leading-relaxed">
-                          {selectedCreditAccount.aging.bucket61_90 + selectedCreditAccount.aging.bucket90Plus > 0 ||
-                          selectedCreditAccount.isBlocked
-                            ? isAr
-                              ? 'توصي قواعد التقييم التلقائي بتسوية الفواتير المتأخرة أولاً لتفعيل أهلية رفع السقف.'
-                              : 'Platform rules recommend settling overdue invoices first to unlock tier upgrades.'
-                            : isAr
-                            ? 'انتظام السداد ممتاز ولا توجد متأخرات +60 يوماً — حسابك مؤهل لطلب مراجعة السقف عبر لجنة المنصة.'
-                            : 'Strong payment record with zero 60+ day overdue invoices — eligible for platform limit review.'}
-                        </p>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={openCreditUpgradeModal}
-                        className="px-3 py-2 rounded-xl bg-white hover:bg-[#F4F4EA] border border-[#0B5D32] text-[#0B5D32] text-xs font-black whitespace-nowrap shrink-0 cursor-pointer"
-                      >
-                        {isAr ? 'طلب تقييم رفع السقف' : 'Request Upgrade Review'}
-                      </button>
-                    </div>
-
-                    {/* Platform Credit Review Requests History (Face-saving neutral responses) */}
-                    {upgradeRequests.filter((r) => r.creditAccountId === selectedCreditAccount.id).length > 0 && (
-                      <div className="space-y-2 pt-1">
-                        <h4 className="text-xs font-black text-[#142018]">
-                          {isAr
-                            ? 'سجل طلبات المراجعة لدى لجنة الائتمان بالمنصة:'
-                            : 'Platform Credit Review Requests:'}
-                        </h4>
-                        <div className="space-y-2">
-                          {upgradeRequests
-                            .filter((r) => r.creditAccountId === selectedCreditAccount.id)
-                            .map((reqItem) => (
-                              <div
-                                key={reqItem.id}
-                                className="rounded-xl border border-[#DCE5DC] bg-[#F4F4EA] p-3 text-xs space-y-1.5"
-                              >
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <span className="font-bold text-[#142018] tabular-nums">
-                                    {isAr ? 'السقف المطلوب:' : 'Target Limit:'}{' '}
-                                    <strong className="text-[#0B5D32]">
-                                      {formatCurrency(reqItem.requestedLimitIQD, currency, language)}
-                                    </strong>
-                                  </span>
-                                  <span
-                                    className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                                      reqItem.status === 'approved'
-                                        ? 'bg-emerald-100 text-[#0B5D32]'
-                                        : reqItem.status === 'deferred_by_policy'
-                                        ? 'bg-amber-100 text-[#92400E]'
-                                        : 'bg-blue-100 text-blue-800'
-                                    }`}
-                                  >
-                                    {reqItem.status === 'approved'
-                                      ? isAr
-                                        ? 'تمت الترقية'
-                                        : 'Approved'
-                                      : reqItem.status === 'deferred_by_policy'
-                                      ? isAr
-                                        ? 'توصية استكمال السداد الدوري'
-                                        : 'Deferred by Policy'
-                                      : isAr
-                                      ? 'قيد التقييم في لجنة المنصة'
-                                      : 'Under Platform Review'}
-                                  </span>
-                                </div>
-                                <p className="text-[11px] text-[#3D5244] leading-relaxed">
-                                  {reqItem.platformResponseAr}
-                                </p>
-                              </div>
-                            ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
             </div>
           )}
-
+        </div>
+        )}
           {/* Platform-Mediated Credit Limit Review Modal */}
           {isUpgradeModalOpen && selectedCreditAccount && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">

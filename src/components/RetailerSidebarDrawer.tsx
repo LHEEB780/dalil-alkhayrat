@@ -527,22 +527,6 @@ export const RetailerSidebarDrawer: React.FC<RetailerSidebarDrawerProps> = ({
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
-              {onToggleDarkMode && (
-                <button
-                  type="button"
-                  onClick={onToggleDarkMode}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-bold transition cursor-pointer ${
-                    isDarkMode
-                      ? 'bg-[#142018] border-[#142018] text-[#FFE600]'
-                      : 'bg-white border-[#DCE5DC] text-[#3D5244] hover:border-[#0B5D32]'
-                  }`}
-                  title={isAr ? 'تبديل وضع المظهر' : 'Toggle Appearance'}
-                >
-                  {isDarkMode ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5 text-[#D97706]" />}
-                  <span>{isDarkMode ? (isAr ? 'ليلي' : 'Dark') : (isAr ? 'فاتح' : 'Light')}</span>
-                </button>
-              )}
-
               <button
                 type="button"
                 onClick={onClose}

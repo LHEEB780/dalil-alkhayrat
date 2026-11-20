@@ -279,30 +279,30 @@ export const SuppliersDirectoryView: React.FC<SuppliersDirectoryViewProps> = ({
       </header>
 
       {/* ================= COMPACT NETWORK SUMMARY BAR ================= */}
-      <div className="grid grid-cols-3 gap-2.5">
-        <div className="bg-white rounded-2xl border border-[#DCE5DC] p-3 flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-[#EBF4EE] text-[#0B5D32] flex items-center justify-center shrink-0">
+      <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
+        <div className="bg-white rounded-2xl border border-[#DCE5DC] p-2.5 sm:p-3 flex flex-col sm:flex-row items-center text-center sm:text-start gap-1.5 sm:gap-2.5 min-w-0">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-[#EBF4EE] text-[#0B5D32] flex items-center justify-center shrink-0">
             <ShieldCheck className="w-4 h-4" />
           </div>
-          <div className="min-w-0">
-            <div className="text-[10px] font-bold text-[#5F7164] truncate">
+          <div className="min-w-0 w-full">
+            <div className="text-[11px] font-bold text-[#5F7164] leading-tight">
               {isAr ? 'الشركات المعتمدة' : 'Verified'}
             </div>
-            <div className="text-sm font-black text-[#142018] tabular-nums">
+            <div className="text-xs sm:text-sm font-black text-[#142018] tabular-nums whitespace-nowrap mt-0.5">
               {suppliersWithLiveDistances.length} {isAr ? 'مورد' : 'vendors'}
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl border border-[#DCE5DC] p-3 flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-[#FEF3C7] text-[#B45309] flex items-center justify-center shrink-0">
+        <div className="bg-white rounded-2xl border border-[#DCE5DC] p-2.5 sm:p-3 flex flex-col sm:flex-row items-center text-center sm:text-start gap-1.5 sm:gap-2.5 min-w-0">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-[#FEF3C7] text-[#B45309] flex items-center justify-center shrink-0">
             <Zap className="w-4 h-4" />
           </div>
-          <div className="min-w-0">
-            <div className="text-[10px] font-bold text-[#5F7164] truncate">
+          <div className="min-w-0 w-full">
+            <div className="text-[11px] font-bold text-[#5F7164] leading-tight">
               {isAr ? 'فانات نشطة الآن' : 'Active Vans'}
             </div>
-            <div className="text-sm font-black text-[#142018] tabular-nums">
+            <div className="text-xs sm:text-sm font-black text-[#142018] tabular-nums whitespace-nowrap mt-0.5">
               {totalActiveVans} {isAr ? 'فان' : 'vans'}
             </div>
           </div>
@@ -311,28 +311,28 @@ export const SuppliersDirectoryView: React.FC<SuppliersDirectoryViewProps> = ({
         <button
           type="button"
           onClick={() => setOnlyFavorites((prev) => !prev)}
-          className={`rounded-2xl border p-3 flex items-center gap-2.5 text-start transition cursor-pointer ${
+          className={`rounded-2xl border p-2.5 sm:p-3 flex flex-col sm:flex-row items-center text-center sm:text-start gap-1.5 sm:gap-2.5 min-w-0 transition cursor-pointer ${
             onlyFavorites
               ? 'bg-[#0B5D32] border-[#0B5D32] text-white'
               : 'bg-white border-[#DCE5DC] hover:border-[#0B5D32]'
           }`}
         >
           <div
-            className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center shrink-0 ${
               onlyFavorites ? 'bg-white/15 text-[#FDE047]' : 'bg-[#FDF2F2] text-[#E11D48]'
             }`}
           >
             <Heart className={`w-4 h-4 ${onlyFavorites ? 'fill-current' : ''}`} />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 w-full">
             <div
-              className={`text-[10px] font-bold truncate ${
-                onlyFavorites ? 'text-white/80' : 'text-[#5F7164]'
+              className={`text-[11px] font-bold leading-tight ${
+                onlyFavorites ? 'text-white/85' : 'text-[#5F7164]'
               }`}
             >
               {isAr ? 'الموردين المفضلين' : 'Favorites'}
             </div>
-            <div className="text-sm font-black tabular-nums">
+            <div className="text-xs sm:text-sm font-black tabular-nums whitespace-nowrap mt-0.5">
               {favoriteSupplierIds.length} {isAr ? 'محفوظ' : 'saved'}
             </div>
           </div>
@@ -646,7 +646,7 @@ export const SuppliersDirectoryView: React.FC<SuppliersDirectoryViewProps> = ({
                 </div>
 
                 {/* Action Buttons */}
-                <div className="pt-1 flex items-center gap-2">
+                <div className="pt-1 space-y-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -656,39 +656,43 @@ export const SuppliersDirectoryView: React.FC<SuppliersDirectoryViewProps> = ({
                         onBrowseSupplierProducts(supplier.nameAr);
                       }
                     }}
-                    className="flex-1 min-h-[42px] py-2 px-3 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap"
+                    className="w-full min-h-[42px] py-2.5 px-3 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white text-xs sm:text-[13px] font-black flex items-center justify-center gap-2 transition cursor-pointer whitespace-nowrap"
                   >
                     <ShoppingBag className="w-4 h-4 shrink-0" />
                     <span>{isAr ? 'تصفح منتجات المورد' : 'Browse Catalog'}</span>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setVanRequestedSupplier(supplier)}
-                    className="min-h-[42px] py-2 px-3 rounded-xl bg-[#EBF4EE] hover:bg-[#DCECE1] border border-[#0B5D32]/25 text-[#0B5D32] text-xs font-black flex items-center justify-center gap-1 transition cursor-pointer shrink-0 whitespace-nowrap"
-                    title={isAr ? 'طلب فان كاش فوري لموقع متجرك' : 'Request Instant Cash Van'}
-                  >
-                    <Zap className="w-3.5 h-3.5" />
-                    <span>{isAr ? 'فان كاش' : 'Van'}</span>
-                  </button>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setVanRequestedSupplier(supplier)}
+                      className="min-h-[40px] py-2 px-2 rounded-xl bg-[#EBF4EE] hover:bg-[#DCECE1] border border-[#0B5D32]/25 text-[#0B5D32] text-xs font-black flex items-center justify-center gap-1 transition cursor-pointer whitespace-nowrap"
+                      title={isAr ? 'طلب فان كاش فوري لموقع متجرك' : 'Request Instant Cash Van'}
+                    >
+                      <Zap className="w-3.5 h-3.5 shrink-0" />
+                      <span>{isAr ? 'فان كاش' : 'Van'}</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setRatingSupplier(supplier)}
-                    className="w-10 h-[42px] rounded-xl bg-[#FEF9C3] hover:bg-[#FEF08A] border border-[#FDE047] text-[#854D0E] flex items-center justify-center transition cursor-pointer shrink-0"
-                    title={isAr ? 'تقييم المورد بالنجوم وتعليق' : 'Rate supplier'}
-                    aria-label={isAr ? 'تقييم المورد' : 'Rate supplier'}
-                  >
-                    <Star className="w-4 h-4 fill-[#EAB308] text-[#CA8A04]" />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setRatingSupplier(supplier)}
+                      className="min-h-[40px] py-2 px-2 rounded-xl bg-[#FEF9C3] hover:bg-[#FEF08A] border border-[#FDE047] text-[#854D0E] text-xs font-black flex items-center justify-center gap-1 transition cursor-pointer whitespace-nowrap"
+                      title={isAr ? 'تقييم المورد بالنجوم وتعليق' : 'Rate supplier'}
+                      aria-label={isAr ? 'تقييم المورد' : 'Rate supplier'}
+                    >
+                      <Star className="w-3.5 h-3.5 fill-[#EAB308] text-[#CA8A04] shrink-0" />
+                      <span>{isAr ? 'تقييم' : 'Rate'}</span>
+                    </button>
 
-                  <a
-                    href={`tel:${supplier.phone}`}
-                    className="w-10 h-[42px] rounded-xl bg-[#F4F4EA] hover:bg-[#EBF4EE] border border-[#DCE5DC] text-[#3D5244] hover:text-[#0B5D32] flex items-center justify-center transition cursor-pointer shrink-0"
-                    title={supplier.phone}
-                  >
-                    <Phone className="w-4 h-4" />
-                  </a>
+                    <a
+                      href={`tel:${supplier.phone}`}
+                      className="min-h-[40px] py-2 px-2 rounded-xl bg-[#F4F4EA] hover:bg-[#EBF4EE] border border-[#DCE5DC] text-[#3D5244] hover:text-[#0B5D32] text-xs font-black flex items-center justify-center gap-1 transition cursor-pointer whitespace-nowrap"
+                      title={supplier.phone}
+                    >
+                      <Phone className="w-3.5 h-3.5 shrink-0" />
+                      <span>{isAr ? 'اتصال' : 'Call'}</span>
+                    </a>
+                  </div>
                 </div>
               </div>
             </div>

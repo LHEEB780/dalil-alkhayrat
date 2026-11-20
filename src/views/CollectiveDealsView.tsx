@@ -35,6 +35,7 @@ import {
 } from '../types/index.ts';
 import { formatCurrency } from '../utils/format.ts';
 import { getLocalizedText } from '../utils/translations.ts';
+import { fetchWithRetry } from '../utils/fetchWithRetry.ts';
 import {
   WHOLESALE_SUPPLIERS,
   WholesaleSupplier,
@@ -200,20 +201,24 @@ export const CollectiveDealsView: React.FC<CollectiveDealsViewProps> = ({
     totalIQD: number;
   } | null>(null);
 
-  const loadPools = async () => {
+  const loadPools = async (signal?: AbortSignal) => {
     try {
-      const res = await fetch('/api/collective-pools');
+      const res = await fetchWithRetry('/api/collective-pools', { signal, retries: 2 });
+      if (!res.ok) return;
       const data = await res.json();
-      if (data.success) {
+      if (!signal?.aborted && data.success) {
         setPools(data.data);
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || signal?.aborted) return;
+      console.warn('Could not load collective pools:', err?.message || err);
     }
   };
 
   useEffect(() => {
-    loadPools();
+    const controller = new AbortController();
+    loadPools(controller.signal);
+    return () => controller.abort();
   }, []);
 
   const heroCampaigns: HeroCampaignSlide[] = useMemo(
@@ -554,11 +559,13 @@ export const CollectiveDealsView: React.FC<CollectiveDealsViewProps> = ({
   const handleJoinPool = async (pool: CollectivePool) => {
     const qty = pledgeQuantities[pool.id] || 10;
     try {
-      const res = await fetch(`/api/collective-pools/${pool.id}/pledge`, {
+      const res = await fetchWithRetry(`/api/collective-pools/${pool.id}/pledge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quantity: qty })
+        body: JSON.stringify({ quantity: qty }),
+        retries: 1
       });
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         setPledgedSuccessPoolId(pool.id);
@@ -566,7 +573,7 @@ export const CollectiveDealsView: React.FC<CollectiveDealsViewProps> = ({
         loadPools();
       }
     } catch (err: any) {
-      console.error(err?.message || err);
+      console.warn('Could not join collective pool:', err?.message || err);
     }
   };
 

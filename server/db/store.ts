@@ -268,7 +268,49 @@ class AppDataStore {
       result = result.filter(p => p.category === params.category || p.category === resolvedCat);
     }
     if (params?.query) {
-      const q = params.query.toLowerCase().trim();
+      const normalizeText = (value: string) =>
+        value.toLowerCase().replace(/[\u064B-\u065F\u0670\u0640]/g, '').trim();
+      const tokenizeWords = (value: string) =>
+        normalizeText(value).split(/[\s\-_/&،,()+.]+/).filter(Boolean);
+      const stripArabicAl = (word: string) =>
+        word.length > 2 && word.startsWith('ال') ? word.slice(2) : word;
+
+      const normalizedQuery = normalizeText(params.query);
+      const queryTokens = tokenizeWords(normalizedQuery);
+
+      const scoreText = (fieldText: string | undefined): 0 | 1 | 2 | 3 => {
+        if (!fieldText || queryTokens.length === 0) return 0;
+        const normalizedField = normalizeText(fieldText);
+        if (!normalizedField) return 0;
+        if (
+          normalizedField === normalizedQuery ||
+          stripArabicAl(normalizedField) === stripArabicAl(normalizedQuery)
+        ) {
+          return 3;
+        }
+        const words = tokenizeWords(normalizedField);
+        if (words.length === 0) return 0;
+
+        let minTokenScore: 0 | 1 | 2 = 2;
+        for (const qt of queryTokens) {
+          const qtBare = stripArabicAl(qt);
+          let bestWordScore: 0 | 1 | 2 = 0;
+          for (const w of words) {
+            const wBare = stripArabicAl(w);
+            if (w === qt || wBare === qt || w === qtBare || wBare === qtBare) {
+              bestWordScore = 2;
+              break;
+            }
+            if (w.startsWith(qt) || (w !== wBare && wBare.startsWith(qt))) {
+              bestWordScore = 1;
+            }
+          }
+          if (bestWordScore === 0) return 0;
+          if (bestWordScore < minTokenScore) minTokenScore = bestWordScore;
+        }
+        return minTokenScore;
+      };
+
       const BILINGUAL_SUBCATEGORY_KEYWORDS: Record<string, string[]> = {
         'أرز': ['rice', 'basmati', 'anbar', 'long grain', 'mahmood rice'],
         'سكر ومحليات': ['sugar', 'white sugar', 'cane sugar', 'sweeteners', 'brown sugar', 'stevia'],
@@ -291,18 +333,30 @@ class AppDataStore {
         'منظفات الغسيل': ['laundry', 'detergent', 'washing powder', 'tide', 'ariel', 'cleaning'],
         'منظفات الأطباق': ['dishwashing', 'dish soap', 'fairy', 'pril', 'cleaning']
       };
-      result = result.filter(p => {
-        const subKws = p.subCategory ? (BILINGUAL_SUBCATEGORY_KEYWORDS[p.subCategory] || []) : [];
-        return (
-          p.nameAr.toLowerCase().includes(q) ||
-          (p.nameEn ? p.nameEn.toLowerCase().includes(q) : false) ||
-          p.brand.toLowerCase().includes(q) ||
-          p.category.toLowerCase().includes(q) ||
-          (p.subCategory ? p.subCategory.toLowerCase().includes(q) : false) ||
-          p.barcode.includes(q) ||
-          subKws.some(kw => kw.includes(q))
-        );
-      });
+
+      const scored = result
+        .map(p => {
+          const subKws = p.subCategory ? (BILINGUAL_SUBCATEGORY_KEYWORDS[p.subCategory] || []) : [];
+          let bestScore = Math.max(
+            scoreText(p.nameAr),
+            scoreText(p.nameEn),
+            scoreText(p.brand),
+            scoreText(p.category),
+            scoreText(p.subCategory),
+            ...subKws.map(kw => scoreText(kw))
+          );
+          const barcodeNorm = p.barcode.toLowerCase();
+          if (barcodeNorm === normalizedQuery) bestScore = Math.max(bestScore, 3);
+          else if (normalizedQuery && barcodeNorm.startsWith(normalizedQuery)) bestScore = Math.max(bestScore, 1);
+          return { product: p, score: bestScore };
+        })
+        .filter(item => item.score > 0);
+
+      const minRequiredScore = scored.some(item => item.score >= 2) ? 2 : 1;
+      result = scored
+        .filter(item => item.score >= minRequiredScore)
+        .sort((a, b) => b.score - a.score)
+        .map(item => item.product);
     }
 
     const eligibleSupplierIds = params?.deliveryZoneId

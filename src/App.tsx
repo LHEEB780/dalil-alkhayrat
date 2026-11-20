@@ -79,33 +79,17 @@ export default function App() {
       : 'Dalil Al-Khairat | B2B Food & Wholesale Iraq';
   }, [language]);
   
-  const DEFAULT_PLATFORM_ADMIN_SESSION: UserSession = {
-    role: 'admin',
-    name: 'فريق تكامل الأنظمة و API',
-    entityName: 'بوابة المطورين - REST OpenAPI',
-    city: 'بغداد - المقر الرئيسي',
-    badge: 'الإدارة (Admin & API)',
-    phone: 'admin@dalilalkhairat.iq',
-    avatarColor: 'bg-purple-600',
-    entityId: 'admin_platform'
-  };
-
   // Isolated user session state
   const [userSession, setUserSession] = useState<UserSession | null>(() => {
     try {
-      if (!localStorage.getItem('dalil_switched_to_admin_v1')) {
-        localStorage.setItem('dalil_switched_to_admin_v1', '1');
-        localStorage.setItem('souq_user_session', JSON.stringify(DEFAULT_PLATFORM_ADMIN_SESSION));
-        return DEFAULT_PLATFORM_ADMIN_SESSION;
-      }
       const saved = localStorage.getItem('souq_user_session');
       return saved ? JSON.parse(saved) : null;
     } catch {
-      return DEFAULT_PLATFORM_ADMIN_SESSION;
+      return null;
     }
   });
 
-  const [activeTab, setActiveTabState] = useState<AppTab>('api_docs');
+  const [activeTab, setActiveTabState] = useState<AppTab>('marketplace');
   const [workspaceMode, setWorkspaceMode] = useState<StoreWorkspaceMode>('b2b');
   const [isStoreOpsEnabled, setIsStoreOpsEnabled] = useState<boolean>(() => {
     try {
@@ -223,23 +207,15 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Appearance Mode (Dark / Light)
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('dalil_theme') === 'dark';
-    } catch {
-      return false;
-    }
-  });
-
+  // Ensure light appearance mode is active
   useEffect(() => {
     try {
-      localStorage.setItem('dalil_theme', isDarkMode ? 'dark' : 'light');
+      localStorage.removeItem('dalil_theme');
     } catch {
       // ignore
     }
-    document.documentElement.classList.toggle('dark-theme', isDarkMode);
-  }, [isDarkMode]);
+    document.documentElement.classList.remove('dark-theme');
+  }, []);
 
   // Global Wishlist & Saved Suppliers
   const [wishlistBarcodes, setWishlistBarcodes] = useState<string[]>(() => {
@@ -1196,8 +1172,6 @@ export default function App() {
           onOpenQRPoster={() => setIsQRPosterOpen(true)}
           onOpenLowStockAlerts={openLowStockAlertsPage}
           lowStockCount={lowStockAlerts.length}
-          isDarkMode={isDarkMode}
-          onToggleDarkMode={() => setIsDarkMode((prev) => !prev)}
           onOpenAccountSection={(section) => {
             setActiveAccountSection(section);
             if (section === 'messages') setUnreadMessagesCount(0);
