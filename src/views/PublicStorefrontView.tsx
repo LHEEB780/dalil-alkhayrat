@@ -54,7 +54,46 @@ interface PublicStorefrontViewProps {
   language?: Language;
 }
 
+function sanitizeB2CImageUrl(url?: string, category?: string): string {
+  const categoryFallbacks: Record<string, string> = {
+    'زيوت وسمن': '/assets/images/white_sunflower_oil.jpg',
+    'أرز وحبوب': '/assets/images/white_basmati_rice.jpg',
+    'ألبان وأجبان': '/assets/images/white_milk_powder.jpg',
+    'معلبات ومخللات': '/assets/images/white_tomato_paste.jpg',
+    'سكر وحلويات': '/assets/images/unit_biscuits_pack.jpg',
+    'منظفات وعناية': '/assets/images/white_cleaner_bottles.jpg'
+  };
+  const fallback = (category && categoryFallbacks[category]) || '/assets/images/white_basmati_rice.jpg';
+  if (!url || typeof url !== 'string') return fallback;
+  const trimmed = url.trim();
+  if (
+    !trimmed ||
+    trimmed.includes('unsplash.com') ||
+    trimmed.includes('carton_') ||
+    trimmed.includes('product_white_sugar_50kg')
+  ) {
+    return fallback;
+  }
+  return trimmed;
+}
+
 const DEFAULT_RETAIL_CONSUMER_PRODUCTS = [
+  {
+    barcode: '6281004411223-RET',
+    productName: 'زيت زيتون بكر ممتاز عصرة أولى أرز لبنان (مفرد)',
+    nameEn: 'Extra Virgin Olive Oil Glass Bottle 750ml',
+    brand: 'أرز لبنان بريميوم',
+    category: 'زيوت وسمن',
+    subCategory: 'زيوت وسمن وطبخ',
+    unit: 'قنينة زجاجية مفردة (750 مل)',
+    retailSellingPriceIQD: 9500,
+    oldPrice: 11000,
+    discountPercent: 14,
+    stockQuantity: 34,
+    rating: 4.9,
+    reviewsCount: 142,
+    imageUrl: '/assets/images/unit_olive_oil_bottle.jpg'
+  },
   {
     barcode: '6210001234567-RET',
     productName: 'زيت دوار الشمس النقي عافية (مفرد)',
@@ -69,7 +108,7 @@ const DEFAULT_RETAIL_CONSUMER_PRODUCTS = [
     stockQuantity: 45,
     rating: 4.9,
     reviewsCount: 112,
-    imageUrl: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/white_sunflower_oil.jpg'
   },
   {
     barcode: '6281007000123-RET',
@@ -85,7 +124,7 @@ const DEFAULT_RETAIL_CONSUMER_PRODUCTS = [
     stockQuantity: 30,
     rating: 4.8,
     reviewsCount: 154,
-    imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/white_basmati_rice.jpg'
   },
   {
     barcode: '6281001234501-RET',
@@ -101,7 +140,7 @@ const DEFAULT_RETAIL_CONSUMER_PRODUCTS = [
     stockQuantity: 28,
     rating: 4.7,
     reviewsCount: 88,
-    imageUrl: 'https://images.unsplash.com/photo-1550583724-b2692b85b150?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/white_milk_powder.jpg'
   },
   {
     barcode: '5201002345678-RET',
@@ -117,7 +156,7 @@ const DEFAULT_RETAIL_CONSUMER_PRODUCTS = [
     stockQuantity: 60,
     rating: 4.9,
     reviewsCount: 210,
-    imageUrl: 'https://images.unsplash.com/photo-1534483509719-3feaee7c30da?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/white_tomato_paste.jpg'
   },
   {
     barcode: '7622210123456-RET',
@@ -133,7 +172,7 @@ const DEFAULT_RETAIL_CONSUMER_PRODUCTS = [
     stockQuantity: 35,
     rating: 4.9,
     reviewsCount: 165,
-    imageUrl: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/white_ceylon_tea.jpg'
   },
   {
     barcode: '6281008765432-RET',
@@ -149,7 +188,7 @@ const DEFAULT_RETAIL_CONSUMER_PRODUCTS = [
     stockQuantity: 80,
     rating: 4.8,
     reviewsCount: 92,
-    imageUrl: 'https://images.unsplash.com/photo-1581441363689-1f3c3c414635?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/white_sugar_pack.jpg'
   },
   {
     barcode: '3073780000001-RET',
@@ -165,7 +204,7 @@ const DEFAULT_RETAIL_CONSUMER_PRODUCTS = [
     stockQuantity: 25,
     rating: 4.8,
     reviewsCount: 74,
-    imageUrl: 'https://images.unsplash.com/photo-1486297678162-eb2a19b0a32d?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/unit_cheese_tub.jpg'
   },
   {
     barcode: '6291001239999-RET',
@@ -181,29 +220,29 @@ const DEFAULT_RETAIL_CONSUMER_PRODUCTS = [
     stockQuantity: 40,
     rating: 4.7,
     reviewsCount: 65,
-    imageUrl: 'https://images.unsplash.com/photo-1544943910-4c1dc44a0b38?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/white_canned_goods.jpg'
   },
   {
-    barcode: '5000204890123-RET',
-    productName: 'سائل مطهر ومعقم ديتول الأصلي لحماية المنزل (مفرد)',
+    barcode: '5000300123456-RET',
+    productName: 'سائل مطهر ومنظف للأسطح ديتول (مفرد)',
     nameEn: 'Dettol Original Antiseptic Liquid 500ml',
     brand: 'ديتول العراق',
     category: 'منظفات وعناية',
     subCategory: 'منظفات ومطهرات',
-    unit: 'قنينة مفردة (500 مل)',
+    unit: 'قارورة مفردة (500 مل)',
     retailSellingPriceIQD: 4500,
     oldPrice: 5000,
     discountPercent: 10,
     stockQuantity: 50,
     rating: 5.0,
     reviewsCount: 230,
-    imageUrl: 'https://images.unsplash.com/photo-1585421514738-01798e348b17?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/white_cleaner_bottles.jpg'
   },
   {
-    barcode: '8001250123456-RET',
-    productName: 'معكرونة سباغيتي إيطالية باريلا رقم 5 (مفرد)',
-    nameEn: 'Barilla Spaghetti No. 5 Pasta 500g',
-    brand: 'باريلا',
+    barcode: '8001234567890-RET',
+    productName: 'معكرونة إسباغيتي فاخرة سنان (مفرد)',
+    nameEn: 'Premium Spaghetti Pasta 500g',
+    brand: 'سنان الإيطالية',
     category: 'أرز وحبوب',
     subCategory: 'أرز ومواد تموينية',
     unit: 'كيس مفرد (500 غرام)',
@@ -213,103 +252,103 @@ const DEFAULT_RETAIL_CONSUMER_PRODUCTS = [
     stockQuantity: 65,
     rating: 4.8,
     reviewsCount: 142,
-    imageUrl: 'https://images.unsplash.com/photo-1612927601601-6638404737ce?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/white_pasta_pack.jpg'
   },
   {
     barcode: '7613035123456-RET',
-    productName: 'قهوة سريعة الذوبان كلاسيك نسكافيه أصلي (مفرد)',
+    productName: 'قهوة سريعة التحضير نسكافيه كلاسيك (مفرد)',
     nameEn: 'Nescafe Classic Instant Coffee Jar 200g',
     brand: 'نسكافيه',
     category: 'سكر وحلويات',
     subCategory: 'حلويات وسكر وشاي',
-    unit: 'مرطبان مفرد (200 غرام)',
+    unit: 'مرطبان زجاجي (200 غرام)',
     retailSellingPriceIQD: 6000,
     oldPrice: 6750,
     discountPercent: 11,
     stockQuantity: 30,
     rating: 4.9,
     reviewsCount: 180,
-    imageUrl: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/white_instant_coffee.jpg'
   },
   {
-    barcode: '6210009990001-RET',
-    productName: 'طبق بيض مائدة محلي طازج كبير (مفرد)',
+    barcode: '6281009988776-RET',
+    productName: 'طبقة بيض مائدة طازج عراقي مزارع الفرات (مفرد)',
     nameEn: 'Fresh Farm Table Eggs Large Tray 30 Eggs',
-    brand: 'مداجن بغداد الحديثة',
+    brand: 'دواجن الفرات',
     category: 'ألبان وأجبان',
     subCategory: 'ألبان وأجبان تبريد',
-    unit: 'طبقة منزلية (30 بيضة)',
+    unit: 'طبقة (30 بيضة)',
     retailSellingPriceIQD: 6000,
     oldPrice: 6500,
     discountPercent: 8,
     stockQuantity: 40,
     rating: 4.9,
     reviewsCount: 310,
-    imageUrl: 'https://images.unsplash.com/photo-1506976785307-8732e854ad03?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/unit_eggs_tray.jpg'
   },
   {
-    barcode: '5410076000111-RET',
-    productName: 'مسحوق غسيل أوتوماتيك مركز أريال (مفرد)',
+    barcode: '4001234567891-RET',
+    productName: 'مسحوق غسيل أوتوماتيك أريال لافندر (مفرد)',
     nameEn: 'Ariel Automatic Laundry Detergent Powder 1.5kg',
     brand: 'أريال',
     category: 'منظفات وعناية',
     subCategory: 'منظفات ومطهرات',
-    unit: 'كيس منزلي (1.5 كغم)',
+    unit: 'كيس مفرد (1.5 كغم)',
     retailSellingPriceIQD: 5500,
     oldPrice: 6250,
     discountPercent: 12,
     stockQuantity: 35,
     rating: 4.8,
     reviewsCount: 95,
-    imageUrl: 'https://images.unsplash.com/photo-1583947215259-38e31be8751f?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/white_cleaner_bottles.jpg'
   },
   {
-    barcode: '0130000012432-RET',
-    productName: 'صلصة طماطم كاتشب هاينز الأصلية (مفرد)',
+    barcode: '013000001243-RET',
+    productName: 'كاتشب طماطم طبيعي هاينز ضغط (مفرد)',
     nameEn: 'Heinz Classic Tomato Ketchup Squeeze 850g',
     brand: 'هاينز',
     category: 'معلبات ومخللات',
     subCategory: 'معلبات وصلصات',
-    unit: 'عبوة ضغط مفردة (850 غرام)',
+    unit: 'عبوة ضغط (850 غرام)',
     retailSellingPriceIQD: 2500,
     oldPrice: 2850,
     discountPercent: 12,
     stockQuantity: 50,
     rating: 4.9,
     reviewsCount: 178,
-    imageUrl: 'https://images.unsplash.com/photo-1607623814075-e51df1bdc82f?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/unit_ketchup_bottle.jpg'
   },
   {
     barcode: '8690504123456-RET',
-    productName: 'بسكويت شاي كلاسيك بيتي بور أولكر (مفرد)',
-    nameEn: 'Ulker Petit Beurre Classic Tea Biscuits 800g',
+    productName: 'بسكويت شاي كلاسيك عائلي أولكر (مفرد)',
+    nameEn: 'Ulker Tea Biscuits Family Pack 12x',
     brand: 'أولكر',
     category: 'سكر وحلويات',
     subCategory: 'حلويات وسكر وشاي',
-    unit: 'باكيت عائلي (800 غرام)',
+    unit: 'باكيت مفرد (12 قطعة)',
     retailSellingPriceIQD: 1500,
     oldPrice: 1750,
     discountPercent: 14,
     stockQuantity: 70,
     rating: 4.7,
     reviewsCount: 120,
-    imageUrl: 'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?auto=format&fit=crop&w=400&q=80'
+    imageUrl: '/assets/images/unit_biscuits_pack.jpg'
   },
   {
-    barcode: '6281005554321-RET',
-    productName: 'سمن نباتي نقي للطبخ شوكة ومعلقة (مفرد)',
-    nameEn: 'Pure Vegetable Cooking Ghee Spoon & Fork 900g',
-    brand: 'شوكة وملعقة',
-    category: 'زيوت وسمن',
-    subCategory: 'زيوت وسمن وطبخ',
-    unit: 'علبة مفردة (900 غرام)',
-    retailSellingPriceIQD: 3500,
-    oldPrice: 4000,
+    barcode: '6281003322114-RET',
+    productName: 'قهوة إسبريسو محمصة مطحونة مختصة (مفرد)',
+    nameEn: 'Roasted Ground Espresso Coffee Pack 250g',
+    brand: 'محمصة دجلة المختصة',
+    category: 'سكر وحلويات',
+    subCategory: 'حلويات وسكر وشاي',
+    unit: 'عبوة مفردة (250 غرام)',
+    retailSellingPriceIQD: 7500,
+    oldPrice: 8500,
     discountPercent: 12,
-    stockQuantity: 25,
-    rating: 4.7,
-    reviewsCount: 68,
-    imageUrl: 'https://images.unsplash.com/photo-1589367920969-ab8e050bbb04?auto=format&fit=crop&w=400&q=80'
+    stockQuantity: 32,
+    rating: 4.9,
+    reviewsCount: 78,
+    imageUrl: '/assets/images/white_espresso_coffee.jpg'
   }
 ];
 
@@ -334,8 +373,8 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
     address: 'حي المنصور - شارع 14 رمضان - قرب ساحة الرواد',
     district: 'بغداد - الكرخ',
     phone: '+964 771 555 8899',
-    coverImageUrl: 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?auto=format&fit=crop&w=1200&q=80',
-    logoUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=200&q=80',
+    coverImageUrl: '/assets/images/banner_dalil_hero.jpg',
+    logoUrl: '/assets/images/unit_olive_oil_bottle.jpg',
     rating: 4.9,
     reviewsCount: 520,
     workingHoursAr: 'مفتوح الآن • 8:00 ص - 1:00 منتصف الليل',
@@ -401,7 +440,7 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
       badgeEn: '40% OFF',
       badgeBg: 'bg-[#FFE600] text-gray-950',
       bgColor: 'from-emerald-700 via-emerald-800 to-green-950',
-      image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=800&q=80',
+      image: '/assets/images/banner_dalil_hero.jpg',
       active: true
     },
     {
@@ -414,7 +453,7 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
       badgeEn: 'Fresh Chilled',
       badgeBg: 'bg-blue-500 text-white',
       bgColor: 'from-blue-700 via-blue-800 to-slate-900',
-      image: 'https://images.unsplash.com/photo-1550583724-b2692b85b150?auto=format&fit=crop&w=800&q=80',
+      image: '/assets/images/white_milk_powder.jpg',
       active: true
     },
     {
@@ -427,7 +466,7 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
       badgeEn: 'Buy 2 Get 1',
       badgeBg: 'bg-rose-500 text-white',
       bgColor: 'from-rose-700 via-rose-800 to-red-950',
-      image: 'https://images.unsplash.com/photo-1585421514738-01798e348b17?auto=format&fit=crop&w=800&q=80',
+      image: '/assets/images/white_cleaner_bottles.jpg',
       active: true
     },
     {
@@ -440,7 +479,7 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
       badgeEn: '20 Min Delivery',
       badgeBg: 'bg-[#00A046] text-white',
       bgColor: 'from-amber-600 via-amber-700 to-orange-950',
-      image: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=800&q=80',
+      image: '/assets/images/banner_dalil_deals.jpg',
       active: true
     }
   ]);
@@ -454,49 +493,49 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
     return () => clearInterval(timer);
   }, [heroBanners.length]);
 
-  // Main Categories List with circular photos (ReadyGrocery style)
+  // Main Categories List with circular single-unit studio photos
   const mainCategories = [
     {
       id: 'الكل',
       labelAr: 'جميع الأصناف',
       labelEn: 'All Items',
-      image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=150&q=80'
+      image: '/assets/images/unit_olive_oil_bottle.jpg'
     },
     {
       id: 'أرز وحبوب',
       labelAr: 'أرز ومواد تموينية',
       labelEn: 'Rice & Grains',
-      image: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=150&q=80'
+      image: '/assets/images/white_basmati_rice.jpg'
     },
     {
       id: 'زيوت وسمن',
       labelAr: 'زيوت وسمن وطبخ',
       labelEn: 'Oils & Ghee',
-      image: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&w=150&q=80'
+      image: '/assets/images/white_sunflower_oil.jpg'
     },
     {
       id: 'ألبان وأجبان',
       labelAr: 'ألبان وأجبان تبريد',
       labelEn: 'Dairy & Chilled',
-      image: 'https://images.unsplash.com/photo-1550583724-b2692b85b150?auto=format&fit=crop&w=150&q=80'
+      image: '/assets/images/unit_cheese_tub.jpg'
     },
     {
       id: 'معلبات ومخللات',
       labelAr: 'معلبات وصلصات',
       labelEn: 'Canned & Sauces',
-      image: 'https://images.unsplash.com/photo-1534483509719-3feaee7c30da?auto=format&fit=crop&w=150&q=80'
+      image: '/assets/images/white_tomato_paste.jpg'
     },
     {
       id: 'سكر وحلويات',
       labelAr: 'حلويات وسكر وشاي',
       labelEn: 'Sweets & Tea',
-      image: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=150&q=80'
+      image: '/assets/images/unit_biscuits_pack.jpg'
     },
     {
       id: 'منظفات وعناية',
       labelAr: 'منظفات ومطهرات',
       labelEn: 'Cleaning & Care',
-      image: 'https://images.unsplash.com/photo-1585421514738-01798e348b17?auto=format&fit=crop&w=150&q=80'
+      image: '/assets/images/white_cleaner_bottles.jpg'
     }
   ];
 
@@ -804,7 +843,7 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
         {/* Cover Photo Banner with Overlay */}
         <div className="relative h-48 sm:h-64 w-full bg-gray-100 overflow-hidden">
           <img
-            src={storeData?.coverImageUrl || 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?auto=format&fit=crop&w=1200&q=80'}
+            src={storeData?.coverImageUrl || '/assets/images/banner_dalil_hero.jpg'}
             alt="Supermarket Storefront"
             className="w-full h-full object-cover"
           />
@@ -848,9 +887,9 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
               {/* Store Circular / Rounded Logo */}
               <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-white p-1 border-4 border-white shadow-xl shrink-0 overflow-hidden">
                 <img
-                  src={storeData?.logoUrl || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=200&q=80'}
+                  src={storeData?.logoUrl || '/assets/images/unit_olive_oil_bottle.jpg'}
                   alt="Store Logo"
-                  className="w-full h-full object-cover rounded-xl"
+                  className="w-full h-full object-contain rounded-xl"
                 />
               </div>
 
@@ -1184,7 +1223,7 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
                 {/* Clean Pure White Square Image Stage */}
                 <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-white p-2 mb-2.5">
                   <img
-                    src={product.imageUrl || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80'}
+                    src={sanitizeB2CImageUrl(product.imageUrl, product.category)}
                     alt={cleanTitle}
                     referrerPolicy="no-referrer"
                     className="h-full w-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300"
@@ -1864,7 +1903,7 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
                     {detailSlideIndex === 0 && (
                       <div className="w-full h-full flex items-center justify-center px-6 pt-5 pb-12 sm:px-10 sm:pt-8 sm:pb-14">
                         <img
-                          src={dp.imageUrl || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80'}
+                          src={sanitizeB2CImageUrl(dp.imageUrl, dp.category)}
                           alt={dpName}
                           referrerPolicy="no-referrer"
                           className="max-h-full max-w-full object-contain drop-shadow-sm rounded-xl"
@@ -1877,7 +1916,7 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
                       <div className="w-full h-full flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-6 px-4 pt-4 pb-12 sm:p-10 sm:pb-14 bg-linear-to-br from-emerald-50/40 via-white to-slate-50">
                         <div className="w-28 h-28 sm:w-44 sm:h-44 bg-white rounded-2xl border border-[#E5E7EB] p-3 flex items-center justify-center shadow-xs shrink-0">
                           <img
-                            src={dp.imageUrl || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80'}
+                            src={sanitizeB2CImageUrl(dp.imageUrl, dp.category)}
                             alt={dpName}
                             referrerPolicy="no-referrer"
                             className="max-h-full max-w-full object-contain scale-105"

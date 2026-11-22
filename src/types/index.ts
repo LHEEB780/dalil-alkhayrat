@@ -63,6 +63,7 @@ export type AppTab =
 export type AccountSectionId =
   | 'profile'
   | 'orders'
+  | 'invoices'
   | 'credit_ledger'
   | 'messages'
   | 'support'
@@ -97,6 +98,7 @@ export interface ProductWithOffers {
   packSize?: string;
   packageQuantity: number;
   imageUrl?: string;
+  images?: string[];
   descriptionAr?: string;
   isPerishable: boolean;
   storageType?: 'ambient' | 'chilled' | 'frozen' | 'dry' | 'controlled';

@@ -33,7 +33,8 @@ import {
   Moon,
   Store,
   LayoutGrid,
-  Power
+  Power,
+  FileText
 } from 'lucide-react';
 import { Language, Currency, AppTab, AccountSectionId, StoreWorkspaceMode } from '../types/index.ts';
 import { UserSession } from '../views/WelcomeAuthView.tsx';
@@ -271,6 +272,15 @@ export const RetailerSidebarDrawer: React.FC<RetailerSidebarDrawerProps> = ({
           icon: CreditCard,
           iconStyle: 'bg-[#EFF7F1] text-[#0B5D32] border-[#DCE5DC]',
           action: () => openSection('credit_ledger', 'b2b'),
+          badge: null
+        },
+        {
+          id: 'account_invoices',
+          accountSection: 'invoices',
+          title: isAr ? 'سجل الفواتير والسداد' : 'Invoices & Payment Details',
+          icon: FileText,
+          iconStyle: 'bg-[#EFF7F1] text-[#0B5D32] border-[#DCE5DC]',
+          action: () => openSection('invoices', 'b2b'),
           badge: null
         },
         {

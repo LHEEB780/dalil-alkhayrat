@@ -61,6 +61,7 @@ import { getLocalizedText } from '../utils/translations.ts';
 import { SupplierRatingModal } from '../components/SupplierRatingSection.tsx';
 import { SupplierLedgerDetailView } from '../components/SupplierLedgerDetailView.tsx';
 import { RetailerPaymentLedgerView } from './RetailerPaymentLedgerView.tsx';
+import { RetailerInvoicesView } from './RetailerInvoicesView.tsx';
 
 interface ChatThreadMessage {
   id: string;
@@ -385,6 +386,11 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
       label: isAr ? 'الطلبات' : 'Orders',
       icon: ShoppingBag,
       badge: orders.length > 0 ? orders.length : null
+    },
+    {
+      id: 'invoices',
+      label: isAr ? 'سجل الفواتير' : 'Invoices',
+      icon: FileText
     },
     {
       id: 'credit_ledger',
@@ -1042,6 +1048,25 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
             </div>
           )}
         </div>
+      )}
+
+      {/* =================== SECTION 2A: INVOICES & PAYMENT DETAILS =================== */}
+      {activeSection === 'invoices' && (
+        <RetailerInvoicesView
+          creditAccounts={storeCreditAccounts}
+          orders={orders}
+          currency={currency}
+          language={language}
+          storeName={userSession.entityName}
+          storeId={userSession.entityId || 'store_almansoor'}
+          onBrowseMarketplace={goToCatalog}
+          onOpenSupplierStatement={(creditAccountId) => {
+            onSelectSection('credit_ledger');
+            setSelectedCreditAccountId(creditAccountId);
+            setOpenedSupplierLedgerId(creditAccountId);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
       )}
 
       {/* =================== SECTION 2B: BUYER CREDIT LEDGER (READ-ONLY) =================== */}

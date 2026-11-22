@@ -45,6 +45,7 @@ export interface UnifiedProduct {
   packSize?: string;
   packageQuantity: number;
   imageUrl?: string;
+  images?: string[];
   descriptionAr?: string;
   isPerishable: boolean;
   storageType?: StorageType;

@@ -392,12 +392,19 @@ class AppDataStore {
       ? new Set(this.getSuppliersByZone(params.deliveryZoneId).map(s => s.id))
       : null;
 
+    const offersByBarcode = new Map<string, SupplierOffer[]>();
+    for (const o of this.offers) {
+      if (eligibleSupplierIds && !eligibleSupplierIds.has(o.supplierId)) continue;
+      let list = offersByBarcode.get(o.barcode);
+      if (!list) {
+        list = [];
+        offersByBarcode.set(o.barcode, list);
+      }
+      list.push(o);
+    }
+
     const mapped = result.map(product => {
-      const productOffers = this.offers.filter(o => {
-        if (o.barcode !== product.barcode) return false;
-        if (eligibleSupplierIds && !eligibleSupplierIds.has(o.supplierId)) return false;
-        return true;
-      });
+      const productOffers = [...(offersByBarcode.get(product.barcode) || [])];
       // Sort offers: lowest price first
       productOffers.sort((a, b) => a.priceIQD - b.priceIQD);
 
@@ -408,8 +415,17 @@ class AppDataStore {
       const longestCreditDays = productOffers.reduce((max, o) => Math.max(max, o.paymentTerms.maxCreditDays), 0);
       const fastestDeliveryDays = productOffers.length > 0 ? Math.min(...productOffers.map(o => o.deliveryDays)) : 1;
 
+      const resolvedImages =
+        product.images && product.images.length > 0
+          ? product.images
+          : product.imageUrl
+          ? [product.imageUrl]
+          : undefined;
+
       return {
         ...product,
+        imageUrl: product.imageUrl || resolvedImages?.[0],
+        images: resolvedImages,
         offers: productOffers,
         minPrice,
         maxPrice,

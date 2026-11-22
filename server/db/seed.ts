@@ -19,6 +19,9 @@ import {
   DeliveryZone,
   Brand
 } from './types.ts';
+import { buildBranchProductsAndOffers } from './branchProductsSeed.ts';
+
+const branchSeedData = buildBranchProductsAndOffers();
 
 export const initialGovernorates: Governorate[] = [
   {
@@ -147,7 +150,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كيس (10 كغم)',
     packSize: '10 كغم',
     packageQuantity: 1,
-    imageUrl: '/assets/images/white_basmati_rice.jpg',
+    imageUrl: '/assets/images/carton_unit_rice_bale.jpg',
+    images: [
+      '/assets/images/carton_unit_rice_bale.jpg',
+      '/assets/images/carton_rice_grain_bulk.jpg',
+      '/assets/images/white_basmati_rice.jpg',
+      '/assets/images/white_pasta_pack.jpg'
+    ],
     descriptionAr: 'أرز بسمتي فاخر حبة طويلة ناصع البياض مثالي للمطاعم والولائم العراقية.',
     isPerishable: false,
     storageType: 'dry',
@@ -171,7 +180,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كرتون (12 × 1 لتر)',
     packSize: '12 × 1 لتر',
     packageQuantity: 12,
-    imageUrl: '/assets/images/white_sunflower_oil.jpg',
+    imageUrl: '/assets/images/carton_unit_sunflower_oil.jpg',
+    images: [
+      '/assets/images/carton_unit_sunflower_oil.jpg',
+      '/assets/images/carton_olive_oil_open.jpg',
+      '/assets/images/white_sunflower_oil.jpg',
+      '/assets/images/carton_cooking_oil_main.jpg'
+    ],
     descriptionAr: 'زيت نباتي صافي خالي من الكوليسترول معبأ بأعلى معايير الجودة الغذائية.',
     isPerishable: false,
     storageType: 'ambient',
@@ -195,7 +210,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كرتون (24 × 400 غرام)',
     packSize: '24 × 400 غرام',
     packageQuantity: 24,
-    imageUrl: '/assets/images/white_milk_powder.jpg',
+    imageUrl: '/assets/images/carton_unit_milk_powder.jpg',
+    images: [
+      '/assets/images/carton_unit_milk_powder.jpg',
+      '/assets/images/carton_canned_open_tins.jpg',
+      '/assets/images/white_milk_powder.jpg',
+      '/assets/images/carton_dairy_milk_main.jpg'
+    ],
     descriptionAr: 'حليب بودرة أوروبي معزز بفيتامين د وأ الكالسيوم سريع الذوبان.',
     isPerishable: true,
     storageType: 'dry',
@@ -219,7 +240,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كرتون (48 × 800 غرام)',
     packSize: '48 × 800 غرام',
     packageQuantity: 48,
-    imageUrl: '/assets/images/white_tomato_paste.jpg',
+    imageUrl: '/assets/images/carton_unit_tomato_paste.jpg',
+    images: [
+      '/assets/images/carton_unit_tomato_paste.jpg',
+      '/assets/images/carton_canned_open_tins.jpg',
+      '/assets/images/white_tomato_paste.jpg',
+      '/assets/images/carton_canned_tomato_main.jpg'
+    ],
     descriptionAr: 'صلصة طماطم حمراء طبيعية خالية من الألوان الاصطناعية طعم عراقي غني.',
     isPerishable: false,
     storageType: 'ambient',
@@ -243,7 +270,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'شوال (50 كغم)',
     packSize: '50 كغم',
     packageQuantity: 1,
-    imageUrl: '/assets/images/white_sugar_pack.jpg',
+    imageUrl: '/assets/images/product_white_sugar_50kg.jpg',
+    images: [
+      '/assets/images/product_white_sugar_50kg.jpg',
+      '/assets/images/carton_rice_grain_bulk.jpg',
+      '/assets/images/white_sugar_pack.jpg',
+      '/assets/images/carton_unit_rice_bale.jpg'
+    ],
     descriptionAr: 'سكر مبلور ناعم الحبيبات إنتاج محلي معتمد للمخابز والمتاجر.',
     isPerishable: false,
     storageType: 'dry',
@@ -267,7 +300,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كرتون (24 × 400 غرام)',
     packSize: '24 × 400 غرام',
     packageQuantity: 24,
-    imageUrl: '/assets/images/white_ceylon_tea.jpg',
+    imageUrl: '/assets/images/carton_unit_tea_box.jpg',
+    images: [
+      '/assets/images/carton_unit_tea_box.jpg',
+      '/assets/images/carton_snacks_open_packs.jpg',
+      '/assets/images/white_ceylon_tea.jpg',
+      '/assets/images/carton_tea_coffee_main.jpg'
+    ],
     descriptionAr: 'شاي عراقي أصيل بنكهة الهيل واللون الياقوتي الفاخر.',
     isPerishable: false,
     storageType: 'dry',
@@ -291,7 +330,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كرتون (48 × 185 غرام)',
     packSize: '48 × 185 غرام',
     packageQuantity: 48,
-    imageUrl: '/assets/images/white_canned_goods.jpg',
+    imageUrl: '/assets/images/carton_canned_open_tins.jpg',
+    images: [
+      '/assets/images/carton_canned_open_tins.jpg',
+      '/assets/images/carton_unit_tomato_paste.jpg',
+      '/assets/images/white_canned_goods.jpg',
+      '/assets/images/carton_canned_tomato_main.jpg'
+    ],
     descriptionAr: 'قطع تونة صفراء متماسكة غنية بأوميغا 3 وسهلة الفتح.',
     isPerishable: false,
     storageType: 'ambient',
@@ -315,7 +360,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كرتون (20 × 500 غرام)',
     packSize: '20 × 500 غرام',
     packageQuantity: 20,
-    imageUrl: '/assets/images/white_pasta_pack.jpg',
+    imageUrl: '/assets/images/carton_unit_pasta.jpg',
+    images: [
+      '/assets/images/carton_unit_pasta.jpg',
+      '/assets/images/carton_snacks_open_packs.jpg',
+      '/assets/images/white_pasta_pack.jpg',
+      '/assets/images/carton_snacks_biscuits_main.jpg'
+    ],
     descriptionAr: 'مكرونة مصنوعة من سميد القمح الصلب لا تتعجن سريعة التحضير.',
     isPerishable: false,
     storageType: 'dry',
@@ -340,7 +391,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كيس (2 كغم)',
     packSize: '2 كغم',
     packageQuantity: 1,
-    imageUrl: '/assets/images/white_espresso_coffee.jpg',
+    imageUrl: '/assets/images/carton_unit_coffee_jar.jpg',
+    images: [
+      '/assets/images/carton_unit_coffee_jar.jpg',
+      '/assets/images/white_espresso_coffee.jpg',
+      '/assets/images/white_coffee_pods.jpg',
+      '/assets/images/white_drip_coffee.jpg'
+    ],
     descriptionAr: 'تحميص إيطالي متوسط فاخر للماكينات الاحترافية والمقاهي والسوبرماركت.',
     isPerishable: false,
     storageType: 'dry',
@@ -364,7 +421,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'علبة (30 ظرف)',
     packSize: '30 ظرف',
     packageQuantity: 30,
-    imageUrl: '/assets/images/white_instant_coffee.jpg',
+    imageUrl: '/assets/images/carton_unit_coffee_jar.jpg',
+    images: [
+      '/assets/images/carton_unit_coffee_jar.jpg',
+      '/assets/images/white_instant_coffee.jpg',
+      '/assets/images/white_coffee_pods.jpg',
+      '/assets/images/white_espresso_coffee.jpg'
+    ],
     descriptionAr: 'مزيج قهوة سريع التحضير مع مبيض وسكر، النكهة الكلاسيكية الأكثر مبيعاً.',
     isPerishable: false,
     storageType: 'dry',
@@ -388,7 +451,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'علبة (16 كبسولة)',
     packSize: '16 كبسولة',
     packageQuantity: 16,
-    imageUrl: '/assets/images/white_coffee_pods.jpg',
+    imageUrl: '/assets/images/carton_unit_coffee_jar.jpg',
+    images: [
+      '/assets/images/carton_unit_coffee_jar.jpg',
+      '/assets/images/white_coffee_pods.jpg',
+      '/assets/images/white_instant_coffee.jpg',
+      '/assets/images/white_espresso_coffee.jpg'
+    ],
     descriptionAr: 'كبسولات حليب وقهوة متوافقة مع ماكينات دولتشي غوستو مع رغوة غنية.',
     isPerishable: false,
     storageType: 'dry',
@@ -412,7 +481,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'باكيت (3 × 225 غرام)',
     packSize: '3 × 225 غرام',
     packageQuantity: 3,
-    imageUrl: '/assets/images/white_drip_coffee.jpg',
+    imageUrl: '/assets/images/carton_unit_coffee_jar.jpg',
+    images: [
+      '/assets/images/carton_unit_coffee_jar.jpg',
+      '/assets/images/white_drip_coffee.jpg',
+      '/assets/images/white_espresso_coffee.jpg',
+      '/assets/images/white_instant_coffee.jpg'
+    ],
     descriptionAr: 'قهوة مطحونة داكنة وغنية مثالية للفلتر والإسبريسو المنزلي والتجاري.',
     isPerishable: false,
     storageType: 'dry',
@@ -436,7 +511,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'مرطبان (400 غرام)',
     packSize: '400 غرام',
     packageQuantity: 1,
-    imageUrl: '/assets/images/white_instant_coffee.jpg',
+    imageUrl: '/assets/images/carton_unit_coffee_jar.jpg',
+    images: [
+      '/assets/images/carton_unit_coffee_jar.jpg',
+      '/assets/images/white_instant_coffee.jpg',
+      '/assets/images/white_espresso_coffee.jpg',
+      '/assets/images/white_drip_coffee.jpg'
+    ],
     descriptionAr: 'حبيبات قهوة ذهبية مجففة بالتجميد بمذاق غني ورائحة لا تقاوم.',
     isPerishable: false,
     storageType: 'dry',
@@ -460,7 +541,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كيس (1 كغم)',
     packSize: '1 كغم',
     packageQuantity: 1,
-    imageUrl: '/assets/images/white_espresso_coffee.jpg',
+    imageUrl: '/assets/images/carton_unit_coffee_jar.jpg',
+    images: [
+      '/assets/images/carton_unit_coffee_jar.jpg',
+      '/assets/images/white_espresso_coffee.jpg',
+      '/assets/images/white_drip_coffee.jpg',
+      '/assets/images/white_coffee_pods.jpg'
+    ],
     descriptionAr: 'أشهر خلطة إيطالية من حبوب أرابيكا الفاخرة بطعم متوازن وملاحظات زهرية.',
     isPerishable: false,
     storageType: 'dry',
@@ -484,7 +571,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'علبة (10 كبسولات)',
     packSize: '10 كبسولات',
     packageQuantity: 10,
-    imageUrl: '/assets/images/white_coffee_pods.jpg',
+    imageUrl: '/assets/images/carton_unit_coffee_jar.jpg',
+    images: [
+      '/assets/images/carton_unit_coffee_jar.jpg',
+      '/assets/images/white_coffee_pods.jpg',
+      '/assets/images/white_espresso_coffee.jpg',
+      '/assets/images/white_instant_coffee.jpg'
+    ],
     descriptionAr: 'كبسولات ألومنيوم تحافظ على النكهة الطازجة متوافقة مع ماكينات نيسبريسو.',
     isPerishable: false,
     storageType: 'dry',
@@ -508,7 +601,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'عبوة (500 غرام)',
     packSize: '500 غرام',
     packageQuantity: 1,
-    imageUrl: '/assets/images/white_drip_coffee.jpg',
+    imageUrl: '/assets/images/carton_unit_coffee_jar.jpg',
+    images: [
+      '/assets/images/carton_unit_coffee_jar.jpg',
+      '/assets/images/white_drip_coffee.jpg',
+      '/assets/images/white_espresso_coffee.jpg',
+      '/assets/images/white_instant_coffee.jpg'
+    ],
     descriptionAr: 'قهوة ألمانية شهيرة مكررة منتقاة من أجود مزارع المرتفعات.',
     isPerishable: false,
     storageType: 'dry',
@@ -532,7 +631,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كيس اقتصادي (400 غرام)',
     packSize: '400 غرام',
     packageQuantity: 1,
-    imageUrl: '/assets/images/white_instant_coffee.jpg',
+    imageUrl: '/assets/images/carton_unit_coffee_jar.jpg',
+    images: [
+      '/assets/images/carton_unit_coffee_jar.jpg',
+      '/assets/images/white_instant_coffee.jpg',
+      '/assets/images/white_drip_coffee.jpg',
+      '/assets/images/white_coffee_pods.jpg'
+    ],
     descriptionAr: 'نكهة ملوك القهوة برائحة ساحرة وسرعة تحضير عالية مناسبة للسوبرماركت.',
     isPerishable: false,
     storageType: 'dry',
@@ -556,7 +661,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كيس (1 كغم)',
     packSize: '1 كغم',
     packageQuantity: 1,
-    imageUrl: '/assets/images/white_espresso_coffee.jpg',
+    imageUrl: '/assets/images/carton_unit_coffee_jar.jpg',
+    images: [
+      '/assets/images/carton_unit_coffee_jar.jpg',
+      '/assets/images/white_espresso_coffee.jpg',
+      '/assets/images/white_drip_coffee.jpg',
+      '/assets/images/white_coffee_pods.jpg'
+    ],
     descriptionAr: 'أرابيكا نقية 100% غنية بنوتات الكراميل والشوكولاتة.',
     isPerishable: false,
     storageType: 'dry',
@@ -580,7 +691,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كرتون (24 × 500 مل)',
     packSize: '24 × 500 مل',
     packageQuantity: 24,
-    imageUrl: '/assets/images/white_cleaner_bottles.jpg',
+    imageUrl: '/assets/images/carton_unit_detergent.jpg',
+    images: [
+      '/assets/images/carton_unit_detergent.jpg',
+      '/assets/images/white_cleaner_bottles.jpg',
+      '/assets/images/carton_paper_tissues_main.jpg',
+      '/assets/images/carton_personal_care_main.jpg'
+    ],
     descriptionAr: 'منظف أطباق ومعقم منزلي فائق الرغوة برائحة الليمون والنعناع مخصص لتجار التجزئة.',
     isPerishable: false,
     storageType: 'ambient',
@@ -604,7 +721,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كرتون (12 × 1 لتر)',
     packSize: '12 × 1 لتر',
     packageQuantity: 12,
-    imageUrl: '/assets/images/white_cleaner_bottles.jpg',
+    imageUrl: '/assets/images/carton_unit_detergent.jpg',
+    images: [
+      '/assets/images/carton_unit_detergent.jpg',
+      '/assets/images/white_cleaner_bottles.jpg',
+      '/assets/images/carton_paper_tissues_main.jpg',
+      '/assets/images/carton_personal_care_main.jpg'
+    ],
     descriptionAr: 'معقم ومطهر عالي التركيز يقضي على الجراثيم برائحة الصنوبر المنعشة للأسواق والمطاعم.',
     isPerishable: false,
     storageType: 'ambient',
@@ -628,7 +751,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كرتون (6 × 3 لتر)',
     packSize: '6 × 3 لتر',
     packageQuantity: 6,
-    imageUrl: '/assets/images/white_cleaner_bottles.jpg',
+    imageUrl: '/assets/images/carton_unit_detergent.jpg',
+    images: [
+      '/assets/images/carton_unit_detergent.jpg',
+      '/assets/images/white_cleaner_bottles.jpg',
+      '/assets/images/carton_paper_tissues_main.jpg',
+      '/assets/images/carton_personal_care_main.jpg'
+    ],
     descriptionAr: 'سائل غسيل فائق الفعالية لإزالة البقع الصعبة مناسب لمحلات السوبرماركت والمغاسل.',
     isPerishable: false,
     storageType: 'ambient',
@@ -652,7 +781,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كرتون (12 × 750 مل)',
     packSize: '12 × 750 مل',
     packageQuantity: 12,
-    imageUrl: '/assets/images/white_cleaner_bottles.jpg',
+    imageUrl: '/assets/images/carton_unit_detergent.jpg',
+    images: [
+      '/assets/images/carton_unit_detergent.jpg',
+      '/assets/images/white_cleaner_bottles.jpg',
+      '/assets/images/carton_paper_tissues_main.jpg',
+      '/assets/images/carton_personal_care_main.jpg'
+    ],
     descriptionAr: 'بخاخ منظف وملمع للزجاج والأسطح يزيل الدهون بدون أثر مخصص للمحلات والشركات.',
     isPerishable: false,
     storageType: 'ambient',
@@ -677,7 +812,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'شريط (12 × 500 مل)',
     packSize: '12 × 500 مل',
     packageQuantity: 12,
-    imageUrl: '/assets/images/white_ceylon_tea.jpg',
+    imageUrl: '/assets/images/carton_unit_water_pack.jpg',
+    images: [
+      '/assets/images/carton_unit_water_pack.jpg',
+      '/assets/images/carton_beverages_water_case.jpg',
+      '/assets/images/carton_unit_beverages.jpg',
+      '/assets/images/carton_tea_coffee_main.jpg'
+    ],
     descriptionAr: 'مياه شرب معدنية نقية قليلة الصوديوم معبأة آلياً للمتاجر والمطاعم.',
     isPerishable: false,
     storageType: 'ambient',
@@ -701,7 +842,13 @@ export const initialProducts: UnifiedProduct[] = [
     unit: 'كرتون (4 × 2.5 كغم)',
     packSize: '4 × 2.5 كغم',
     packageQuantity: 4,
-    imageUrl: '/assets/images/white_pasta_pack.jpg',
+    imageUrl: '/assets/images/carton_frozen_meat_main.jpg',
+    images: [
+      '/assets/images/carton_frozen_meat_main.jpg',
+      '/assets/images/carton_snacks_open_packs.jpg',
+      '/assets/images/white_pasta_pack.jpg',
+      '/assets/images/carton_dairy_milk_main.jpg'
+    ],
     descriptionAr: 'بطاطا مجمدة مقرمشة عالية الجودة مخصصة للمطاعم والسوبرماركت.',
     isPerishable: true,
     storageType: 'frozen',
@@ -714,7 +861,8 @@ export const initialProducts: UnifiedProduct[] = [
     reviewsCount: 86,
     isSmartShipping: true,
     subCategory: 'بطاطا مجمدة'
-  }
+  },
+  ...branchSeedData.products
 ];
 
 export const initialSuppliers: SupplierProfile[] = [
@@ -1227,7 +1375,8 @@ export const initialOffers: SupplierOffer[] = [
     availableStock: 180,
     deliveryDays: 1,
     paymentTerms: { allowsCredit: true, maxCreditDays: 30, allowsCash: true }
-  }
+  },
+  ...branchSeedData.offers
 ];
 
 export const initialStores: StoreProfile[] = [

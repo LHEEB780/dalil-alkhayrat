@@ -136,6 +136,7 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
       setIsProfitCompareOpen(false);
       setIsSupplyTermsOpen(false);
       setImageLoadFailed(false);
+      setFailedSlideImages({});
       setAddedBottomBar(false);
       setAddedOfferId(null);
 
@@ -208,6 +209,48 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
     return [...inCategory, ...topOthers].slice(0, 8);
   }, [product, allProducts]);
 
+  const galleryImages = useMemo(() => {
+    if (!product) return [];
+    const raw =
+      product.images && product.images.length > 0
+        ? product.images.filter(Boolean)
+        : product.imageUrl
+        ? [product.imageUrl]
+        : [];
+    return Array.from(new Set(raw)).length > 0 ? raw : [];
+  }, [product]);
+
+  const slides = useMemo(() => {
+    const roleLabelsAr = [
+      'كرتون الجملة وبجانبه منتج مفرد',
+      'فتح الكرتون وتعبئة الوحدات',
+      'تفاصيل العبوة الفردية',
+      'تكديس وشحن الجملة'
+    ];
+    const roleLabelsEn = [
+      'Wholesale Carton + Single Unit',
+      'Open Case & Inner Units',
+      'Retail Unit Close-Up',
+      'Bulk Dispatch & Stacking'
+    ];
+    if (galleryImages.length === 0) {
+      return [
+        {
+          id: 'fallback-0',
+          label: isAr ? roleLabelsAr[0] : roleLabelsEn[0],
+          src: ''
+        }
+      ];
+    }
+    return galleryImages.map((src, idx) => ({
+      id: `photo-${idx}`,
+      label: isAr
+        ? roleLabelsAr[idx] || `صورة المنتج ${idx + 1}`
+        : roleLabelsEn[idx] || `Product Photo ${idx + 1}`,
+      src
+    }));
+  }, [galleryImages, isAr]);
+
   if (!product) return null;
 
   const displayName =
@@ -244,24 +287,6 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
       : isAr
       ? `التوصيل خلال ${product.fastestDeliveryDays} أيام`
       : `Delivery in ${product.fastestDeliveryDays} days`;
-
-  const slides = [
-    {
-      id: 'hero',
-      label: isAr ? 'الصورة الرئيسية' : 'Main View',
-      kind: 'hero' as const
-    },
-    {
-      id: 'packaging',
-      label: isAr ? 'تعبئة الجملة' : 'Wholesale Pack',
-      kind: 'packaging' as const
-    },
-    {
-      id: 'specs',
-      label: isAr ? 'الباركود والتخزين' : 'GTIN & Storage',
-      kind: 'specs' as const
-    }
-  ];
 
   const handleNextSlide = () => {
     setActiveSlideIndex((prev) => (prev + 1) % slides.length);
@@ -390,141 +415,129 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto bg-[#F8FAFC]"
         >
-          {/* 1. Professional Multi-Slide Image Carousel (with proper bottom clearance for dots) */}
+          {/* 1. Professional 4-Photo Wholesale Image Gallery */}
           <div className="bg-white border-b border-[#E5E7EB]">
             <div
-              className="relative h-76 sm:h-96 w-full bg-linear-to-b from-[#F9FAFB] to-white flex items-center justify-center overflow-hidden select-none"
+              className="relative h-72 sm:h-88 w-full bg-white flex items-center justify-center overflow-hidden select-none"
               onTouchStart={handleTouchStart}
               onTouchEnd={handleTouchEnd}
             >
-              {/* Slide 1: Hero Studio Product Showcase */}
-              {activeSlideIndex === 0 && (
-                <div className="w-full h-full flex items-center justify-center px-4 pt-5 pb-12 sm:px-10 sm:pt-8 sm:pb-14 transition-opacity duration-200">
-                  {product.imageUrl && !imageLoadFailed ? (
-                    <img
-                      src={product.imageUrl}
-                      alt={displayName}
-                      referrerPolicy="no-referrer"
-                      onError={() => setImageLoadFailed(true)}
-                      className="max-h-full max-w-full object-contain drop-shadow-sm rounded-xl transition-transform duration-300"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center text-gray-400">
-                      <Package className="w-16 h-16 stroke-1" />
-                      <span className="text-xs mt-2 font-medium">{displayName}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Slide 2: Wholesale Carton & Packaging Close-up */}
-              {activeSlideIndex === 1 && (
-                <div className="w-full h-full flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-6 px-4 pt-4 pb-12 sm:p-10 sm:pb-14 bg-linear-to-br from-emerald-50/40 via-white to-slate-50">
-                  <div className="w-28 h-28 sm:w-48 sm:h-48 bg-white rounded-2xl border border-[#E5E7EB] p-3 flex items-center justify-center shadow-xs shrink-0">
-                    {product.imageUrl && !imageLoadFailed ? (
+              {(() => {
+                const currentSlide = slides[activeSlideIndex] || slides[0];
+                const currentSrc = currentSlide?.src || product.imageUrl || '';
+                const hasFailed = !currentSrc || Boolean(failedSlideImages[`slide-${activeSlideIndex}`]) || imageLoadFailed;
+                return (
+                  <div className="w-full h-full flex items-center justify-center px-6 pt-5 pb-12 sm:px-12 sm:pt-6 sm:pb-12 transition-opacity duration-200">
+                    {!hasFailed ? (
                       <img
-                        src={product.imageUrl}
-                        alt={displayName}
+                        src={currentSrc}
+                        alt={`${displayName} — ${currentSlide?.label || ''}`}
                         referrerPolicy="no-referrer"
-                        onError={() => setImageLoadFailed(true)}
-                        className="max-h-full max-w-full object-contain scale-105"
+                        onError={() =>
+                          setFailedSlideImages((prev) => ({
+                            ...prev,
+                            [`slide-${activeSlideIndex}`]: true
+                          }))
+                        }
+                        className="max-h-full max-w-full object-contain rounded-xl transition-transform duration-300"
                       />
                     ) : (
-                      <Package className="w-12 h-12 text-[#00A046]" />
+                      <div className="flex flex-col items-center justify-center text-gray-400">
+                        <Package className="w-16 h-16 stroke-1" />
+                        <span className="text-xs mt-2 font-medium">{displayName}</span>
+                      </div>
                     )}
                   </div>
-                  <div className="text-center sm:text-start max-w-xs space-y-1">
-                    <div className="text-[11px] font-bold text-[#00A046]">
-                      {isAr ? 'مواصفات تعبئة الجملة' : 'Wholesale Carton Specs'}
-                    </div>
-                    <div className="text-base sm:text-lg font-black text-[#1F2328]">{displayUnit}</div>
-                    <div className="text-xs sm:text-sm text-[#4B5563]">
-                      {isAr
-                        ? `يحتوي الطرد القياسي على ${product.packageQuantity} وحدة بيع للتجار.`
-                        : `Standard carton packs ${product.packageQuantity} retail units.`}
-                    </div>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
-              {/* Slide 3: Verified Barcode & Storage Quality */}
-              {activeSlideIndex === 2 && (
-                <div className="w-full h-full flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-6 px-4 pt-4 pb-12 sm:p-10 sm:pb-14 bg-linear-to-br from-slate-50 via-white to-blue-50/40">
-                  <div className="w-36 h-32 sm:w-48 sm:h-48 bg-white rounded-2xl border border-[#E5E7EB] p-4 flex flex-col items-center justify-center shadow-xs shrink-0">
-                    <Barcode className="w-12 h-12 sm:w-16 sm:h-16 text-[#1F2328]" />
-                    <span className="font-mono text-xs sm:text-sm font-bold text-[#1F2328] mt-1.5 tracking-wider">
-                      {product.barcode}
-                    </span>
-                    <span className="text-[10px] text-[#6B7280] mt-0.5">
-                      {product.standardBarcodeFormat}
-                    </span>
-                  </div>
-                  <div className="text-center sm:text-start max-w-xs space-y-1">
-                    <div className="text-[11px] font-bold text-blue-700">
-                      {isAr ? 'توثيق المنتج وظروف التخزين' : 'Verified GTIN & Storage'}
-                    </div>
-                    <div className="text-sm sm:text-base font-bold text-[#1F2328] flex items-center justify-center sm:justify-start gap-1.5">
-                      {product.isPerishable ? (
-                        <>
-                          <ThermometerSnowflake className="w-4 h-4 text-sky-600 shrink-0" />
-                          <span>
-                            {isAr ? 'منتج طازج يتطلب حفظاً مبرداً' : 'Chilled / Fresh Storage Required'}
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <ShieldCheck className="w-4 h-4 text-[#00A046] shrink-0" />
-                          <span>
-                            {isAr ? 'تخزين جاف بدرجة حرارة الغرفة' : 'Ambient Dry Warehouse Storage'}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                    <div className="text-xs text-[#6B7280] truncate">
-                      {isAr
-                        ? `العلامة: ${product.brand}`
-                        : `Brand: ${product.brand}`}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Carousel Navigation Arrows (bottom of image, light green) */}
-              <button
-                type="button"
-                onClick={isAr ? handleNextSlide : handlePrevSlide}
-                className="absolute left-3 bottom-2.5 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#DCFCE7]/95 hover:bg-[#BBF7D0] border border-[#86EFAC] shadow-sm flex items-center justify-center text-[#16A34A] transition cursor-pointer"
-                aria-label={isAr ? 'الشريحة التالية' : 'Previous slide'}
-              >
-                <ChevronLeft className="w-4.5 h-4.5" />
-              </button>
-
-              <button
-                type="button"
-                onClick={isAr ? handlePrevSlide : handleNextSlide}
-                className="absolute right-3 bottom-2.5 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#DCFCE7]/95 hover:bg-[#BBF7D0] border border-[#86EFAC] shadow-sm flex items-center justify-center text-[#16A34A] transition cursor-pointer"
-                aria-label={isAr ? 'الشريحة السابقة' : 'Next slide'}
-              >
-                <ChevronRight className="w-4.5 h-4.5" />
-              </button>
-
-              {/* Pagination Dots (clean clearance at bottom) */}
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-white/90 backdrop-blur-xs px-2.5 py-1 rounded-full border border-[#E5E7EB] shadow-2xs">
-                {slides.map((slide, idx) => (
-                  <button
-                    key={slide.id}
-                    type="button"
-                    onClick={() => setActiveSlideIndex(idx)}
-                    aria-label={slide.label}
-                    className={`h-1.5 rounded-full transition-all cursor-pointer ${
-                      activeSlideIndex === idx
-                        ? 'w-5 bg-[#00A046]'
-                        : 'w-1.5 bg-gray-300 hover:bg-gray-400'
-                    }`}
-                  />
-                ))}
+              {/* Photo Counter & Role Label */}
+              <div className="absolute top-3 start-3 flex items-center gap-1.5 bg-white/95 backdrop-blur-xs border border-[#E5E7EB] px-2.5 py-1 rounded-lg shadow-2xs text-[11px] font-bold text-[#0F3D24] tabular-nums">
+                <span>
+                  {activeSlideIndex + 1} / {slides.length}
+                </span>
+                <span className="text-[#CBD5E1]">·</span>
+                <span className="text-[#4B5563] font-semibold">
+                  {slides[activeSlideIndex]?.label}
+                </span>
               </div>
+
+              {/* Carousel Navigation Arrows */}
+              {slides.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={isAr ? handleNextSlide : handlePrevSlide}
+                    className="absolute left-3 bottom-2.5 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#DCFCE7]/95 hover:bg-[#BBF7D0] border border-[#86EFAC] shadow-sm flex items-center justify-center text-[#16A34A] transition cursor-pointer"
+                    aria-label={isAr ? 'الصورة التالية' : 'Previous photo'}
+                  >
+                    <ChevronLeft className="w-4.5 h-4.5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={isAr ? handlePrevSlide : handleNextSlide}
+                    className="absolute right-3 bottom-2.5 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#DCFCE7]/95 hover:bg-[#BBF7D0] border border-[#86EFAC] shadow-sm flex items-center justify-center text-[#16A34A] transition cursor-pointer"
+                    aria-label={isAr ? 'الصورة السابقة' : 'Next photo'}
+                  >
+                    <ChevronRight className="w-4.5 h-4.5" />
+                  </button>
+                </>
+              )}
+
+              {/* Pagination Dots */}
+              {slides.length > 1 && (
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-white/90 backdrop-blur-xs px-2.5 py-1 rounded-full border border-[#E5E7EB] shadow-2xs">
+                  {slides.map((slide, idx) => (
+                    <button
+                      key={slide.id}
+                      type="button"
+                      onClick={() => setActiveSlideIndex(idx)}
+                      aria-label={slide.label}
+                      className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                        activeSlideIndex === idx
+                          ? 'w-5 bg-[#00A046]'
+                          : 'w-1.5 bg-gray-300 hover:bg-gray-400'
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
+
+            {/* 4-Photo Thumbnail Strip */}
+            {slides.length > 1 && (
+              <div className="px-4 py-2.5 bg-[#FAFDFB] border-t border-[#F1F5F9] flex items-center justify-center gap-2.5 overflow-x-auto">
+                {slides.map((slide, idx) => {
+                  const isActiveThumb = activeSlideIndex === idx;
+                  return (
+                    <button
+                      key={slide.id}
+                      type="button"
+                      onClick={() => setActiveSlideIndex(idx)}
+                      title={slide.label}
+                      className={`relative w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-white p-1 border-2 overflow-hidden transition shrink-0 cursor-pointer ${
+                        isActiveThumb
+                          ? 'border-[#00A046] ring-2 ring-[#00A046]/20 shadow-xs'
+                          : 'border-[#E5E7EB] hover:border-[#00A046]/50 opacity-80 hover:opacity-100'
+                      }`}
+                    >
+                      <img
+                        src={slide.src}
+                        alt={slide.label}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-contain"
+                      />
+                      {idx === 0 && (
+                        <span className="absolute bottom-0 inset-x-0 bg-[#0F3D24]/85 text-white text-[8px] font-bold leading-tight py-0.5 text-center">
+                          {isAr ? 'كرتون+مفرد' : 'Case+Unit'}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* 2. Product Title & Structured Metadata */}

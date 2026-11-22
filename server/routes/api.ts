@@ -1076,6 +1076,30 @@ interface StorefrontState {
   }>;
 }
 
+function ensureRetailSingleUnitImage(url?: string, category?: string): string {
+  const categoryDefaults: Record<string, string> = {
+    'زيوت وسمن': '/assets/images/white_sunflower_oil.jpg',
+    'أرز وحبوب': '/assets/images/white_basmati_rice.jpg',
+    'ألبان وأجبان': '/assets/images/white_milk_powder.jpg',
+    'معلبات ومخللات': '/assets/images/white_tomato_paste.jpg',
+    'سكر وحلويات': '/assets/images/unit_biscuits_pack.jpg',
+    'مشروبات وشاي': '/assets/images/white_ceylon_tea.jpg',
+    'منظفات وعناية': '/assets/images/white_cleaner_bottles.jpg'
+  };
+  const fallback = (category && categoryDefaults[category]) || '/assets/images/white_basmati_rice.jpg';
+  if (!url || typeof url !== 'string') return fallback;
+  const trimmed = url.trim();
+  if (
+    !trimmed ||
+    trimmed.includes('unsplash.com') ||
+    trimmed.includes('carton_') ||
+    trimmed.includes('product_white_sugar_50kg')
+  ) {
+    return fallback;
+  }
+  return trimmed;
+}
+
 const almansoorStorefrontState: StorefrontState = {
   storeId: 'store_almansoor',
   slug: 'almansoor-market',
@@ -1084,8 +1108,8 @@ const almansoorStorefrontState: StorefrontState = {
   phone: '+964 771 555 8899',
   district: 'بغداد - حي المنصور',
   address: 'شارع 14 رمضان - قرب ساحة الرواد، عمارة الأمل',
-  coverImageUrl: 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?auto=format&fit=crop&w=1200&q=80',
-  logoUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=200&q=80',
+  coverImageUrl: '/assets/images/banner_dalil_hero.jpg',
+  logoUrl: '/assets/images/unit_olive_oil_bottle.jpg',
   rating: 4.9,
   reviewsCount: 520,
   workingHoursAr: 'مفتوح الآن • 8:00 ص - 1:00 منتصف الليل',
@@ -1106,7 +1130,7 @@ const almansoorStorefrontState: StorefrontState = {
       badgeEn: '40% OFF',
       badgeBg: 'bg-[#FFE600] text-gray-950',
       bgColor: 'from-emerald-700 via-emerald-800 to-green-950',
-      image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=800&q=80',
+      image: '/assets/images/banner_dalil_hero.jpg',
       active: true
     },
     {
@@ -1119,7 +1143,7 @@ const almansoorStorefrontState: StorefrontState = {
       badgeEn: 'Fresh Chilled',
       badgeBg: 'bg-blue-500 text-white',
       bgColor: 'from-blue-700 via-blue-800 to-slate-900',
-      image: 'https://images.unsplash.com/photo-1550583724-b2692b85b150?auto=format&fit=crop&w=800&q=80',
+      image: '/assets/images/white_milk_powder.jpg',
       active: true
     },
     {
@@ -1132,7 +1156,7 @@ const almansoorStorefrontState: StorefrontState = {
       badgeEn: 'Buy 2 Get 1',
       badgeBg: 'bg-rose-500 text-white',
       bgColor: 'from-rose-700 via-rose-800 to-red-950',
-      image: 'https://images.unsplash.com/photo-1585421514738-01798e348b17?auto=format&fit=crop&w=800&q=80',
+      image: '/assets/images/white_cleaner_bottles.jpg',
       active: true
     },
     {
@@ -1145,11 +1169,28 @@ const almansoorStorefrontState: StorefrontState = {
       badgeEn: '20 Min Delivery',
       badgeBg: 'bg-[#00A046] text-white',
       bgColor: 'from-amber-600 via-amber-700 to-orange-950',
-      image: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=800&q=80',
+      image: '/assets/images/banner_dalil_deals.jpg',
       active: true
     }
   ],
   products: [
+    {
+      barcode: '6281004411223-RET',
+      productName: 'زيت زيتون بكر ممتاز عصرة أولى أرز لبنان (مفرد)',
+      nameEn: 'Extra Virgin Olive Oil Glass Bottle 750ml',
+      brand: 'أرز لبنان بريميوم',
+      category: 'زيوت وسمن',
+      subCategory: 'زيوت وسمن وطبخ',
+      unit: 'قنينة زجاجية مفردة (750 مل)',
+      retailSellingPriceIQD: 9500,
+      oldPrice: 11000,
+      discountPercent: 14,
+      stockQuantity: 34,
+      rating: 4.9,
+      reviewsCount: 142,
+      imageUrl: '/assets/images/unit_olive_oil_bottle.jpg',
+      active: true
+    },
     {
       barcode: '6210001234567-RET',
       productName: 'زيت دوار الشمس النقي عافية (مفرد)',
@@ -1164,7 +1205,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 45,
       rating: 4.9,
       reviewsCount: 112,
-      imageUrl: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/white_sunflower_oil.jpg',
       active: true
     },
     {
@@ -1181,7 +1222,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 30,
       rating: 4.8,
       reviewsCount: 154,
-      imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/white_basmati_rice.jpg',
       active: true
     },
     {
@@ -1198,7 +1239,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 28,
       rating: 4.7,
       reviewsCount: 88,
-      imageUrl: 'https://images.unsplash.com/photo-1550583724-b2692b85b150?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/white_milk_powder.jpg',
       active: true
     },
     {
@@ -1215,7 +1256,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 60,
       rating: 4.9,
       reviewsCount: 210,
-      imageUrl: 'https://images.unsplash.com/photo-1534483509719-3feaee7c30da?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/white_tomato_paste.jpg',
       active: true
     },
     {
@@ -1232,7 +1273,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 35,
       rating: 4.9,
       reviewsCount: 165,
-      imageUrl: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/white_ceylon_tea.jpg',
       active: true
     },
     {
@@ -1249,7 +1290,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 80,
       rating: 4.8,
       reviewsCount: 92,
-      imageUrl: 'https://images.unsplash.com/photo-1581441363689-1f3c3c414635?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/white_sugar_pack.jpg',
       active: true
     },
     {
@@ -1266,7 +1307,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 25,
       rating: 4.8,
       reviewsCount: 74,
-      imageUrl: 'https://images.unsplash.com/photo-1486297678162-eb2a19b0a32d?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/unit_cheese_tub.jpg',
       active: true
     },
     {
@@ -1283,7 +1324,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 50,
       rating: 4.7,
       reviewsCount: 65,
-      imageUrl: 'https://images.unsplash.com/photo-1544943910-4c1dc44a0b2d?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/white_canned_goods.jpg',
       active: true
     },
     {
@@ -1300,7 +1341,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 30,
       rating: 4.9,
       reviewsCount: 140,
-      imageUrl: 'https://images.unsplash.com/photo-1585421514738-01798e348b17?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/white_cleaner_bottles.jpg',
       active: true
     },
     {
@@ -1317,7 +1358,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 90,
       rating: 4.8,
       reviewsCount: 85,
-      imageUrl: 'https://images.unsplash.com/photo-1621996346565-e3d5d6281691?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/white_pasta_pack.jpg',
       active: true
     },
     {
@@ -1334,7 +1375,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 20,
       rating: 4.9,
       reviewsCount: 195,
-      imageUrl: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/white_instant_coffee.jpg',
       active: true
     },
     {
@@ -1351,7 +1392,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 25,
       rating: 4.9,
       reviewsCount: 130,
-      imageUrl: 'https://images.unsplash.com/photo-1582722872445-44dc5f7e3c8f?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/unit_eggs_tray.jpg',
       active: true
     },
     {
@@ -1368,7 +1409,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 18,
       rating: 4.8,
       reviewsCount: 104,
-      imageUrl: 'https://images.unsplash.com/photo-1610557892470-55d9e80c0bce?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/white_cleaner_bottles.jpg',
       active: true
     },
     {
@@ -1385,7 +1426,7 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 40,
       rating: 4.9,
       reviewsCount: 88,
-      imageUrl: 'https://images.unsplash.com/photo-1598514982205-f36b96d1e8d4?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/unit_ketchup_bottle.jpg',
       active: true
     },
     {
@@ -1402,24 +1443,24 @@ const almansoorStorefrontState: StorefrontState = {
       stockQuantity: 70,
       rating: 4.8,
       reviewsCount: 96,
-      imageUrl: 'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?auto=format&fit=crop&w=400&q=80',
+      imageUrl: '/assets/images/unit_biscuits_pack.jpg',
       active: true
     },
     {
       barcode: '6281003322114-RET',
-      productName: 'سمنة نباتية نقية للطبخ شوكة وسكين (مفرد)',
-      nameEn: 'Pure Vegetable Ghee for Cooking 900g',
-      brand: 'شوكة وملعقة',
-      category: 'زيوت وسمن',
-      subCategory: 'زيوت وسمن وطبخ',
-      unit: 'علبة صفيح (900 غرام)',
-      retailSellingPriceIQD: 3500,
-      oldPrice: 4000,
+      productName: 'قهوة إسبريسو محمصة مطحونة مختصة (مفرد)',
+      nameEn: 'Roasted Ground Espresso Coffee Pack 250g',
+      brand: 'محمصة دجلة المختصة',
+      category: 'سكر وحلويات',
+      subCategory: 'حلويات وسكر وشاي',
+      unit: 'عبوة مفردة (250 غرام)',
+      retailSellingPriceIQD: 7500,
+      oldPrice: 8500,
       discountPercent: 12,
       stockQuantity: 32,
-      rating: 4.7,
-      reviewsCount: 52,
-      imageUrl: 'https://images.unsplash.com/photo-1589367920969-ab8e050bbb04?auto=format&fit=crop&w=400&q=80',
+      rating: 4.9,
+      reviewsCount: 78,
+      imageUrl: '/assets/images/white_espresso_coffee.jpg',
       active: true
     }
   ]
@@ -1497,12 +1538,13 @@ apiRouter.post('/store/:storeId/storefront/products', (req: Request, res: Respon
   }
 
   const newBarcode = `RET-${Date.now().toString().slice(-8)}`;
+  const resolvedCategory = category || 'أرز ومواد تموينية';
   const newProduct = {
     barcode: newBarcode,
     productName: productName.trim(),
     nameEn: nameEn?.trim() || productName.trim(),
     brand: brand?.trim() || 'منتج محلي',
-    category: category || 'أرز ومواد تموينية',
+    category: resolvedCategory,
     subCategory: subCategory || 'منتجات طازجة',
     unit: unit.trim(),
     retailSellingPriceIQD: Number(retailSellingPriceIQD),
@@ -1511,7 +1553,7 @@ apiRouter.post('/store/:storeId/storefront/products', (req: Request, res: Respon
     stockQuantity: Number(stockQuantity) || 20,
     rating: 5.0,
     reviewsCount: 1,
-    imageUrl: imageUrl || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=400&q=80',
+    imageUrl: ensureRetailSingleUnitImage(imageUrl, resolvedCategory),
     active: true
   };
 
@@ -1528,11 +1570,18 @@ apiRouter.post('/store/:storeId/storefront/products', (req: Request, res: Respon
 // 7.4 Store Owner Management: Update Retail Product (تعديل منتج أو سعر أو كمية)
 apiRouter.patch('/store/:storeId/storefront/products/:barcode', (req: Request, res: Response) => {
   const { barcode } = req.params;
-  const updates = req.body;
+  const updates = { ...req.body };
 
   const productIdx = almansoorStorefrontState.products.findIndex(p => p.barcode === barcode);
   if (productIdx === -1) {
     return res.status(404).json({ success: false, message: 'المنتج غير موجود' });
+  }
+
+  if (updates.imageUrl !== undefined) {
+    updates.imageUrl = ensureRetailSingleUnitImage(
+      updates.imageUrl,
+      updates.category || almansoorStorefrontState.products[productIdx].category
+    );
   }
 
   almansoorStorefrontState.products[productIdx] = {
@@ -1624,7 +1673,10 @@ apiRouter.post('/store/:storeId/storefront/banners', (req: Request, res: Respons
     badgeEn: 'Special Offer',
     badgeBg: badgeBg || 'bg-[#FFE600] text-gray-950',
     bgColor: bgColor || 'from-emerald-700 via-emerald-800 to-green-950',
-    image: image || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=800&q=80',
+    image:
+      image && !String(image).includes('unsplash.com') && !String(image).includes('carton_')
+        ? image
+        : '/assets/images/banner_dalil_hero.jpg',
     active: true
   };
 
@@ -1698,7 +1750,7 @@ apiRouter.get('/store/:storeId/storefront/analytics', (req: Request, res: Respon
       unitsSold: 94,
       revenueIQD: 329000,
       sharePercent: 24.5,
-      imageUrl: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&w=200&q=80',
+      imageUrl: '/assets/images/white_sunflower_oil.jpg',
       turnoverDays: 9,
       speedBadge: 'صاروخي 🚀'
     },
@@ -1710,7 +1762,7 @@ apiRouter.get('/store/:storeId/storefront/analytics', (req: Request, res: Respon
       unitsSold: 82,
       revenueIQD: 266500,
       sharePercent: 19.8,
-      imageUrl: 'https://images.unsplash.com/photo-1550583724-b2692b85b150?auto=format&fit=crop&w=200&q=80',
+      imageUrl: '/assets/images/white_milk_powder.jpg',
       turnoverDays: 12,
       speedBadge: 'سريع جداً ⚡'
     },
@@ -1722,7 +1774,7 @@ apiRouter.get('/store/:storeId/storefront/analytics', (req: Request, res: Respon
       unitsSold: 71,
       revenueIQD: 284000,
       sharePercent: 17.2,
-      imageUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=200&q=80',
+      imageUrl: '/assets/images/white_basmati_rice.jpg',
       turnoverDays: 14,
       speedBadge: 'سريع جداً ⚡'
     },
@@ -1734,7 +1786,7 @@ apiRouter.get('/store/:storeId/storefront/analytics', (req: Request, res: Respon
       unitsSold: 68,
       revenueIQD: 85000,
       sharePercent: 14.1,
-      imageUrl: 'https://images.unsplash.com/photo-1534483509719-3feaee7c30da?auto=format&fit=crop&w=200&q=80',
+      imageUrl: '/assets/images/white_tomato_paste.jpg',
       turnoverDays: 16,
       speedBadge: 'سريع ✓'
     },
@@ -1746,7 +1798,7 @@ apiRouter.get('/store/:storeId/storefront/analytics', (req: Request, res: Respon
       unitsSold: 55,
       revenueIQD: 206250,
       sharePercent: 11.8,
-      imageUrl: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=200&q=80',
+      imageUrl: '/assets/images/white_ceylon_tea.jpg',
       turnoverDays: 19,
       speedBadge: 'معتدل'
     },
@@ -1758,19 +1810,19 @@ apiRouter.get('/store/:storeId/storefront/analytics', (req: Request, res: Respon
       unitsSold: 46,
       revenueIQD: 207000,
       sharePercent: 9.4,
-      imageUrl: 'https://images.unsplash.com/photo-1585421514738-01798e348b17?auto=format&fit=crop&w=200&q=80',
+      imageUrl: '/assets/images/white_cleaner_bottles.jpg',
       turnoverDays: 22,
       speedBadge: 'معتدل'
     },
     {
-      barcode: '6210009990001-RET',
+      barcode: '6281009988776-RET',
       name: 'طبقة بيض مائدة طازج محلي (30 بيضة)',
       unit: 'طبقة منزلية',
       category: 'ألبان وأجبان',
       unitsSold: 42,
       revenueIQD: 252000,
       sharePercent: 8.6,
-      imageUrl: 'https://images.unsplash.com/photo-1582722872445-44dc5f7e3c8f?auto=format&fit=crop&w=200&q=80',
+      imageUrl: '/assets/images/unit_eggs_tray.jpg',
       turnoverDays: 7,
       speedBadge: 'صاروخي 🚀'
     }

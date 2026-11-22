@@ -106,7 +106,7 @@ export const StorefrontManagementView: React.FC<StorefrontManagementViewProps> =
   const [newBannerBadgeAr, setNewBannerBadgeAr] = useState('تخفيض 25%');
   const [newBannerBgColor, setNewBannerBgColor] = useState('from-[#0B5D32] via-[#0F6E3D] to-[#083E22]');
   const [newBannerImage, setNewBannerImage] = useState(
-    'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=800&q=80'
+    '/assets/images/banner_dalil_hero.jpg'
   );
 
   // Editable Store Settings
@@ -1609,8 +1609,11 @@ export const StorefrontManagementView: React.FC<StorefrontManagementViewProps> =
                   <div className="w-14 h-14 rounded-xl bg-[#F4F4EA] border border-[#DCE5DC] p-1.5 shrink-0 flex items-center justify-center">
                     <img
                       src={
-                        product.imageUrl ||
-                        'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=100&q=80'
+                        product.imageUrl &&
+                        !product.imageUrl.includes('unsplash.com') &&
+                        !product.imageUrl.includes('carton_')
+                          ? product.imageUrl
+                          : '/assets/images/white_basmati_rice.jpg'
                       }
                       alt={product.productName}
                       className="w-full h-full object-contain"
@@ -1705,8 +1708,11 @@ export const StorefrontManagementView: React.FC<StorefrontManagementViewProps> =
                           <div className="w-10 h-10 rounded-xl bg-[#F4F4EA] border border-[#DCE5DC] p-1 shrink-0 flex items-center justify-center">
                             <img
                               src={
-                                product.imageUrl ||
-                                'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=100&q=80'
+                                product.imageUrl &&
+                                !product.imageUrl.includes('unsplash.com') &&
+                                !product.imageUrl.includes('carton_')
+                                  ? product.imageUrl
+                                  : '/assets/images/white_basmati_rice.jpg'
                               }
                               alt={product.productName}
                               className="w-full h-full object-contain"
@@ -2322,37 +2328,24 @@ export const StorefrontManagementView: React.FC<StorefrontManagementViewProps> =
                   <input
                     type="text"
                     dir="ltr"
-                    placeholder="https://..."
+                    placeholder="/assets/images/..."
                     value={newProductImageUrl}
                     onChange={(e) => setNewProductImageUrl(e.target.value)}
                     className="w-full min-h-[38px] bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl px-3 py-1.5 text-[11px] font-mono text-left focus:bg-white focus:border-[#0B5D32] outline-none"
                   />
                   <div className="flex items-center gap-1.5 mt-2 overflow-x-auto pb-1">
                     {[
-                      {
-                        label: 'زيت',
-                        url: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&w=400&q=80'
-                      },
-                      {
-                        label: 'أرز',
-                        url: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=400&q=80'
-                      },
-                      {
-                        label: 'حليب',
-                        url: 'https://images.unsplash.com/photo-1550583724-b2692b85b150?auto=format&fit=crop&w=400&q=80'
-                      },
-                      {
-                        label: 'طماطم',
-                        url: 'https://images.unsplash.com/photo-1534483509719-3feaee7c30da?auto=format&fit=crop&w=400&q=80'
-                      },
-                      {
-                        label: 'شاي',
-                        url: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=400&q=80'
-                      },
-                      {
-                        label: 'منظفات',
-                        url: 'https://images.unsplash.com/photo-1585421514738-01798e348b17?auto=format&fit=crop&w=400&q=80'
-                      }
+                      { label: 'زيت زيتون', url: '/assets/images/unit_olive_oil_bottle.jpg' },
+                      { label: 'زيت طبخ', url: '/assets/images/white_sunflower_oil.jpg' },
+                      { label: 'أرز', url: '/assets/images/white_basmati_rice.jpg' },
+                      { label: 'حليب', url: '/assets/images/white_milk_powder.jpg' },
+                      { label: 'جبن', url: '/assets/images/unit_cheese_tub.jpg' },
+                      { label: 'بيض', url: '/assets/images/unit_eggs_tray.jpg' },
+                      { label: 'طماطم', url: '/assets/images/white_tomato_paste.jpg' },
+                      { label: 'كاتشب', url: '/assets/images/unit_ketchup_bottle.jpg' },
+                      { label: 'شاي', url: '/assets/images/white_ceylon_tea.jpg' },
+                      { label: 'بسكويت', url: '/assets/images/unit_biscuits_pack.jpg' },
+                      { label: 'منظفات', url: '/assets/images/white_cleaner_bottles.jpg' }
                     ].map((preset, idx) => (
                       <button
                         key={idx}

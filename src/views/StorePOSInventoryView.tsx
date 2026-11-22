@@ -232,7 +232,17 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
 
   const resolveItemImage = (barcode: string, category: string) => {
     const matched = products.find((p) => p.barcode === barcode);
-    if (matched?.imageUrl) return matched.imageUrl;
+    const singleUnitFromGallery = matched?.images?.find(
+      (src) => src && !src.includes('carton_') && !src.includes('product_white_sugar_50kg')
+    );
+    if (singleUnitFromGallery) return singleUnitFromGallery;
+    if (
+      matched?.imageUrl &&
+      !matched.imageUrl.includes('carton_') &&
+      !matched.imageUrl.includes('product_white_sugar_50kg')
+    ) {
+      return matched.imageUrl;
+    }
     return CATEGORY_FALLBACK_IMAGES[category] || '/assets/images/white_basmati_rice.jpg';
   };
 
