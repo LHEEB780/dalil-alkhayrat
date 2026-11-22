@@ -1,4 +1,42 @@
+import type { SupplierOrderRules } from '../../shared/orderRules.ts';
+export type { SupplierOrderRules };
+
 export type Role = 'store' | 'cashier' | 'supplier' | 'driver' | 'admin' | 'customer';
+
+export type SellerBusinessType =
+  | 'manufacturer'
+  | 'importer'
+  | 'wholesaler'
+  | 'distributor'
+  | 'trader'
+  | 'warehouse'
+  | 'brand_owner'
+  | 'authorized_distributor';
+
+export type VerificationStatus =
+  | 'pending'
+  | 'verified'
+  | 'verified_business'
+  | 'authorized_distributor';
+
+export interface SupplierProfile {
+  id: string;
+  companyName: string;
+  contactPerson: string;
+  phone: string;
+  city: string;
+  address: string;
+  categories: string[];
+  rating: number;
+  totalVans: number;
+  activeCreditLinesCount: number;
+  isVerified: boolean;
+  businessType: SellerBusinessType;
+  verificationStatus: VerificationStatus;
+  serviceZoneIds: string[];
+  orderRules?: SupplierOrderRules;
+  createdAt: string;
+}
 
 export type Currency = 'IQD' | 'USD';
 
@@ -10,6 +48,7 @@ export type AppTab =
   | 'marketplace'
   | 'all_categories'
   | 'category_branches'
+  | 'all_brands'
   | 'suppliers'
   | 'supplier'
   | 'driver'

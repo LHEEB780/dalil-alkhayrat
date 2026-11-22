@@ -16,7 +16,8 @@ import {
   Building2,
   Truck,
   Search,
-  X
+  X,
+  Award
 } from 'lucide-react';
 import {
   ProductWithOffers,
@@ -37,6 +38,7 @@ import {
 } from '../data/nearbySuppliers.ts';
 import { StoreLocationModal } from '../components/StoreLocationModal.tsx';
 import { resolveCategoryKey } from '../data/categories.ts';
+import { FAMOUS_BRANDS } from '../data/brands.ts';
 
 interface StoreMarketplaceViewProps {
   products: ProductWithOffers[];
@@ -62,6 +64,7 @@ interface StoreMarketplaceViewProps {
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   onResetGlobalFilters?: () => void;
+  onOpenAllBrands?: (brandId?: string) => void;
 }
 
 interface HorizontalProductShelfProps {
@@ -132,7 +135,8 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
   lowStockAlerts = [],
   searchQuery = '',
   onSearchChange,
-  onResetGlobalFilters
+  onResetGlobalFilters,
+  onOpenAllBrands
 }) => {
   const isAr = language === 'ar';
 
@@ -975,6 +979,75 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
           </div>
         </section>
       )}
+
+      {/* ================= 6.5. FAMOUS WHOLESALE BRANDS ANIMATED SLIDER ================= */}
+      <section
+        id="famous-brands-section"
+        className="bg-white rounded-3xl border border-[#EAECEF] p-4 sm:p-5 shadow-[0_2px_10px_rgba(15,23,42,0.04)] space-y-4 overflow-hidden"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#EFFAF3] border border-[#BBF7D0] flex items-center justify-center text-[#00A046] shrink-0">
+              <Award className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="font-black text-base sm:text-lg text-[#111827] leading-snug truncate">
+                {isAr ? 'أشهر العلامات التجارية' : 'Famous Wholesale Brands'}
+              </h2>
+              <p className="text-xs text-[#6B7280] font-medium mt-0.5 truncate">
+                {isAr
+                  ? `${FAMOUS_BRANDS.length} علامة تجارية معتمدة · اضغط على أي علامة لتصفح منتجاتها`
+                  : `${FAMOUS_BRANDS.length} trusted brands · Tap any brand to browse wholesale SKUs`}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onOpenAllBrands?.()}
+            className="min-h-[38px] px-3.5 py-2 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white text-xs font-black flex items-center gap-1 transition cursor-pointer shrink-0 whitespace-nowrap"
+          >
+            <span>{isAr ? 'جميع العلامات' : 'All Brands'}</span>
+            {isAr ? <ChevronLeft className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+
+        <div className="relative brands-marquee-viewport overflow-hidden py-1 -mx-1 px-1">
+          <div className="pointer-events-none absolute inset-y-0 left-0 w-8 sm:w-12 bg-gradient-to-r from-white to-transparent z-10" />
+          <div className="pointer-events-none absolute inset-y-0 right-0 w-8 sm:w-12 bg-gradient-to-l from-white to-transparent z-10" />
+
+          <div className="brands-marquee-track gap-3">
+            {[...FAMOUS_BRANDS.filter((b) => b.featured), ...FAMOUS_BRANDS.filter((b) => b.featured)].map(
+              (brand, idx) => (
+                <button
+                  key={`${brand.id}-${idx}`}
+                  type="button"
+                  onClick={() => onOpenAllBrands?.(brand.id)}
+                  className="w-[152px] sm:w-[172px] shrink-0 rounded-2xl border border-[#EAECEF] bg-[#FAFBFD] hover:bg-white hover:border-[#00A046] hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 p-3 flex flex-col items-center text-center cursor-pointer group"
+                >
+                  <div className="w-20 h-20 sm:w-22 sm:h-22 rounded-xl bg-white border border-[#F1F5F9] p-2 mb-2.5 flex items-center justify-center overflow-hidden">
+                    <img
+                      src={brand.imageUrl}
+                      alt={isAr ? brand.nameAr : brand.nameEn}
+                      referrerPolicy="no-referrer"
+                      loading="lazy"
+                      className="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-300"
+                    />
+                  </div>
+                  <span className="text-xs sm:text-[13px] font-black text-[#111827] group-hover:text-[#00A046] transition-colors line-clamp-1 w-full">
+                    {isAr ? brand.nameAr : brand.nameEn}
+                  </span>
+                  <span className="text-[10.5px] text-[#6B7280] font-semibold mt-0.5 line-clamp-1 w-full">
+                    {isAr
+                      ? `${brand.categoryAr} · ${brand.countryAr}`
+                      : `${brand.categoryEn} · ${brand.countryEn}`}
+                  </span>
+                </button>
+              )
+            )}
+          </div>
+        </div>
+      </section>
 
       {/* ================= 7. DEPARTMENT SPOTLIGHT + SLIDER ROWS ================= */}
       {/* Row A: Pantry & Rice Spotlight + Slider */}

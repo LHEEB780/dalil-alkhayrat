@@ -28,7 +28,8 @@ import {
   ChevronUp,
   UserCheck
 } from 'lucide-react';
-import { Role, Language } from '../types/index.ts';
+import { Role, Language, SellerBusinessType } from '../types/index.ts';
+import { SELLER_BUSINESS_TYPES, getSellerBusinessTypeLabel } from '../utils/translations.ts';
 
 interface WelcomeAuthViewProps {
   onLoginAsRole: (role: Role, userProfile: UserSession) => void;
@@ -45,6 +46,7 @@ export interface UserSession {
   phone: string;
   avatarColor: string;
   entityId?: string;
+  businessType?: SellerBusinessType;
 }
 
 export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({ 
@@ -67,6 +69,7 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
   const [storeName, setStoreName] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [city, setCity] = useState('بغداد');
+  const [supplierBusinessType, setSupplierBusinessType] = useState<SellerBusinessType>('wholesaler');
 
   // Unified list of commercial roles - each presented ONCE without duplication
   const unifiedRoles = [
@@ -327,7 +330,8 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
         phone: phoneNumber,
         badge: isAr ? 'حساب جديد' : 'New Account',
         avatarColor: 'bg-emerald-50',
-        entityId
+        entityId,
+        businessType: selectedRole === 'supplier' ? supplierBusinessType : undefined
       });
     }
   };
@@ -603,6 +607,25 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
                         <option value="driver">{isAr ? 'سائق ومندوب فان' : 'Van Driver'}</option>
                       </select>
                     </div>
+
+                    {selectedRole === 'supplier' && (
+                      <div className="sm:col-span-2">
+                        <label className="text-gray-600 block mb-1 font-bold">
+                          {isAr ? 'نوع النشاط:' : 'Business Type:'}
+                        </label>
+                        <select
+                          value={supplierBusinessType}
+                          onChange={(e) => setSupplierBusinessType(e.target.value as SellerBusinessType)}
+                          className="w-full bg-[#F7F8FA] border border-[#E5E7EB] rounded-xl p-2.5 text-xs focus:bg-white focus:border-[#00A046]"
+                        >
+                          {SELLER_BUSINESS_TYPES.map((typeKey) => (
+                            <option key={typeKey} value={typeKey}>
+                              {getSellerBusinessTypeLabel(typeKey, language)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 )}
 

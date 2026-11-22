@@ -78,6 +78,46 @@
   animation: fadeIn 0.2s ease-out forwards;
 }
 
+@keyframes brandsMarqueeLtr {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+@keyframes brandsMarqueeRtl {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(50%, 0, 0);
+  }
+}
+
+.brands-marquee-track {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+  animation: brandsMarqueeLtr 34s linear infinite;
+}
+
+[dir="rtl"] .brands-marquee-track {
+  animation-name: brandsMarqueeRtl;
+}
+
+.brands-marquee-viewport:hover .brands-marquee-track,
+.brands-marquee-viewport:focus-within .brands-marquee-track {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brands-marquee-track {
+    animation: none;
+  }
+}
+
 /* Global Dark Appearance Mode (وضع المظهر الداكن) */
 html.dark-theme {
   color-scheme: dark;

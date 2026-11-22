@@ -56,8 +56,12 @@ apiRouter.get('/products/:barcode', (req: Request, res: Response) => {
 
 apiRouter.get('/suppliers', (req: Request, res: Response) => {
   try {
-    const { deliveryZoneId } = req.query;
-    const suppliers = db.getSuppliersByZone(deliveryZoneId as string | undefined);
+    const { deliveryZoneId, businessType, verificationStatus } = req.query;
+    const suppliers = db.getSuppliers({
+      deliveryZoneId: deliveryZoneId as string | undefined,
+      businessType: businessType as any,
+      verificationStatus: verificationStatus as any
+    });
     res.json({ success: true, count: suppliers.length, data: suppliers });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -455,7 +459,17 @@ apiRouter.get('/van/fleet/:supplierId', (req: Request, res: Response) => {
     const { supplierId } = req.params;
     const drivers = db.drivers.filter(d => d.supplierId === supplierId);
     const fleet = drivers.map(driver => {
-      const inventory = db.vanInventory.filter(v => v.driverId === driver.id);
+      const inventory = db.vanInventory
+        .filter(v => v.driverId === driver.id)
+        .map(v => {
+          const prod = db.products.find(p => p.barcode === v.barcode);
+          return {
+            ...v,
+            imageUrl: prod?.imageUrl,
+            category: prod?.category || 'أخرى',
+            subCategory: prod?.subCategory
+          };
+        });
       const routeStops = db.vanRouteStops
         .filter(s => s.driverId === driver.id)
         .sort((a, b) => a.sequence - b.sequence);
@@ -488,6 +502,9 @@ apiRouter.get('/van/fleet/:supplierId', (req: Request, res: Response) => {
         barcode: p.barcode,
         nameAr: p.nameAr,
         unit: p.unit,
+        brand: p.brand,
+        category: p.category,
+        imageUrl: p.imageUrl,
         defaultPriceIQD: offer?.priceIQD || 25000
       };
     });
@@ -566,6 +583,24 @@ apiRouter.post('/van/load-stock', (req: Request, res: Response) => {
     res.status(201).json({
       success: true,
       message: 'تم تحميل البضاعة في عهدة الفان بنجاح وتحديث المخزون المتنقل',
+      data: item
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.patch('/van/adjust-stock', (req: Request, res: Response) => {
+  try {
+    const { driverId, barcode, delta } = req.body;
+    const item = db.adjustVanStock({
+      driverId,
+      barcode,
+      delta: Number(delta)
+    });
+    res.json({
+      success: true,
+      message: 'تم تحديث كمية الصنف في مخزون الفان بنجاح',
       data: item
     });
   } catch (error: any) {

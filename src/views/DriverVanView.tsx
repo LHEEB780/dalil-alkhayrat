@@ -153,6 +153,7 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
   const [restockSearch, setRestockSearch] = useState('');
   const [restockCategory, setRestockCategory] = useState<string>('الكل');
   const [restockBranchId, setRestockBranchId] = useState<string>('all');
+  const [restockCatalogView, setRestockCatalogView] = useState<'mini' | 'grid' | 'list'>('grid');
   const [restockNotes, setRestockNotes] = useState('');
   const [isSubmittingRestock, setIsSubmittingRestock] = useState(false);
 
@@ -1577,94 +1578,310 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
               {/* Left 7 Cols: Supplier Catalog Products */}
               <div className="lg:col-span-7 bg-white rounded-2xl border border-[#DCE5DC] p-3.5 space-y-3">
-                <div className="relative">
-                  <Search className="w-4 h-4 text-[#5F7164] absolute top-1/2 -translate-y-1/2 start-3" />
-                  <input
-                    type="text"
-                    value={restockSearch}
-                    onChange={(e) => setRestockSearch(e.target.value)}
-                    placeholder={isAr ? 'ابحث في منتجات المورد بالاسم أو الباركود...' : 'Search supplier products...'}
-                    className="w-full h-10 bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] focus:bg-white rounded-xl ps-9 pe-3 text-xs font-bold focus:outline-hidden"
-                  />
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-[#5F7164] absolute top-1/2 -translate-y-1/2 start-3" />
+                    <input
+                      type="text"
+                      value={restockSearch}
+                      onChange={(e) => setRestockSearch(e.target.value)}
+                      placeholder={isAr ? 'ابحث في منتجات المورد بالاسم أو الباركود...' : 'Search supplier products...'}
+                      className="w-full h-10 bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] focus:bg-white rounded-xl ps-9 pe-3 text-xs font-bold focus:outline-hidden"
+                    />
+                  </div>
+
+                  {/* Mini / Grid / List View Mode Switcher */}
+                  <div className="flex items-center bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl p-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setRestockCatalogView('mini')}
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center transition cursor-pointer ${
+                        restockCatalogView === 'mini'
+                          ? 'bg-[#0B5D32] text-white shadow-2xs'
+                          : 'text-[#4B6352] hover:text-[#142018]'
+                      }`}
+                      title={isAr ? 'عرض مصغّر' : 'Mini Grid View'}
+                      aria-label={isAr ? 'عرض مصغّر' : 'Mini Grid View'}
+                    >
+                      <Grid3X3 className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRestockCatalogView('grid')}
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center transition cursor-pointer ${
+                        restockCatalogView === 'grid'
+                          ? 'bg-[#0B5D32] text-white shadow-2xs'
+                          : 'text-[#4B6352] hover:text-[#142018]'
+                      }`}
+                      title={isAr ? 'عرض شبكي' : 'Grid View'}
+                      aria-label={isAr ? 'عرض شبكي' : 'Grid View'}
+                    >
+                      <LayoutGrid className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRestockCatalogView('list')}
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center transition cursor-pointer ${
+                        restockCatalogView === 'list'
+                          ? 'bg-[#0B5D32] text-white shadow-2xs'
+                          : 'text-[#4B6352] hover:text-[#142018]'
+                      }`}
+                      title={isAr ? 'عرض قائمة' : 'List View'}
+                      aria-label={isAr ? 'عرض قائمة' : 'List View'}
+                    >
+                      <LayoutList className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 {filteredCatalog.length === 0 ? (
                   <div className="py-10 text-center text-xs font-bold text-[#5F7164]">
                     {isAr ? 'لا توجد منتجات مطابقة في هذا القسم.' : 'No matching supplier products in this category.'}
                   </div>
-                ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[520px] overflow-y-auto">
-                  {filteredCatalog.map((prod) => {
-                    const qtyInReq = restockCart[prod.barcode] || 0;
-                    const currentVanItem = vanStock.find((v) => v.barcode === prod.barcode);
-                    const imgSrc = prod.imageUrl || resolveVanProductImage(prod.barcode, prod.nameAr, products);
+                ) : restockCatalogView === 'mini' ? (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-[520px] overflow-y-auto pe-0.5">
+                    {filteredCatalog.map((prod) => {
+                      const qtyInReq = restockCart[prod.barcode] || 0;
+                      const currentVanItem = vanStock.find((v) => v.barcode === prod.barcode);
+                      const imgSrc = prod.imageUrl || resolveVanProductImage(prod.barcode, prod.nameAr, products);
 
-                    return (
-                      <div
-                        key={prod.barcode}
-                        className={`rounded-xl border p-2.5 flex flex-col justify-between gap-2 transition ${
-                          qtyInReq > 0
-                            ? 'border-[#0B5D32] bg-[#ECFDF5]/40 ring-1 ring-[#0B5D32]/20'
-                            : 'border-[#EAEFEA] bg-white'
-                        }`}
-                      >
-                        <div className="space-y-1.5">
-                          <div className="aspect-square bg-white rounded-lg border border-[#F0F2ED] p-1.5 flex items-center justify-center relative">
+                      return (
+                        <div
+                          key={prod.barcode}
+                          onClick={() => handleAdjustRestockQty(prod.barcode, 5)}
+                          className={`group rounded-xl border p-1.5 flex flex-col justify-between gap-1.5 transition cursor-pointer ${
+                            qtyInReq > 0
+                              ? 'border-[#0B5D32] bg-[#ECFDF5]/40 ring-1 ring-[#0B5D32]/20'
+                              : 'border-[#DCE5DC] bg-white hover:border-[#0B5D32]/60'
+                          }`}
+                        >
+                          <div className="relative h-16 sm:h-20 w-full bg-white rounded-lg border border-[#F0F2ED] p-1 flex items-center justify-center overflow-hidden">
                             <img
                               src={imgSrc}
                               alt={prod.nameAr}
                               referrerPolicy="no-referrer"
-                              className="max-h-full max-w-full object-contain mix-blend-multiply"
+                              loading="lazy"
+                              className="max-h-full max-w-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-200"
                             />
+                            {qtyInReq > 0 && (
+                              <span className="absolute top-1 end-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#0B5D32] text-white text-[9.5px] font-black font-mono tabular-nums flex items-center justify-center shadow-xs">
+                                {qtyInReq}
+                              </span>
+                            )}
                             {currentVanItem && (
-                              <span className="absolute bottom-1 start-1 text-[9.5px] font-bold bg-[#F4F4EA] text-[#4B6352] px-1.5 py-0.5 rounded-md tabular-nums">
-                                {isAr ? `بالفان ${currentVanItem.remainingQuantity}` : `Van ${currentVanItem.remainingQuantity}`}
+                              <span className="absolute bottom-0.5 start-0.5 text-[9px] font-black bg-[#F4F4EA] text-[#4B6352] px-1 rounded tabular-nums">
+                                {currentVanItem.remainingQuantity}
                               </span>
                             )}
                           </div>
-                          <div className="text-[11px] font-bold text-[#142018] line-clamp-2 leading-tight">
-                            {prod.nameAr}
-                          </div>
-                          <div className="text-[10px] text-[#5F7164] truncate">{prod.unit}</div>
-                          <div className="text-xs font-black font-mono text-[#0B5D32] tabular-nums">
-                            {formatCurrency(prod.priceIQD, currency, language)}
+
+                          <div className="space-y-1 flex-1 flex flex-col justify-between">
+                            <h4 className="text-[10px] sm:text-[10.5px] font-black text-[#142018] line-clamp-2 leading-tight min-h-[25px]">
+                              {prod.nameAr}
+                            </h4>
+
+                            <div className="pt-1 border-t border-[#F0F3EE] flex items-center justify-between gap-1">
+                              <span className="text-[9.5px] sm:text-[10px] font-black font-mono tabular-nums text-[#0B5D32] truncate">
+                                {formatCurrency(prod.priceIQD, currency, language)}
+                              </span>
+
+                              {qtyInReq === 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleAdjustRestockQty(prod.barcode, 5);
+                                  }}
+                                  className="w-6 h-6 rounded-md bg-[#0B5D32] hover:bg-[#084725] text-white flex items-center justify-center transition cursor-pointer shrink-0"
+                                  aria-label={isAr ? 'إضافة (+5)' : 'Add (+5)'}
+                                >
+                                  <Plus className="w-3 h-3 stroke-[2.5]" />
+                                </button>
+                              ) : (
+                                <div
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="h-6 flex items-center bg-[#0B5D32] text-white rounded-md overflow-hidden shrink-0"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAdjustRestockQty(prod.barcode, -1)}
+                                    className="px-1 h-full hover:bg-black/15 cursor-pointer flex items-center justify-center"
+                                  >
+                                    <Minus className="w-2.5 h-2.5 stroke-[3]" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAdjustRestockQty(prod.barcode, 5)}
+                                    className="px-1 h-full hover:bg-black/15 cursor-pointer flex items-center justify-center"
+                                  >
+                                    <Plus className="w-2.5 h-2.5 stroke-[3]" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
+                      );
+                    })}
+                  </div>
+                ) : restockCatalogView === 'grid' ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[520px] overflow-y-auto">
+                    {filteredCatalog.map((prod) => {
+                      const qtyInReq = restockCart[prod.barcode] || 0;
+                      const currentVanItem = vanStock.find((v) => v.barcode === prod.barcode);
+                      const imgSrc = prod.imageUrl || resolveVanProductImage(prod.barcode, prod.nameAr, products);
 
-                        {qtyInReq === 0 ? (
-                          <button
-                            type="button"
-                            onClick={() => handleAdjustRestockQty(prod.barcode, 5)}
-                            className="w-full py-1.5 rounded-lg bg-[#0B5D32] hover:bg-[#084725] text-white font-bold text-[11px] flex items-center justify-center gap-1 cursor-pointer transition"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                            <span>{isAr ? 'إضافة (+5)' : 'Add (+5)'}</span>
-                          </button>
-                        ) : (
-                          <div className="flex items-center justify-between bg-white border border-[#0B5D32] rounded-lg p-0.5">
-                            <button
-                              type="button"
-                              onClick={() => handleAdjustRestockQty(prod.barcode, -1)}
-                              className="w-6 h-6 rounded-md bg-[#F4F4EA] hover:bg-gray-200 flex items-center justify-center cursor-pointer"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </button>
-                            <span className="font-mono font-black text-xs text-[#0B5D32] tabular-nums">
-                              {qtyInReq}
-                            </span>
+                      return (
+                        <div
+                          key={prod.barcode}
+                          className={`rounded-xl border p-2.5 flex flex-col justify-between gap-2 transition ${
+                            qtyInReq > 0
+                              ? 'border-[#0B5D32] bg-[#ECFDF5]/40 ring-1 ring-[#0B5D32]/20'
+                              : 'border-[#EAEFEA] bg-white'
+                          }`}
+                        >
+                          <div className="space-y-1.5">
+                            <div className="aspect-square bg-white rounded-lg border border-[#F0F2ED] p-1.5 flex items-center justify-center relative">
+                              <img
+                                src={imgSrc}
+                                alt={prod.nameAr}
+                                referrerPolicy="no-referrer"
+                                className="max-h-full max-w-full object-contain mix-blend-multiply"
+                              />
+                              {currentVanItem && (
+                                <span className="absolute bottom-1 start-1 text-[9.5px] font-bold bg-[#F4F4EA] text-[#4B6352] px-1.5 py-0.5 rounded-md tabular-nums">
+                                  {isAr ? `بالفان ${currentVanItem.remainingQuantity}` : `Van ${currentVanItem.remainingQuantity}`}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] font-bold text-[#142018] line-clamp-2 leading-tight">
+                              {prod.nameAr}
+                            </div>
+                            <div className="text-[10px] text-[#5F7164] truncate">{prod.unit}</div>
+                            <div className="text-xs font-black font-mono text-[#0B5D32] tabular-nums">
+                              {formatCurrency(prod.priceIQD, currency, language)}
+                            </div>
+                          </div>
+
+                          {qtyInReq === 0 ? (
                             <button
                               type="button"
                               onClick={() => handleAdjustRestockQty(prod.barcode, 5)}
-                              className="w-6 h-6 rounded-md bg-[#0B5D32] text-white flex items-center justify-center cursor-pointer"
+                              className="w-full py-1.5 rounded-lg bg-[#0B5D32] hover:bg-[#084725] text-white font-bold text-[11px] flex items-center justify-center gap-1 cursor-pointer transition"
                             >
-                              <Plus className="w-3 h-3" />
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>{isAr ? 'إضافة (+5)' : 'Add (+5)'}</span>
                             </button>
+                          ) : (
+                            <div className="flex items-center justify-between bg-white border border-[#0B5D32] rounded-lg p-0.5">
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustRestockQty(prod.barcode, -1)}
+                                className="w-6 h-6 rounded-md bg-[#F4F4EA] hover:bg-gray-200 flex items-center justify-center cursor-pointer"
+                              >
+                                <Minus className="w-3 h-3" />
+                              </button>
+                              <span className="font-mono font-black text-xs text-[#0B5D32] tabular-nums">
+                                {qtyInReq}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustRestockQty(prod.barcode, 5)}
+                                className="w-6 h-6 rounded-md bg-[#0B5D32] text-white flex items-center justify-center cursor-pointer"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-xl border border-[#EAEFEA] divide-y divide-[#EAEFEA] max-h-[520px] overflow-y-auto">
+                    {filteredCatalog.map((prod) => {
+                      const qtyInReq = restockCart[prod.barcode] || 0;
+                      const currentVanItem = vanStock.find((v) => v.barcode === prod.barcode);
+                      const imgSrc = prod.imageUrl || resolveVanProductImage(prod.barcode, prod.nameAr, products);
+
+                      return (
+                        <div
+                          key={prod.barcode}
+                          onClick={() => handleAdjustRestockQty(prod.barcode, 5)}
+                          className={`p-2.5 flex items-center justify-between gap-2.5 transition cursor-pointer ${
+                            qtyInReq > 0 ? 'bg-[#ECFDF5]/35' : 'hover:bg-[#F8FAF7]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div className="w-12 h-12 rounded-xl bg-white border border-[#EAEFEA] p-1 flex items-center justify-center shrink-0">
+                              <img
+                                src={imgSrc}
+                                alt={prod.nameAr}
+                                referrerPolicy="no-referrer"
+                                className="max-h-full max-w-full object-contain mix-blend-multiply"
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-black text-[#142018] truncate">{prod.nameAr}</div>
+                              <div className="text-[10.5px] text-[#5F7164] tabular-nums flex items-center gap-1.5 flex-wrap mt-0.5">
+                                <span>{prod.unit}</span>
+                                {currentVanItem && (
+                                  <>
+                                    <span>·</span>
+                                    <span className="font-bold text-[#0B5D32]">
+                                      {isAr
+                                        ? `بالفان ${currentVanItem.remainingQuantity}`
+                                        : `Van ${currentVanItem.remainingQuantity}`}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-2 shrink-0"
+                          >
+                            <span className="text-xs font-black font-mono tabular-nums text-[#0B5D32] whitespace-nowrap">
+                              {formatCurrency(prod.priceIQD, currency, language)}
+                            </span>
+
+                            {qtyInReq === 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustRestockQty(prod.barcode, 5)}
+                                className="h-8 px-2.5 rounded-xl bg-[#0B5D32] hover:bg-[#084725] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>+5</span>
+                              </button>
+                            ) : (
+                              <div className="h-8 flex items-center bg-[#0B5D32] text-white rounded-xl overflow-hidden">
+                                <button
+                                  type="button"
+                                  onClick={() => handleAdjustRestockQty(prod.barcode, -1)}
+                                  className="px-2 h-full hover:bg-black/15 cursor-pointer"
+                                >
+                                  <Minus className="w-3 h-3 stroke-[3]" />
+                                </button>
+                                <span className="px-2 text-xs font-mono font-black tabular-nums">
+                                  {qtyInReq}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAdjustRestockQty(prod.barcode, 5)}
+                                  className="px-2 h-full hover:bg-black/15 cursor-pointer"
+                                >
+                                  <Plus className="w-3 h-3 stroke-[3]" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
 

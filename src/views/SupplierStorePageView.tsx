@@ -32,7 +32,11 @@ import {
   SupplierReviewSummary
 } from '../types/index.ts';
 import { formatCurrency } from '../utils/format.ts';
-import { getLocalizedText } from '../utils/translations.ts';
+import {
+  getLocalizedText,
+  getSellerBusinessTypeLabel,
+  getVerificationStatusLabel
+} from '../utils/translations.ts';
 import { SupplierRatingSection } from '../components/SupplierRatingSection.tsx';
 
 interface SupplierStorePageViewProps {
@@ -333,9 +337,20 @@ export const SupplierStorePageView: React.FC<SupplierStorePageViewProps> = ({
               </div>
             )}
 
-            <div className="inline-flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-[#00A046] px-3 py-1.5 rounded-xl text-[11px] font-bold">
+            <div className="inline-flex items-center gap-1.5 bg-white border border-[#E5E7EB] text-[#1F2328] px-3 py-1.5 rounded-xl text-[11px] font-bold">
+              <Building2 className="w-3.5 h-3.5 text-[#00A046]" />
+              <span>{getSellerBusinessTypeLabel(supplier.businessType, language)}</span>
+            </div>
+
+            <div
+              className={`inline-flex items-center gap-1.5 border px-3 py-1.5 rounded-xl text-[11px] font-bold ${
+                (supplier.verificationStatus || (supplier.isVerified ? 'verified' : 'pending')) === 'pending'
+                  ? 'bg-amber-50 border-amber-200 text-amber-900'
+                  : 'bg-emerald-50 border-emerald-200 text-[#00A046]'
+              }`}
+            >
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>{isAr ? 'تاجر جملة معتمد' : 'Verified Wholesaler'}</span>
+              <span>{getVerificationStatusLabel(supplier.verificationStatus, supplier.isVerified, language)}</span>
             </div>
           </div>
 

@@ -36,7 +36,8 @@ import {
   Eye,
   Store,
   ShieldCheck,
-  RotateCcw
+  RotateCcw,
+  TrendingUp
 } from 'lucide-react';
 import { Currency, ProductWithOffers, Language } from '../types/index.ts';
 import { formatCurrency } from '../utils/format.ts';
@@ -155,6 +156,7 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
   const [salesHistory, setSalesHistory] = useState<POSSaleRecord[]>([]);
   const [posReturns, setPosReturns] = useState<POSReturnRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date>(() => new Date());
 
   // POS Catalog & Receipt state
   const [selectedCategory, setSelectedCategory] = useState<string>('الكل');
@@ -234,23 +236,27 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
     return CATEGORY_FALLBACK_IMAGES[category] || '/assets/images/white_basmati_rice.jpg';
   };
 
-  const loadData = async (signal?: AbortSignal) => {
-    setLoading(true);
+  const loadData = async (signal?: AbortSignal, silent = false) => {
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const [invResult, salesResult, returnsResult] = await Promise.allSettled([
-        fetchWithRetry(`/api/store/inventory/${storeId}`, { signal, retries: 3 }),
-        fetchWithRetry(`/api/store/pos-sales/${storeId}`, { signal, retries: 3 }),
-        fetchWithRetry(`/api/store/pos-returns/${storeId}`, { signal, retries: 3 })
+        fetchWithRetry(`/api/store/inventory/${storeId}`, { signal, retries: silent ? 1 : 3 }),
+        fetchWithRetry(`/api/store/pos-sales/${storeId}`, { signal, retries: silent ? 1 : 3 }),
+        fetchWithRetry(`/api/store/pos-returns/${storeId}`, { signal, retries: silent ? 1 : 3 })
       ]);
 
       if (signal?.aborted) return;
 
       let hadFailure = false;
+      let updatedAny = false;
 
       if (invResult.status === 'fulfilled' && invResult.value.ok) {
         const invData = await invResult.value.json();
         if (invData.success) {
           setInventory(invData.data || []);
+          updatedAny = true;
         }
       } else if (
         invResult.status === 'rejected' &&
@@ -263,6 +269,7 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
         const salesData = await salesResult.value.json();
         if (salesData.success) {
           setSalesHistory(salesData.data || []);
+          updatedAny = true;
         }
       } else if (
         salesResult.status === 'rejected' &&
@@ -275,10 +282,15 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
         const retData = await returnsResult.value.json();
         if (retData.success) {
           setPosReturns(retData.data || []);
+          updatedAny = true;
         }
       }
 
-      if (hadFailure && inventory.length === 0) {
+      if (updatedAny) {
+        setLastSyncedAt(new Date());
+      }
+
+      if (!silent && hadFailure && inventory.length === 0) {
         setFeedbackBanner({
           type: 'error',
           message: isAr
@@ -287,7 +299,7 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
         });
       }
     } catch (err: any) {
-      if (err?.name !== 'AbortError' && !signal?.aborted) {
+      if (!silent && err?.name !== 'AbortError' && !signal?.aborted) {
         setFeedbackBanner({
           type: 'error',
           message: isAr
@@ -296,7 +308,7 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
         });
       }
     } finally {
-      if (!signal?.aborted) {
+      if (!signal?.aborted && !silent) {
         setLoading(false);
       }
     }
@@ -304,8 +316,19 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
 
   useEffect(() => {
     const controller = new AbortController();
-    loadData(controller.signal);
-    return () => controller.abort();
+    loadData(controller.signal, false);
+
+    // Live background sync every 10s for real-time shift sales & order monitoring
+    const pollInterval = setInterval(() => {
+      if (!controller.signal.aborted) {
+        loadData(controller.signal, true);
+      }
+    }, 10000);
+
+    return () => {
+      clearInterval(pollInterval);
+      controller.abort();
+    };
   }, []);
 
   const lowStockItems = useMemo(
@@ -1065,6 +1088,48 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
     };
   }, [salesHistory, posReturns, inventory]);
 
+  const shiftLiveMetrics = useMemo(() => {
+    let cashSalesIQD = 0;
+    let nonCashSalesIQD = 0;
+    let inStoreCount = 0;
+    let takeAwayCount = 0;
+    let onlineCount = 0;
+    let latestSale: POSSaleRecord | null = null;
+
+    for (const sale of salesHistory) {
+      if (sale.paymentType === 'cash') {
+        cashSalesIQD += sale.totalIQD;
+      } else {
+        nonCashSalesIQD += sale.totalIQD;
+      }
+      if (sale.orderMode === 'online_order') {
+        onlineCount += 1;
+      } else if (sale.orderMode === 'take_away') {
+        takeAwayCount += 1;
+      } else {
+        inStoreCount += 1;
+      }
+      if (!latestSale || (sale.receiptNumber || 0) > (latestSale.receiptNumber || 0)) {
+        latestSale = sale;
+      }
+    }
+
+    const avgOrderIQD =
+      analyticsStats.totalOrdersCount > 0
+        ? Math.round(analyticsStats.totalRevenueIQD / analyticsStats.totalOrdersCount)
+        : 0;
+
+    return {
+      cashSalesIQD,
+      nonCashSalesIQD,
+      inStoreCount,
+      takeAwayCount,
+      onlineCount,
+      avgOrderIQD,
+      latestSale
+    };
+  }, [salesHistory, analyticsStats.totalOrdersCount, analyticsStats.totalRevenueIQD]);
+
   const chartSeries = useMemo(() => {
     const liveInStore = salesHistory
       .filter((s) => s.orderMode !== 'online_order')
@@ -1398,6 +1463,157 @@ export const StorePOSInventoryView: React.FC<StorePOSInventoryViewProps> = ({
           )}
         </div>
       )}
+
+      {/* ================= LIVE SHIFT PERFORMANCE WIDGET ================= */}
+      <section
+        aria-label={isAr ? 'لوحة متابعة أداء الوردية اللحظية' : 'Real-Time Shift Performance Widget'}
+        className="bg-white rounded-2xl border border-[#DCE5DC] shadow-[0_1px_4px_rgba(11,93,50,0.04)] overflow-hidden"
+      >
+        <div className="grid grid-cols-1 md:grid-cols-12 divide-y md:divide-y-0 md:divide-x md:divide-x-reverse divide-[#E8EDE8]">
+          {/* KPI 1: Total Daily Sales */}
+          <div className="md:col-span-5 px-4 py-3 flex items-center justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#4B6352]">
+                <TrendingUp className="w-3.5 h-3.5 text-[#0B5D32] shrink-0" />
+                <span>{isAr ? 'إجمالي المبيعات اليومية (الوردية)' : 'Total Daily Shift Sales'}</span>
+              </div>
+              <div className="text-xl sm:text-2xl font-black font-mono tabular-nums text-[#0B5D32] leading-tight">
+                {formatCurrency(analyticsStats.totalRevenueIQD, currency, language)}
+              </div>
+              <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-[#5F7164] font-semibold">
+                <span className="tabular-nums">
+                  {isAr
+                    ? `نقدي: ${formatCurrency(shiftLiveMetrics.cashSalesIQD, currency, language)}`
+                    : `Cash: ${formatCurrency(shiftLiveMetrics.cashSalesIQD, currency, language)}`}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span className="tabular-nums">
+                  {isAr
+                    ? `بطاقة / آجل: ${formatCurrency(shiftLiveMetrics.nonCashSalesIQD, currency, language)}`
+                    : `Card/Credit: ${formatCurrency(shiftLiveMetrics.nonCashSalesIQD, currency, language)}`}
+                </span>
+                {analyticsStats.totalReturnsIQD > 0 && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="text-amber-700 tabular-nums">
+                      {isAr
+                        ? `مرتجع: -${formatCurrency(analyticsStats.totalReturnsIQD, currency, language)}`
+                        : `Returns: -${formatCurrency(analyticsStats.totalReturnsIQD, currency, language)}`}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* KPI 2: Current Orders Count */}
+          <div className="md:col-span-4 px-4 py-3 flex items-center justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#4B6352]">
+                <ShoppingBag className="w-3.5 h-3.5 text-[#0B5D32] shrink-0" />
+                <span>{isAr ? 'عدد الطلبات الحالية' : 'Current Orders Count'}</span>
+              </div>
+              <div className="flex items-baseline gap-2.5 flex-wrap">
+                <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-[#142018] leading-tight">
+                  {analyticsStats.totalOrdersCount}
+                </span>
+                <span className="text-xs font-bold text-[#5F7164]">
+                  {isAr ? 'طلب مكتمل' : 'completed'}
+                </span>
+                {posCart.length > 0 && (
+                  <span className="text-[11px] font-bold text-[#0B5D32] tabular-nums">
+                    {isAr
+                      ? `+ 1 طلب نشط (${posCart.reduce((s, l) => s + l.qty, 0)} صنف)`
+                      : `+ 1 active (${posCart.reduce((s, l) => s + l.qty, 0)} items)`}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-[#5F7164] font-semibold tabular-nums">
+                <span>
+                  {isAr ? `مباشر: ${shiftLiveMetrics.inStoreCount}` : `In-Store: ${shiftLiveMetrics.inStoreCount}`}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span>
+                  {isAr ? `سفري: ${shiftLiveMetrics.takeAwayCount}` : `Takeaway: ${shiftLiveMetrics.takeAwayCount}`}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span>
+                  {isAr ? `أونلاين: ${shiftLiveMetrics.onlineCount}` : `Online: ${shiftLiveMetrics.onlineCount}`}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span>
+                  {isAr
+                    ? `متوسط الفاتورة: ${formatCurrency(shiftLiveMetrics.avgOrderIQD, currency, language)}`
+                    : `Avg: ${formatCurrency(shiftLiveMetrics.avgOrderIQD, currency, language)}`}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* KPI 3: Live Shift Sync & Quick Drilldown */}
+          <div className="md:col-span-3 px-4 py-3 bg-[#FAFCF9] flex flex-col justify-between gap-2">
+            <div className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="inline-flex items-center gap-1.5 font-bold text-[#0B5D32]">
+                <span className="w-2 h-2 rounded-full bg-[#16A34A]" aria-hidden="true" />
+                <span>{isAr ? 'مراقبة لحظية للوردية' : 'Live Shift Monitor'}</span>
+              </span>
+              <span className="text-[10.5px] font-mono tabular-nums text-[#5F7164] flex items-center gap-1" dir="ltr">
+                <Clock className="w-3 h-3" />
+                {lastSyncedAt.toLocaleTimeString(isAr ? 'ar-IQ' : 'en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit'
+                })}
+              </span>
+            </div>
+
+            {shiftLiveMetrics.latestSale ? (
+              <div className="text-[11px] text-[#3D5244] truncate tabular-nums">
+                {isAr
+                  ? `آخر فاتورة #${shiftLiveMetrics.latestSale.receiptNumber} · ${formatCurrency(shiftLiveMetrics.latestSale.totalIQD, currency, language)}`
+                  : `Latest #${shiftLiveMetrics.latestSale.receiptNumber} · ${formatCurrency(shiftLiveMetrics.latestSale.totalIQD, currency, language)}`}
+              </div>
+            ) : (
+              <div className="text-[11px] text-[#5F7164]">
+                {isAr ? 'بانتظار أول عملية بيع في الوردية' : 'Waiting for first shift sale'}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 pt-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  if (activeSubView === 'report') {
+                    setActiveSubView('pos');
+                  } else {
+                    setActiveSubView('report');
+                    setReportTab('transactions');
+                  }
+                }}
+                className="flex-1 px-2.5 py-1.5 rounded-lg bg-[#EBF4EE] hover:bg-[#DCECE2] text-[#0B5D32] text-[11px] font-bold transition cursor-pointer text-center whitespace-nowrap"
+              >
+                {activeSubView === 'report'
+                  ? isAr
+                    ? 'شاشة الكاشير'
+                    : 'POS Terminal'
+                  : isAr
+                  ? 'تفاصيل الوردية'
+                  : 'Shift Details'}
+              </button>
+              <button
+                type="button"
+                onClick={() => loadData(undefined, false)}
+                disabled={loading}
+                aria-label={isAr ? 'مزامنة الآن' : 'Sync now'}
+                className="px-2.5 py-1.5 rounded-lg bg-white border border-[#DCE5DC] hover:border-[#0B5D32] text-[#3D5244] text-[11px] font-bold flex items-center gap-1 cursor-pointer transition shrink-0"
+              >
+                <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+                <span>{isAr ? 'تحديث' : 'Sync'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* ================= FEEDBACK & SMART RESTOCK BRIDGE BANNER ================= */}
       {feedbackBanner && (

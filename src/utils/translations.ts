@@ -188,6 +188,13 @@ export interface TranslationDictionary {
   geoSupplierNotServingZone: string;
   geoCartZoneBlockedNotice: string;
   geoRemoveSupplierItems: string;
+
+  // Supplier Minimum Order Rules
+  orderRuleMissingValue: (missingFormatted: string, minFormatted: string) => string;
+  orderRuleMissingQuantity: (missing: number, min: number) => string;
+  orderRuleMissingCartons: (missing: number, min: number) => string;
+  orderRuleMissingSkus: (missing: number, min: number) => string;
+  orderRulesCartBlockedNotice: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -378,7 +385,18 @@ export const translations: Record<Language, TranslationDictionary> = {
     geoSelectArea: 'اختر المنطقة',
     geoSupplierNotServingZone: 'هذا المورد لا يغطي منطقة التوصيل المختارة حالياً',
     geoCartZoneBlockedNotice: 'لا يمكن إرسال الطلب لوجود مورد لا يخدم منطقة التوصيل الحالية. يرجى إزالة منتجاته أو تغيير منطقة التوصيل.',
-    geoRemoveSupplierItems: 'إزالة منتجات هذا المورد'
+    geoRemoveSupplierItems: 'إزالة منتجات هذا المورد',
+
+    // Supplier Minimum Order Rules
+    orderRuleMissingValue: (missingFormatted, minFormatted) =>
+      `ينقصك ${missingFormatted} للوصول إلى الحد الأدنى للطلب (${minFormatted})`,
+    orderRuleMissingQuantity: (missing, min) =>
+      `ينقصك ${missing} قطع للوصول إلى الحد الأدنى لإجمالي الكمية (${min})`,
+    orderRuleMissingCartons: (missing, min) =>
+      `ينقصك ${missing} كراتين للوصول إلى الحد الأدنى للكراتين (${min})`,
+    orderRuleMissingSkus: (missing, min) =>
+      `ينقصك ${missing} أصناف مختلفة للوصول إلى الحد الأدنى للأصناف (${min})`,
+    orderRulesCartBlockedNotice: 'لا يمكن إتمام الطلب حتى تتحقق قواعد الحد الأدنى لجميع الموردين في السلة.'
   },
   en: {
     // Brand & General
@@ -567,7 +585,18 @@ export const translations: Record<Language, TranslationDictionary> = {
     geoSelectArea: 'Select Area',
     geoSupplierNotServingZone: 'This supplier does not serve your selected delivery zone',
     geoCartZoneBlockedNotice: 'Cannot submit order because one or more suppliers do not serve your delivery zone. Please remove their items or change your delivery zone.',
-    geoRemoveSupplierItems: 'Remove supplier items'
+    geoRemoveSupplierItems: 'Remove supplier items',
+
+    // Supplier Minimum Order Rules
+    orderRuleMissingValue: (missingFormatted, minFormatted) =>
+      `You are missing ${missingFormatted} to reach the minimum order value (${minFormatted})`,
+    orderRuleMissingQuantity: (missing, min) =>
+      `You are missing ${missing} units to reach the minimum total quantity (${min})`,
+    orderRuleMissingCartons: (missing, min) =>
+      `You are missing ${missing} cartons to reach the minimum cartons requirement (${min})`,
+    orderRuleMissingSkus: (missing, min) =>
+      `You are missing ${missing} distinct SKUs to reach the minimum SKU count (${min})`,
+    orderRulesCartBlockedNotice: 'Cannot complete checkout until all supplier minimum order rules are satisfied.'
   }
 };
 
@@ -671,3 +700,56 @@ export function getLocalizedText(text: string | undefined | null, lang: Language
   if (lang === 'ar') return text;
   return itemTranslations[text] || text;
 }
+
+export const SELLER_BUSINESS_TYPES = [
+  'manufacturer',
+  'importer',
+  'wholesaler',
+  'distributor',
+  'trader',
+  'warehouse',
+  'brand_owner',
+  'authorized_distributor'
+] as const;
+
+export const sellerBusinessTypeLabels: Record<
+  (typeof SELLER_BUSINESS_TYPES)[number],
+  { ar: string; en: string }
+> = {
+  manufacturer: { ar: 'مصنع / شركة منتجة', en: 'Manufacturer' },
+  importer: { ar: 'مستورد', en: 'Importer' },
+  wholesaler: { ar: 'تاجر جملة', en: 'Wholesaler' },
+  distributor: { ar: 'موزع', en: 'Distributor' },
+  trader: { ar: 'تاجر', en: 'Trader' },
+  warehouse: { ar: 'مستودع / مخزن جملة', en: 'Warehouse' },
+  brand_owner: { ar: 'مالك علامة تجارية', en: 'Brand Owner' },
+  authorized_distributor: { ar: 'وكيل / موزع معتمد', en: 'Authorized Distributor' }
+};
+
+export const verificationStatusLabels: Record<
+  'pending' | 'verified' | 'verified_business' | 'authorized_distributor',
+  { ar: string; en: string }
+> = {
+  pending: { ar: 'قيد المراجعة', en: 'Pending Verification' },
+  verified: { ar: 'موثّق', en: 'Verified' },
+  verified_business: { ar: 'شركة موثّقة', en: 'Verified Business' },
+  authorized_distributor: { ar: 'موزع معتمد', en: 'Authorized Distributor' }
+};
+
+export function getSellerBusinessTypeLabel(
+  businessType: keyof typeof sellerBusinessTypeLabels | undefined,
+  lang: Language
+): string {
+  const key = businessType || 'wholesaler';
+  return sellerBusinessTypeLabels[key]?.[lang] || sellerBusinessTypeLabels.wholesaler[lang];
+}
+
+export function getVerificationStatusLabel(
+  verificationStatus: keyof typeof verificationStatusLabels | undefined,
+  isVerified: boolean,
+  lang: Language
+): string {
+  const key = verificationStatus || (isVerified ? 'verified' : 'pending');
+  return verificationStatusLabels[key]?.[lang] || verificationStatusLabels.pending[lang];
+}
+

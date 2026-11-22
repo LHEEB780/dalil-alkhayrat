@@ -1,3 +1,5 @@
+import { SellerBusinessType, VerificationStatus, SupplierOrderRules } from '../types/index.ts';
+
 export interface WholesaleSupplier {
   id: string;
   nameAr: string;
@@ -19,6 +21,8 @@ export interface WholesaleSupplier {
   specialtiesAr: string;
   specialtiesEn: string;
   isVerified: boolean;
+  businessType: SellerBusinessType;
+  verificationStatus: VerificationStatus;
   hasSmartShipping: boolean;
   activeVansCount: number;
   badgeAr: string;
@@ -31,6 +35,7 @@ export interface WholesaleSupplier {
   category?: string;
   minOrderUSD?: number;
   serviceZoneIds?: string[];
+  orderRules?: SupplierOrderRules;
 }
 
 export interface StoreDistrict {
@@ -204,6 +209,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     specialtiesAr: 'ألبان وأجبان، معلبات، معكرونة، شاي، منظفات',
     specialtiesEn: 'Dairy & Cheese, Canned, Pasta, Tea',
     isVerified: true,
+    businessType: 'distributor',
+    verificationStatus: 'verified_business',
     hasSmartShipping: true,
     activeVansCount: 5,
     badgeAr: 'الأقرب لموقعك ⚡',
@@ -214,7 +221,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     logoUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=150&q=80',
     storeImageUrl: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=600&q=80',
     brandsDistributed: ['بريزيدن', 'لونا', 'المراعي', 'الروابي', 'سنان'],
-    serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_najaf_center', 'zone_babil_hilla']
+    serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_najaf_center', 'zone_babil_hilla'],
+    orderRules: { minOrderValueIQD: 100000 }
   },
   {
     id: 'supp_rafidain',
@@ -238,6 +246,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     specialtiesAr: 'أرز بسمتي عنبر، زيوت عافية، حليب بودرة، سكر نقي',
     specialtiesEn: 'Basmati Rice, Cooking Oils, Milk, Sugar',
     isVerified: true,
+    businessType: 'wholesaler',
+    verificationStatus: 'verified_business',
     hasSmartShipping: true,
     activeVansCount: 7,
     badgeAr: 'المورد الأعلى تقييماً ⭐',
@@ -248,7 +258,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     logoUrl: 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?auto=format&fit=crop&w=150&q=80',
     storeImageUrl: 'https://images.unsplash.com/photo-1553413077-190dd305871c?auto=format&fit=crop&w=600&q=80',
     brandsDistributed: ['عافية', 'أرز العنبر العراقي', 'شكر الاتحاد', 'نيدو', 'ألتونسا'],
-    serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_najaf_center', 'zone_najaf_kufa', 'zone_karbala_center']
+    serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_najaf_center', 'zone_najaf_kufa', 'zone_karbala_center'],
+    orderRules: { minOrderValueIQD: 150000, minCartons: 3, minSkuCount: 2 }
   },
   {
     id: 'supp_nahrain',
@@ -272,6 +283,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     specialtiesAr: 'شاي الكوزي، قهوة العميد، بن لافازا، نسكافيه',
     specialtiesEn: 'Al-Koozi Tea, Al-Ameed Coffee, Lavazza',
     isVerified: true,
+    businessType: 'importer',
+    verificationStatus: 'authorized_distributor',
     hasSmartShipping: true,
     activeVansCount: 3,
     badgeAr: 'شحن مجاني SMART 🚚',
@@ -282,7 +295,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     logoUrl: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=150&q=80',
     storeImageUrl: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=600&q=80',
     brandsDistributed: ['شاي الكوزي', 'قهوة العميد', 'نسكافيه', 'لافازا', 'ديلما'],
-    serviceZoneIds: ['zone_baghdad_rusafa', 'zone_najaf_center', 'zone_karbala_center', 'zone_karbala_hindiya']
+    serviceZoneIds: ['zone_baghdad_rusafa', 'zone_najaf_center', 'zone_karbala_center', 'zone_karbala_hindiya'],
+    orderRules: { minOrderValueIQD: 120000, minCartons: 4 }
   },
   {
     id: 'supp_babylon',
@@ -306,6 +320,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     specialtiesAr: 'زيوت نباتية بالكرتون، سمنة، تونة الوها، معجون طماطم',
     specialtiesEn: 'Cooking Oils, Ghee, Tuna, Tomato Paste',
     isVerified: true,
+    businessType: 'trader',
+    verificationStatus: 'verified',
     hasSmartShipping: false,
     activeVansCount: 4,
     badgeAr: 'أفضل أسعار الزيوت 💰',
@@ -316,7 +332,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     logoUrl: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&w=150&q=80',
     storeImageUrl: 'https://images.unsplash.com/photo-1578575437130-527eed3abbec?auto=format&fit=crop&w=600&q=80',
     brandsDistributed: ['عافية', 'زيت الذرة الشهبندر', 'تونة ألوها', 'معجون المزرعة', 'سمنة شوكة وملعقة'],
-    serviceZoneIds: ['zone_baghdad_karkh', 'zone_babil_hilla', 'zone_babil_musayyib', 'zone_karbala_hindiya']
+    serviceZoneIds: ['zone_baghdad_karkh', 'zone_babil_hilla', 'zone_babil_musayyib', 'zone_karbala_hindiya'],
+    orderRules: { minOrderValueIQD: 200000, minTotalQuantity: 10 }
   },
   {
     id: 'supp_jamila',
@@ -340,6 +357,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     specialtiesAr: 'شوالات أرز عنبر 50 كغم، طحين صفر، سكر الاتحاد بالطن',
     specialtiesEn: '50kg Rice sacks, Sugar, Flour',
     isVerified: true,
+    businessType: 'manufacturer',
+    verificationStatus: 'verified_business',
     hasSmartShipping: false,
     activeVansCount: 8,
     badgeAr: 'أسعار مصنع مباشرة 🏭',
@@ -350,7 +369,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     logoUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=150&q=80',
     storeImageUrl: 'https://images.unsplash.com/photo-1605371924599-2d0365da1ae0?auto=format&fit=crop&w=600&q=80',
     brandsDistributed: ['أرز محمود', 'طحين صفر تركي', 'سكر الاتحاد', 'عدس كندي', 'فاصولياء بيضاء'],
-    serviceZoneIds: ['zone_baghdad_rusafa', 'zone_baghdad_karkh', 'zone_babil_hilla', 'zone_babil_musayyib', 'zone_karbala_center']
+    serviceZoneIds: ['zone_baghdad_rusafa', 'zone_baghdad_karkh', 'zone_babil_hilla', 'zone_babil_musayyib', 'zone_karbala_center'],
+    orderRules: { minOrderValueIQD: 400000, minCartons: 10, minSkuCount: 2 }
   },
   {
     id: 'supp_baghdad_canned',
@@ -373,7 +393,9 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     creditTermsEn: '20-day credit for verified stores',
     specialtiesAr: 'معلبات ذرة، فول مدمس، حلاوة طحينية، بسكويت',
     specialtiesEn: 'Canned Corn, Fava Beans, Halawa, Biscuits',
-    isVerified: true,
+    isVerified: false,
+    businessType: 'brand_owner',
+    verificationStatus: 'pending',
     hasSmartShipping: true,
     activeVansCount: 4,
     badgeAr: 'توصيل فوري < ساعة ⏱️',
@@ -384,7 +406,8 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     logoUrl: 'https://images.unsplash.com/photo-1534723452862-4c874018d66d?auto=format&fit=crop&w=150&q=80',
     storeImageUrl: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80',
     brandsDistributed: ['حدائق كاليفورنيا', 'أمريكانا', 'لونا', 'المداح', 'بسكويت أولكر'],
-    serviceZoneIds: ['zone_baghdad_karkh', 'zone_najaf_center', 'zone_najaf_kufa']
+    serviceZoneIds: ['zone_baghdad_karkh', 'zone_najaf_center', 'zone_najaf_kufa'],
+    orderRules: { minOrderValueIQD: 80000 }
   }
 ];
 
@@ -429,8 +452,12 @@ export function resolveWholesaleSupplierByOffer(
       districtEn: supplierCity || base.districtEn,
       specialtiesAr: 'مشروبات ساخنة، قهوة، شاي، سلع استهلاكية بالجملة',
       specialtiesEn: 'Coffee, Tea, Beverages & FMCG Wholesale',
+      isVerified: true,
+      businessType: 'authorized_distributor',
+      verificationStatus: 'authorized_distributor',
       badgeAr: 'موزع معتمد ✓',
-      badgeEn: 'Verified Distributor ✓'
+      badgeEn: 'Verified Distributor ✓',
+      orderRules: { minCartons: 5, minTotalQuantity: 6 }
     };
   }
 
@@ -445,8 +472,12 @@ export function resolveWholesaleSupplierByOffer(
       districtEn: supplierCity || base.districtEn,
       specialtiesAr: 'مواد تموينية، منظفات، ألبان، معلبات، حبوب',
       specialtiesEn: 'Groceries, Cleaning, Dairy, Canned & Grains',
+      isVerified: true,
+      businessType: 'warehouse',
+      verificationStatus: 'verified',
       badgeAr: 'مجمع جملة معتمد ✓',
-      badgeEn: 'Verified Wholesale Hub ✓'
+      badgeEn: 'Verified Wholesale Hub ✓',
+      orderRules: { minOrderValueIQD: 120000 }
     };
   }
 

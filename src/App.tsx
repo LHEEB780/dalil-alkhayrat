@@ -23,6 +23,7 @@ import { SupplierStorePageView } from './views/SupplierStorePageView.tsx';
 import { RetailerAccountHubView } from './views/RetailerAccountHubView.tsx';
 import { AllCategoriesView } from './views/AllCategoriesView.tsx';
 import { CategoryBranchesView } from './views/CategoryBranchesView.tsx';
+import { AllBrandsView } from './views/AllBrandsView.tsx';
 import { ApiDocsView } from './views/ApiDocsView.tsx';
 
 import {
@@ -36,7 +37,8 @@ import {
   AppTab,
   AccountSectionId,
   StoreBranchAddress,
-  StoreWorkspaceMode
+  StoreWorkspaceMode,
+  SupplierOrderRules
 } from './types/index.ts';
 import {
   WholesaleSupplier,
@@ -104,9 +106,10 @@ export default function App() {
   const [supplierReturnTab, setSupplierReturnTab] = useState<AppTab>('marketplace');
   const [activeAccountSection, setActiveAccountSection] = useState<AccountSectionId>('profile');
   const [branchesReturnTab, setBranchesReturnTab] = useState<'marketplace' | 'all_categories'>('marketplace');
+  const [selectedBrandId, setSelectedBrandId] = useState<string | null>(null);
 
   const B2C_TABS: AppTab[] = ['store_pos', 'store_management', 'b2c'];
-  const B2B_TABS: AppTab[] = ['marketplace', 'all_categories', 'category_branches', 'suppliers', 'collective'];
+  const B2B_TABS: AppTab[] = ['marketplace', 'all_categories', 'category_branches', 'all_brands', 'suppliers', 'collective'];
 
   const handleToggleStoreOpsEnabled = (enabled: boolean) => {
     setIsStoreOpsEnabled(enabled);
@@ -348,7 +351,7 @@ export default function App() {
 
   // Data state
   const [products, setProducts] = useState<ProductWithOffers[]>([]);
-  const [allSuppliers, setAllSuppliers] = useState<{ id: string; serviceZoneIds?: string[] }[]>([]);
+  const [allSuppliers, setAllSuppliers] = useState<{ id: string; serviceZoneIds?: string[]; orderRules?: SupplierOrderRules }[]>([]);
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('الكل');
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('الكل');
@@ -545,9 +548,11 @@ export default function App() {
     setCartItems(prev => {
       const existingIndex = prev.findIndex(item => item.offer.id === offer.id);
       if (existingIndex > -1) {
-        const copy = [...prev];
-        copy[existingIndex].quantity += quantity;
-        return copy;
+        return prev.map((item, idx) =>
+          idx === existingIndex
+            ? { ...item, quantity: item.quantity + quantity }
+            : item
+        );
       }
       return [...prev, { product, offer, quantity }];
     });
@@ -572,6 +577,7 @@ export default function App() {
   const handleOrderSuccess = (parentOrder: any) => {
     fetchOrders();
     setOrderToast(`تم بنجاح إنشاء الطلب الرئيسي (${parentOrder.id}) وتقسيمه تلقائياً إلى ${parentOrder.subOrders.length} طلبيات للموردين!`);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     setTimeout(() => setOrderToast(null), 6000);
   };
 
@@ -748,6 +754,25 @@ export default function App() {
               setSelectedSupplierStore(supplier);
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
+            onOpenAllBrands={(brandId) => {
+              setSelectedBrandId(brandId || null);
+              setActiveTab('all_brands');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        )}
+
+        {activeTab === 'all_brands' && (
+          <AllBrandsView
+            products={products}
+            currency={currency}
+            language={language}
+            initialBrandId={selectedBrandId}
+            onBack={handleGoBack}
+            onCompareOffers={(product) => setComparingProduct(product)}
+            onAddToCart={handleAddToCart}
+            wishlistBarcodes={wishlistBarcodes}
+            onToggleWishlist={handleToggleWishlist}
           />
         )}
 
@@ -1082,6 +1107,7 @@ export default function App() {
           language={language}
           currentDistrict={currentDistrict}
           suppliers={allSuppliers}
+          storeId={userSession?.entityId || 'store_almansoor'}
           onUpdateQuantity={handleUpdateCartQuantity}
           onRemoveItem={handleRemoveCartItem}
           onClearCart={handleClearCart}

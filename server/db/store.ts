@@ -3,6 +3,8 @@ import {
   SupplierOffer,
   StoreProfile,
   SupplierProfile,
+  SellerBusinessType,
+  VerificationStatus,
   DriverProfile,
   VanInventoryItem,
   VanRouteStop,
@@ -30,6 +32,11 @@ import {
   DeliveryZone,
   Brand
 } from './types.ts';
+import {
+  validateSupplierOrderRules,
+  FailedSupplierOrderRule,
+  SupplierOrderRuleItem
+} from '../../shared/orderRules.ts';
 import {
   initialProducts,
   initialSuppliers,
@@ -251,9 +258,31 @@ class AppDataStore {
     return this.deliveryZones;
   }
 
+  getSuppliers(params?: {
+    deliveryZoneId?: string;
+    businessType?: SellerBusinessType;
+    verificationStatus?: VerificationStatus;
+  }): SupplierProfile[] {
+    let result = this.suppliers.map(s => ({
+      ...s,
+      businessType: s.businessType ?? 'wholesaler',
+      verificationStatus: s.verificationStatus ?? (s.isVerified ? 'verified' : 'pending')
+    }));
+
+    if (params?.deliveryZoneId) {
+      result = result.filter(s => s.serviceZoneIds.includes(params.deliveryZoneId!));
+    }
+    if (params?.businessType) {
+      result = result.filter(s => s.businessType === params.businessType);
+    }
+    if (params?.verificationStatus) {
+      result = result.filter(s => s.verificationStatus === params.verificationStatus);
+    }
+    return result;
+  }
+
   getSuppliersByZone(deliveryZoneId?: string): SupplierProfile[] {
-    if (!deliveryZoneId) return this.suppliers;
-    return this.suppliers.filter(s => s.serviceZoneIds.includes(deliveryZoneId));
+    return this.getSuppliers({ deliveryZoneId });
   }
 
   // ================= PRODUCTS & OFFERS =================
@@ -608,16 +637,54 @@ class AppDataStore {
     const store = this.stores.find(s => s.id === params.storeId);
     if (!store) throw new Error('Store profile not found');
 
-    // Validate delivery zone coverage before deducting any stock
-    if (params.deliveryZoneId) {
-      for (const reqItem of params.items) {
-        const offer = this.offers.find(o => o.id === reqItem.offerId);
-        if (offer) {
-          const supplier = this.suppliers.find(s => s.id === offer.supplierId);
-          if (supplier && !supplier.serviceZoneIds.includes(params.deliveryZoneId)) {
-            throw new Error(`المورد (${supplier.companyName}) لا يغطي منطقة التوصيل المختارة حالياً`);
-          }
+    if (!params.items || params.items.length === 0) {
+      throw new Error('بيانات الطلب غير مكتملة');
+    }
+
+    // Phase 1: Validate everything before deducting stock or creating sub-orders / ledger entries
+    const offerQuantities: Record<string, number> = {};
+    const validatedLines: {
+      offer: SupplierOffer;
+      product: UnifiedProduct;
+      quantity: number;
+    }[] = [];
+
+    for (const reqItem of params.items) {
+      const qty = Number(reqItem.quantity);
+      if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
+        throw new Error(`الكمية المطلوبة للصنف (${reqItem.barcode}) غير صالحة`);
+      }
+
+      const offer = this.offers.find(o => o.id === reqItem.offerId);
+      const product = this.products.find(p => p.barcode === reqItem.barcode);
+      if (!offer || !product) {
+        throw new Error(`Offer or product not found for barcode ${reqItem.barcode}`);
+      }
+
+      if (params.deliveryZoneId) {
+        const supplier = this.suppliers.find(s => s.id === offer.supplierId);
+        if (supplier && !supplier.serviceZoneIds.includes(params.deliveryZoneId)) {
+          throw new Error(`المورد (${supplier.companyName}) لا يغطي منطقة التوصيل المختارة حالياً`);
         }
+      }
+
+      offerQuantities[offer.id] = (offerQuantities[offer.id] || 0) + qty;
+      validatedLines.push({ offer, product, quantity: qty });
+    }
+
+    for (const offerId of Object.keys(offerQuantities)) {
+      const totalOfferQty = offerQuantities[offerId];
+      const offer = this.offers.find(o => o.id === offerId)!;
+      const product = this.products.find(p => p.barcode === offer.barcode)!;
+
+      if (offer.minOrderQuantity > 0 && totalOfferQty < offer.minOrderQuantity) {
+        throw new Error(
+          `الكمية المطلوبة من (${product.nameAr}) لدى المورد (${offer.supplierName}) هي ${totalOfferQty}، والحد الأدنى للعرض هو ${offer.minOrderQuantity} (ينقصك ${offer.minOrderQuantity - totalOfferQty})`
+        );
+      }
+
+      if (offer.availableStock < totalOfferQty) {
+        throw new Error(`الكمية المطلوبة من ${product.nameAr} تتجاوز المخزون المتوفر لدى ${offer.supplierName}`);
       }
     }
 
@@ -633,53 +700,69 @@ class AppDataStore {
         unitPriceIQD: number;
         totalPriceIQD: number;
       }[];
+      ruleItems: SupplierOrderRuleItem[];
       subtotalIQD: number;
     }> = {};
 
-    for (const reqItem of params.items) {
-      const offer = this.offers.find(o => o.id === reqItem.offerId);
-      const product = this.products.find(p => p.barcode === reqItem.barcode);
-      if (!offer || !product) {
-        throw new Error(`Offer or product not found for barcode ${reqItem.barcode}`);
-      }
-
-      if (offer.availableStock < reqItem.quantity) {
-        throw new Error(`الكمية المطلوبة من ${product.nameAr} تتجاوز المخزون المتوفر لدى ${offer.supplierName}`);
-      }
-
+    for (const line of validatedLines) {
+      const { offer, product, quantity } = line;
       if (!supplierGroups[offer.supplierId]) {
         supplierGroups[offer.supplierId] = {
           supplierId: offer.supplierId,
           supplierName: offer.supplierName,
           items: [],
+          ruleItems: [],
           subtotalIQD: 0
         };
       }
 
-      const lineTotal = offer.priceIQD * reqItem.quantity;
+      const lineTotal = offer.priceIQD * quantity;
       supplierGroups[offer.supplierId].items.push({
         barcode: product.barcode,
         productName: product.nameAr,
         unit: product.unit,
-        quantity: reqItem.quantity,
+        quantity,
         unitPriceIQD: offer.priceIQD,
         totalPriceIQD: lineTotal
       });
+      supplierGroups[offer.supplierId].ruleItems.push({
+        barcode: product.barcode,
+        quantity,
+        unitPriceIQD: offer.priceIQD,
+        unit: product.unit,
+        packageQuantity: product.packageQuantity
+      });
       supplierGroups[offer.supplierId].subtotalIQD += lineTotal;
-
-      // Deduct available stock
-      offer.availableStock -= reqItem.quantity;
     }
 
-    const parentOrderId = `ORD-${Date.now()}`;
-    const subOrders: SubOrder[] = [];
-    let totalAmountIQD = 0;
+    const formatFailedRuleMessage = (rule: FailedSupplierOrderRule): string => {
+      switch (rule.rule) {
+        case 'minOrderValueIQD':
+          return `الحد الأدنى لقيمة الطلب (المطلوب ${rule.required.toLocaleString()} د.ع، الحالي ${rule.current.toLocaleString()} د.ع، ينقصك ${rule.missing.toLocaleString()} د.ع)`;
+        case 'minTotalQuantity':
+          return `الحد الأدنى لإجمالي الكمية (المطلوب ${rule.required}، الحالي ${rule.current}، ينقصك ${rule.missing})`;
+        case 'minCartons':
+          return `الحد الأدنى للكراتين (المطلوب ${rule.required} كرتون، الحالي ${rule.current}، ينقصك ${rule.missing})`;
+        case 'minSkuCount':
+          return `الحد الأدنى لعدد الأصناف المختلفة (المطلوب ${rule.required} أصناف، الحالي ${rule.current}، ينقصك ${rule.missing})`;
+      }
+    };
 
+    // Validate per-supplier orderRules and credit limits BEFORE mutating any stock/orders/ledger
     for (const suppId of Object.keys(supplierGroups)) {
       const group = supplierGroups[suppId];
-      totalAmountIQD += group.subtotalIQD;
+      const supplier = this.suppliers.find(s => s.id === suppId);
+      const validation = validateSupplierOrderRules(group.ruleItems, supplier?.orderRules);
 
-      // Check credit limit if paying by credit
+      if (!validation.isValid) {
+        const firstFailure = validation.failedRules[0];
+        const details = validation.failedRules.map(formatFailedRuleMessage).join('؛ ');
+        throw new Error(
+          `المورد (${group.supplierName}): لم تتحقق شروط الحد الأدنى للطلب — ${details}` +
+          (validation.failedRules.length > 1 ? '' : ` [الفرق: ${firstFailure.missing.toLocaleString()}]`)
+        );
+      }
+
       if (params.paymentMethod === 'credit') {
         const creditAcc = this.getCreditAccount(store.id, suppId);
         if (!creditAcc) {
@@ -692,6 +775,21 @@ class AppDataStore {
           throw new Error(`الرصيد الائتماني المتاح مع ${group.supplierName} (${creditAcc.availableCreditIQD.toLocaleString()} د.ع) لا يكفي لتغطية قيمة الطلب (${group.subtotalIQD.toLocaleString()} د.ع)`);
         }
       }
+    }
+
+    // Phase 2: All checks passed — atomically deduct stock and create SubOrders + LedgerEntries
+    for (const offerId of Object.keys(offerQuantities)) {
+      const offer = this.offers.find(o => o.id === offerId)!;
+      offer.availableStock -= offerQuantities[offerId];
+    }
+
+    const parentOrderId = `ORD-${Date.now()}`;
+    const subOrders: SubOrder[] = [];
+    let totalAmountIQD = 0;
+
+    for (const suppId of Object.keys(supplierGroups)) {
+      const group = supplierGroups[suppId];
+      totalAmountIQD += group.subtotalIQD;
 
       // Generate 4-digit PIN for delivery proof
       const pin = Math.floor(1000 + Math.random() * 9000).toString();
@@ -1081,6 +1179,44 @@ class AppDataStore {
 
     this.vanInventory.push(newItem);
     return newItem;
+  }
+
+  adjustVanStock(params: {
+    driverId: string;
+    barcode: string;
+    delta: number;
+  }): VanInventoryItem {
+    const driver = this.drivers.find(d => d.id === params.driverId);
+    if (!driver) throw new Error('السائق غير موجود');
+    const delta = Math.trunc(Number(params.delta));
+    if (!Number.isFinite(delta) || delta === 0) {
+      throw new Error('مقدار التعديل غير صالح');
+    }
+
+    const existing = this.vanInventory.find(
+      v => v.driverId === params.driverId && v.barcode === params.barcode
+    );
+    if (!existing) {
+      if (delta > 0) {
+        return this.loadVanStock({
+          driverId: params.driverId,
+          barcode: params.barcode,
+          quantity: delta
+        });
+      }
+      throw new Error('الصنف غير محمّل في الفان');
+    }
+
+    const nextRemaining = existing.remainingQuantity + delta;
+    const nextLoaded = existing.loadedQuantity + delta;
+    const minCommitted = existing.soldQuantity + existing.returnedQuantity + existing.damagedQuantity;
+    if (nextRemaining < 0 || nextLoaded < minCommitted) {
+      throw new Error('لا يمكن إنقاص الكمية عن الحد المتبقي أو الكمية المباعة');
+    }
+
+    existing.loadedQuantity = nextLoaded;
+    existing.remainingQuantity = nextRemaining;
+    return existing;
   }
 
   createVanLoadRequest(params: {

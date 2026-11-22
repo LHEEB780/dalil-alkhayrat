@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { 
   X, 
   Trash2, 
@@ -14,9 +14,14 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { CartItem, Currency, Language } from '../types/index.ts';
-import { StoreDistrict } from '../data/nearbySuppliers.ts';
+import { StoreDistrict, WHOLESALE_SUPPLIERS } from '../data/nearbySuppliers.ts';
 import { formatCurrency } from '../utils/format.ts';
 import { translations } from '../utils/translations.ts';
+import {
+  validateSupplierOrderRules,
+  FailedSupplierOrderRule,
+  SupplierOrderRules
+} from '../../shared/orderRules.ts';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -29,7 +34,8 @@ interface CartDrawerProps {
   onOrderSuccess: (orderData: any) => void;
   language?: Language;
   currentDistrict?: StoreDistrict;
-  suppliers?: { id: string; serviceZoneIds?: string[] }[];
+  suppliers?: { id: string; serviceZoneIds?: string[]; orderRules?: SupplierOrderRules }[];
+  storeId?: string;
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
@@ -43,7 +49,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onOrderSuccess,
   language = 'ar',
   currentDistrict,
-  suppliers = []
+  suppliers = [],
+  storeId = 'store_almansoor'
 }) => {
   const isAr = language === 'ar';
   const t = translations[language];
@@ -52,52 +59,106 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    setErrorMessage(null);
+  }, [isOpen, cartItems, paymentMethod]);
 
   // Group items automatically by supplier! (Core B2B requirement)
-  const groupedBySupplier = cartItems.reduce((acc, item) => {
-    const suppId = item.offer.supplierId;
-    if (!acc[suppId]) {
-      acc[suppId] = {
-        supplierId: suppId,
-        supplierName: item.offer.supplierName,
-        supplierCity: item.offer.supplierCity,
-        allowsCredit: item.offer.paymentTerms.allowsCredit,
-        maxCreditDays: item.offer.paymentTerms.maxCreditDays,
-        items: [],
-        subtotalIQD: 0
-      };
-    }
-    acc[suppId].items.push(item);
-    acc[suppId].subtotalIQD += item.offer.priceIQD * item.quantity;
-    return acc;
-  }, {} as Record<string, {
-    supplierId: string;
-    supplierName: string;
-    supplierCity: string;
-    allowsCredit: boolean;
-    maxCreditDays: number;
-    items: CartItem[];
-    subtotalIQD: number;
-  }>);
+  const supplierGroups = useMemo(() => {
+    const groupedBySupplier = cartItems.reduce((acc, item) => {
+      const suppId = item.offer.supplierId;
+      if (!acc[suppId]) {
+        acc[suppId] = {
+          supplierId: suppId,
+          supplierName: item.offer.supplierName,
+          supplierCity: item.offer.supplierCity,
+          allowsCredit: item.offer.paymentTerms.allowsCredit,
+          maxCreditDays: item.offer.paymentTerms.maxCreditDays,
+          items: [],
+          subtotalIQD: 0
+        };
+      }
+      acc[suppId].items.push(item);
+      acc[suppId].subtotalIQD += item.offer.priceIQD * item.quantity;
+      return acc;
+    }, {} as Record<string, {
+      supplierId: string;
+      supplierName: string;
+      supplierCity: string;
+      allowsCredit: boolean;
+      maxCreditDays: number;
+      items: CartItem[];
+      subtotalIQD: number;
+    }>);
+    return Object.values(groupedBySupplier);
+  }, [cartItems]);
 
-  const supplierGroups = Object.values(groupedBySupplier);
-  const totalAmountIQD = cartItems.reduce((sum, item) => sum + item.offer.priceIQD * item.quantity, 0);
-
-  const isSupplierServingZone = (supplierId: string): boolean => {
-    const activeZoneId = currentDistrict?.deliveryZoneId;
-    if (!activeZoneId) return true;
-    const supp = suppliers.find((s) => s.id === supplierId);
-    if (!supp || !Array.isArray(supp.serviceZoneIds)) return true;
-    return supp.serviceZoneIds.includes(activeZoneId);
-  };
-
-  const unsupportedSupplierIds = new Set(
-    supplierGroups
-      .filter((g) => !isSupplierServingZone(g.supplierId))
-      .map((g) => g.supplierId)
+  const totalAmountIQD = useMemo(
+    () => cartItems.reduce((sum, item) => sum + item.offer.priceIQD * item.quantity, 0),
+    [cartItems]
   );
+
+  const unsupportedSupplierIds = useMemo(() => {
+    const activeZoneId = currentDistrict?.deliveryZoneId;
+    if (!activeZoneId) return new Set<string>();
+    return new Set(
+      supplierGroups
+        .filter((g) => {
+          const supp = suppliers.find((s) => s.id === g.supplierId);
+          if (!supp || !Array.isArray(supp.serviceZoneIds)) return false;
+          return !supp.serviceZoneIds.includes(activeZoneId);
+        })
+        .map((g) => g.supplierId)
+    );
+  }, [supplierGroups, suppliers, currentDistrict?.deliveryZoneId]);
+
   const hasUnsupportedSuppliers = unsupportedSupplierIds.size > 0;
+
+  const supplierOrderValidations = useMemo(() => {
+    const getSupplierOrderRules = (supplierId: string): SupplierOrderRules | undefined => {
+      const apiSupplier = suppliers.find((s) => s.id === supplierId);
+      if (apiSupplier?.orderRules) return apiSupplier.orderRules;
+      return WHOLESALE_SUPPLIERS.find((s) => s.id === supplierId)?.orderRules;
+    };
+
+    return supplierGroups.reduce((acc, group) => {
+      const ruleItems = group.items.map((item) => ({
+        barcode: item.product.barcode,
+        quantity: item.quantity,
+        unitPriceIQD: item.offer.priceIQD,
+        unit: item.product.unit,
+        packageQuantity: item.product.packageQuantity
+      }));
+      acc[group.supplierId] = validateSupplierOrderRules(
+        ruleItems,
+        getSupplierOrderRules(group.supplierId)
+      );
+      return acc;
+    }, {} as Record<string, ReturnType<typeof validateSupplierOrderRules>>);
+  }, [supplierGroups, suppliers]);
+
+  const hasUnmetOrderRules = useMemo(
+    () => supplierGroups.some((g) => !supplierOrderValidations[g.supplierId]?.isValid),
+    [supplierGroups, supplierOrderValidations]
+  );
+
+  if (!isOpen) return null;
+
+  const formatFailedRuleAlert = (rule: FailedSupplierOrderRule): string => {
+    switch (rule.rule) {
+      case 'minOrderValueIQD':
+        return t.orderRuleMissingValue(
+          formatCurrency(rule.missing, currency, language),
+          formatCurrency(rule.required, currency, language)
+        );
+      case 'minTotalQuantity':
+        return t.orderRuleMissingQuantity(rule.missing, rule.required);
+      case 'minCartons':
+        return t.orderRuleMissingCartons(rule.missing, rule.required);
+      case 'minSkuCount':
+        return t.orderRuleMissingSkus(rule.missing, rule.required);
+    }
+  };
 
   const handleRemoveSupplierItems = (supplierId: string) => {
     cartItems
@@ -106,13 +167,27 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   };
 
   const handleCheckout = async () => {
-    if (cartItems.length === 0 || hasUnsupportedSuppliers) return;
+    if (isSubmitting) return;
+
+    if (cartItems.length === 0) {
+      setErrorMessage(isAr ? 'السلة فارغة حالياً، يرجى إضافة منتجات أولاً' : 'Your cart is currently empty.');
+      return;
+    }
+    if (hasUnsupportedSuppliers) {
+      setErrorMessage(t.geoCartZoneBlockedNotice);
+      return;
+    }
+    if (hasUnmetOrderRules) {
+      setErrorMessage(t.orderRulesCartBlockedNotice);
+      return;
+    }
+
     setIsSubmitting(true);
     setErrorMessage(null);
 
     try {
       const payload = {
-        storeId: 'store_almansoor', // active logged-in store
+        storeId,
         items: cartItems.map(item => ({
           offerId: item.offer.id,
           barcode: item.product.barcode,
@@ -129,17 +204,30 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         body: JSON.stringify(payload)
       });
 
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: any = null;
+      try {
+        data = rawText ? JSON.parse(rawText) : null;
+      } catch {
+        data = null;
+      }
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.message || 'فشل إرسال الطلبية');
+      if (!res.ok || !data?.success) {
+        throw new Error(
+          data?.message ||
+            (isAr ? `فشل إرسال الطلبية (رمز ${res.status})` : `Order submission failed (${res.status})`)
+        );
       }
 
       onClearCart();
       onOrderSuccess(data.data);
       onClose();
     } catch (err: any) {
-      setErrorMessage(err.message || 'حدث خطأ غير متوقع أثناء معالجة الطلب');
+      const fallbackMsg =
+        !navigator.onLine
+          ? (isAr ? 'انقطع الاتصال بالشبكة، يرجى التحقق من الإنترنت والمحاولة مرة أخرى' : 'Network disconnected, please check your connection and try again.')
+          : (isAr ? 'حدث خطأ أثناء معالجة الطلب، يرجى المحاولة مرة أخرى' : 'An error occurred while processing the order.');
+      setErrorMessage(err?.message || fallbackMsg);
     } finally {
       setIsSubmitting(false);
     }
@@ -210,13 +298,16 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               {/* Grouped Supplier Orders */}
               {supplierGroups.map((group) => {
                 const isUnsupported = unsupportedSupplierIds.has(group.supplierId);
+                const orderValidation = supplierOrderValidations[group.supplierId];
+                const hasFailedOrderRules = orderValidation && !orderValidation.isValid;
+                const hasSupplierIssue = isUnsupported || hasFailedOrderRules;
                 return (
-                <div key={group.supplierId} className={`border rounded-xl overflow-hidden bg-white shadow-xs ${isUnsupported ? 'border-red-300' : 'border-[#E5E7EB]'}`}>
+                <div key={group.supplierId} className={`border rounded-xl overflow-hidden bg-white shadow-xs ${hasSupplierIssue ? 'border-red-300' : 'border-[#E5E7EB]'}`}>
                   
                   {/* Supplier Sub-Header */}
                   <div className="bg-[#F7F8FA] px-3.5 py-2.5 border-b border-[#E5E7EB] flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Building2 className={`w-4 h-4 ${isUnsupported ? 'text-[#B91C1C]' : 'text-[#00A046]'}`} />
+                      <Building2 className={`w-4 h-4 ${hasSupplierIssue ? 'text-[#B91C1C]' : 'text-[#00A046]'}`} />
                       <span className="font-bold text-xs sm:text-sm text-[#1F2328]">{group.supplierName}</span>
                     </div>
                     <span className="text-xs font-bold text-[#00A046]">
@@ -237,6 +328,17 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       >
                         {t.geoRemoveSupplierItems}
                       </button>
+                    </div>
+                  )}
+
+                  {hasFailedOrderRules && (
+                    <div className="px-3.5 py-2.5 bg-red-50 border-b border-red-200 text-red-700 text-xs flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[#B91C1C]" />
+                      <div className="space-y-0.5">
+                        {orderValidation.failedRules.map((rule) => (
+                          <div key={rule.rule}>{formatFailedRuleAlert(rule)}</div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -389,16 +491,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
               </div>
 
-              {/* Error Box */}
-              {errorMessage && (
-                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[#B91C1C]" />
-                  <div>
-                    <span className="font-bold">تعذر إتمام الطلب:</span>
-                    <p className="mt-0.5">{errorMessage}</p>
-                  </div>
-                </div>
-              )}
             </>
           )}
         </div>
@@ -424,9 +516,27 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </div>
             )}
 
+            {hasUnmetOrderRules && (
+              <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[#B91C1C]" />
+                <span>{t.orderRulesCartBlockedNotice}</span>
+              </div>
+            )}
+
+            {errorMessage && (
+              <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[#B91C1C]" />
+                <div>
+                  <span className="font-bold">{isAr ? 'تعذر إتمام الطلب:' : 'Checkout failed:'}</span>
+                  <p className="mt-0.5">{errorMessage}</p>
+                </div>
+              </div>
+            )}
+
             <button
+              type="button"
               onClick={handleCheckout}
-              disabled={isSubmitting || hasUnsupportedSuppliers}
+              disabled={isSubmitting || hasUnsupportedSuppliers || hasUnmetOrderRules}
               className="w-full py-3 px-4 rounded-xl bg-[#00A046] text-white font-bold text-sm hover:bg-[#008a3c] disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-sm flex items-center justify-center gap-2 cursor-pointer"
             >
               {isSubmitting ? (

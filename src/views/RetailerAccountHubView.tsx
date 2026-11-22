@@ -60,6 +60,7 @@ import { formatCurrency } from '../utils/format.ts';
 import { getLocalizedText } from '../utils/translations.ts';
 import { SupplierRatingModal } from '../components/SupplierRatingSection.tsx';
 import { SupplierLedgerDetailView } from '../components/SupplierLedgerDetailView.tsx';
+import { RetailerPaymentLedgerView } from './RetailerPaymentLedgerView.tsx';
 
 interface ChatThreadMessage {
   id: string;
@@ -161,6 +162,7 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
   const [storeCreditAccounts, setStoreCreditAccounts] = useState<CreditAccountItem[]>([]);
   const [selectedCreditAccountId, setSelectedCreditAccountId] = useState<string | null>(null);
   const [openedSupplierLedgerId, setOpenedSupplierLedgerId] = useState<string | null>(null);
+  const [showPaymentLedgerView, setShowPaymentLedgerView] = useState(false);
   const [storeLedgerEntries, setStoreLedgerEntries] = useState<LedgerEntryItem[]>([]);
   const [loadingCreditData, setLoadingCreditData] = useState(false);
 
@@ -198,6 +200,7 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
     loadStoreCreditData();
     if (activeSection !== 'credit_ledger') {
       setOpenedSupplierLedgerId(null);
+      setShowPaymentLedgerView(false);
     }
   }, [userSession.entityName, activeSection]);
 
@@ -1044,7 +1047,25 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
       {/* =================== SECTION 2B: BUYER CREDIT LEDGER (READ-ONLY) =================== */}
       {activeSection === 'credit_ledger' && (
         <div className="space-y-4">
-        {openedSupplierLedgerId && selectedCreditAccount ? (
+        {showPaymentLedgerView ? (
+          <RetailerPaymentLedgerView
+            creditAccounts={storeCreditAccounts}
+            orders={orders}
+            currency={currency}
+            language={language}
+            storeName={userSession.entityName}
+            onBack={() => {
+              setShowPaymentLedgerView(false);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onOpenSupplierStatement={(creditAccountId) => {
+              setShowPaymentLedgerView(false);
+              setSelectedCreditAccountId(creditAccountId);
+              setOpenedSupplierLedgerId(creditAccountId);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        ) : openedSupplierLedgerId && selectedCreditAccount ? (
           <SupplierLedgerDetailView
             account={selectedCreditAccount}
             ledgerEntries={storeLedgerEntries}
@@ -1086,15 +1107,29 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={openCreditUpgradeModal}
-                disabled={!selectedCreditAccount}
-                className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white text-xs font-black cursor-pointer whitespace-nowrap flex items-center gap-1.5 disabled:opacity-50"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-[#FDE047]" />
-                <span>{isAr ? 'مراجعة ورفع السقف عبر المنصة' : 'Platform Limit Review'}</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPaymentLedgerView(true);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-[#EBF4EE] hover:bg-[#DCECE1] border border-[#0B5D32]/25 text-[#0B5D32] text-xs font-black cursor-pointer whitespace-nowrap flex items-center gap-1.5"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>{isAr ? 'سجل المعاملات وتاريخ السداد' : 'Payment & Transactions Ledger'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={openCreditUpgradeModal}
+                  disabled={!selectedCreditAccount}
+                  className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white text-xs font-black cursor-pointer whitespace-nowrap flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-[#FDE047]" />
+                  <span>{isAr ? 'مراجعة ورفع السقف عبر المنصة' : 'Platform Limit Review'}</span>
+                </button>
+              </div>
             </div>
 
             {upgradeFeedback && !isUpgradeModalOpen && (

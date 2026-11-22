@@ -1,10 +1,12 @@
 /// <reference types="google.maps" />
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   APIProvider,
+  APILoadingStatus,
   Map as GoogleMap,
   AdvancedMarker,
   Pin,
+  useApiLoadingStatus,
   useMap,
   useMapsLibrary
 } from '@vis.gl/react-google-maps';
@@ -18,9 +20,13 @@ import {
   CheckCircle2,
   Phone,
   ShoppingCart,
-  Route as RouteIcon
+  Route as RouteIcon,
+  ExternalLink,
+  RefreshCw
 } from 'lucide-react';
 import { Language, OrderItem } from '../types/index.ts';
+
+const MAPS_LIBRARIES = ['routes', 'marker'];
 
 interface RouteStopItem {
   id: string;
@@ -192,6 +198,163 @@ function TrafficAndRouteController({
   return null;
 }
 
+interface NavigationMapSurfaceProps {
+  isAr: boolean;
+  mapsLoadError: boolean;
+  originInput: string | { lat: number; lng: number };
+  originLabel: string;
+  activeDestination: string;
+  selectedStopStoreName?: string;
+  showTraffic: boolean;
+  avoidTolls: boolean;
+  routeSummary: ComputedRouteSummary | null;
+  routeError: string | null;
+  externalDirectionsUrl: string;
+  onRouteComputed: (summary: ComputedRouteSummary | null) => void;
+  onRouteError: (msg: string | null) => void;
+  onLoadingChange: (loading: boolean) => void;
+}
+
+function NavigationMapSurface({
+  isAr,
+  mapsLoadError,
+  originInput,
+  originLabel,
+  activeDestination,
+  selectedStopStoreName,
+  showTraffic,
+  avoidTolls,
+  routeSummary,
+  routeError,
+  externalDirectionsUrl,
+  onRouteComputed,
+  onRouteError,
+  onLoadingChange
+}: NavigationMapSurfaceProps) {
+  const loadingStatus = useApiLoadingStatus();
+  const hasLoadFailed =
+    mapsLoadError ||
+    loadingStatus === APILoadingStatus.FAILED ||
+    loadingStatus === APILoadingStatus.AUTH_FAILURE;
+
+  if (hasLoadFailed) {
+    return (
+      <div className="h-[380px] sm:h-[440px] flex flex-col items-center justify-center p-6 text-center bg-[#F8FAF7] space-y-3">
+        <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center">
+          <AlertCircle className="w-6 h-6" />
+        </div>
+        <div className="space-y-1 max-w-md">
+          <h4 className="font-black text-sm text-[#142018]">
+            {isAr
+              ? 'تعذر تحميل الخريطة التفاعلية داخل التطبيق'
+              : 'Interactive Map Could Not Load'}
+          </h4>
+          <p className="text-xs text-[#5F7164] leading-relaxed">
+            {isAr
+              ? 'قد يكون السبب ضعف الشبكة أو حظر الاتصال بخدمة الخرائط على هذا المتصفح. يمكنك متابعة المسار مباشرة عبر تطبيق خرائط جوجل أو إعادة المحاولة.'
+              : 'This may be caused by a network drop or content blocker. You can launch directions directly in Google Maps or retry loading.'}
+          </p>
+        </div>
+
+        <div className="w-full max-w-md bg-white border border-[#DCE5DC] rounded-xl p-3 text-xs text-start space-y-1">
+          <div className="text-[10.5px] font-bold text-[#5F7164]">
+            {isAr ? 'الوجهة المحددة حالياً:' : 'Selected Destination:'}
+          </div>
+          <div className="font-black text-[#142018] truncate">
+            {selectedStopStoreName ? `${selectedStopStoreName} — ${activeDestination}` : activeDestination}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-center gap-2 flex-wrap pt-1">
+          <a
+            href={externalDirectionsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-4 py-2 rounded-xl bg-[#0B5D32] hover:bg-[#084725] text-white font-bold text-xs flex items-center gap-1.5 transition"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            <span>{isAr ? 'فتح المسار في خرائط جوجل' : 'Open in Google Maps'}</span>
+          </a>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-3.5 py-2 rounded-xl bg-white border border-[#DCE5DC] hover:border-[#0B5D32] text-[#142018] font-bold text-xs flex items-center gap-1.5 cursor-pointer transition"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>{isAr ? 'إعادة المحاولة' : 'Retry'}</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative w-full h-[380px] sm:h-[440px]">
+      <GoogleMap
+        defaultCenter={{ lat: 33.3152, lng: 44.3661 }}
+        defaultZoom={12}
+        mapId="DEMO_MAP_ID"
+        gestureHandling="greedy"
+        fullscreenControl={true}
+        streetViewControl={false}
+        internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
+        className="w-full h-full"
+      >
+        <TrafficAndRouteController
+          origin={originInput}
+          destination={activeDestination}
+          showTraffic={showTraffic}
+          avoidTolls={avoidTolls}
+          onRouteComputed={onRouteComputed}
+          onRouteError={onRouteError}
+          onLoadingChange={onLoadingChange}
+        />
+
+        {routeSummary?.startLocation && (
+          <AdvancedMarker position={routeSummary.startLocation} title={originLabel}>
+            <Pin background="#0B5D32" borderColor="#FFFFFF" glyphColor="#FFE600" />
+          </AdvancedMarker>
+        )}
+
+        {routeSummary?.endLocation && (
+          <AdvancedMarker
+            position={routeSummary.endLocation}
+            title={selectedStopStoreName || activeDestination}
+          >
+            <Pin background="#DC2626" borderColor="#FFFFFF" glyphColor="#FFFFFF" />
+          </AdvancedMarker>
+        )}
+      </GoogleMap>
+
+      {(loadingStatus === APILoadingStatus.LOADING ||
+        loadingStatus === APILoadingStatus.NOT_LOADED) && (
+        <div className="absolute top-3 start-3 bg-white/95 border border-[#DCE5DC] text-[#142018] rounded-xl px-3 py-1.5 text-[11px] font-bold shadow-sm flex items-center gap-2">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#0B5D32]" />
+          <span>{isAr ? 'جاري تحميل الخريطة...' : 'Loading map...'}</span>
+        </div>
+      )}
+
+      {routeError && (
+        <div className="absolute bottom-3 inset-x-3 bg-white/95 border border-red-200 text-red-700 rounded-xl px-3 py-2 text-xs font-bold shadow-md flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span className="truncate">{routeError}</span>
+          </div>
+          <a
+            href={externalDirectionsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#0B5D32] hover:underline shrink-0 flex items-center gap-1"
+          >
+            <ExternalLink className="w-3 h-3" />
+            <span>{isAr ? 'خرائط جوجل' : 'Google Maps'}</span>
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const VanSmartNavigation: React.FC<VanSmartNavigationProps> = ({
   routeStops,
   assignedOrders,
@@ -200,7 +363,7 @@ export const VanSmartNavigation: React.FC<VanSmartNavigationProps> = ({
   onMarkStopVisited
 }) => {
   const isAr = language === 'ar';
-  const apiKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || '';
+  const apiKey = ((import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || '').trim();
 
   const [originInput, setOriginInput] = useState<string | { lat: number; lng: number }>(
     'Shorja Market, Baghdad, Iraq'
@@ -214,6 +377,7 @@ export const VanSmartNavigation: React.FC<VanSmartNavigationProps> = ({
   const [avoidTolls, setAvoidTolls] = useState<boolean>(false);
   const [isLocating, setIsLocating] = useState<boolean>(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
+  const [mapsLoadError, setMapsLoadError] = useState<boolean>(false);
 
   const [routeSummary, setRouteSummary] = useState<ComputedRouteSummary | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
@@ -226,6 +390,23 @@ export const VanSmartNavigation: React.FC<VanSmartNavigationProps> = ({
     : selectedStop
     ? `${selectedStop.district}, Baghdad, Iraq`
     : 'Al-Mansour, Baghdad, Iraq';
+
+  const externalDirectionsUrl = useMemo(() => {
+    const originParam =
+      typeof originInput === 'string'
+        ? originInput
+        : `${originInput.lat},${originInput.lng}`;
+    return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(originParam)}&destination=${encodeURIComponent(activeDestination)}&travelmode=driving`;
+  }, [originInput, activeDestination]);
+
+  const handleMapsApiError = useCallback(
+    (err: unknown) => {
+      void err;
+      setMapsLoadError(true);
+      setIsComputing(false);
+    },
+    []
+  );
 
   const handleUseMyGPS = () => {
     if (!navigator.geolocation) {
@@ -406,62 +587,29 @@ export const VanSmartNavigation: React.FC<VanSmartNavigationProps> = ({
               </p>
             </div>
           ) : (
-            <APIProvider apiKey={apiKey} language={isAr ? 'ar' : 'en'} region="IQ">
-              <div className="relative w-full h-[380px] sm:h-[440px]">
-                <GoogleMap
-                  defaultCenter={{ lat: 33.3152, lng: 44.3661 }}
-                  defaultZoom={12}
-                  mapId="DEMO_MAP_ID"
-                  gestureHandling="greedy"
-                  fullscreenControl={true}
-                  streetViewControl={false}
-                  internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-                  className="w-full h-full"
-                >
-                  <TrafficAndRouteController
-                    origin={originInput}
-                    destination={activeDestination}
-                    showTraffic={showTraffic}
-                    avoidTolls={avoidTolls}
-                    onRouteComputed={setRouteSummary}
-                    onRouteError={setRouteError}
-                    onLoadingChange={setIsComputing}
-                  />
-
-                  {routeSummary?.startLocation && (
-                    <AdvancedMarker
-                      position={routeSummary.startLocation}
-                      title={originLabel}
-                    >
-                      <Pin
-                        background="#0B5D32"
-                        borderColor="#FFFFFF"
-                        glyphColor="#FFE600"
-                      />
-                    </AdvancedMarker>
-                  )}
-
-                  {routeSummary?.endLocation && (
-                    <AdvancedMarker
-                      position={routeSummary.endLocation}
-                      title={selectedStop?.storeName || activeDestination}
-                    >
-                      <Pin
-                        background="#DC2626"
-                        borderColor="#FFFFFF"
-                        glyphColor="#FFFFFF"
-                      />
-                    </AdvancedMarker>
-                  )}
-                </GoogleMap>
-
-                {routeError && (
-                  <div className="absolute bottom-3 inset-x-3 bg-white/95 border border-red-200 text-red-700 rounded-xl px-3 py-2 text-xs font-bold shadow-md flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{routeError}</span>
-                  </div>
-                )}
-              </div>
+            <APIProvider
+              apiKey={apiKey}
+              libraries={MAPS_LIBRARIES}
+              language={isAr ? 'ar' : 'en'}
+              region="IQ"
+              onError={handleMapsApiError}
+            >
+              <NavigationMapSurface
+                isAr={isAr}
+                mapsLoadError={mapsLoadError}
+                originInput={originInput}
+                originLabel={originLabel}
+                activeDestination={activeDestination}
+                selectedStopStoreName={selectedStop?.storeName}
+                showTraffic={showTraffic}
+                avoidTolls={avoidTolls}
+                routeSummary={routeSummary}
+                routeError={routeError}
+                externalDirectionsUrl={externalDirectionsUrl}
+                onRouteComputed={setRouteSummary}
+                onRouteError={setRouteError}
+                onLoadingChange={setIsComputing}
+              />
             </APIProvider>
           )}
 

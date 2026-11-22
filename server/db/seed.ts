@@ -730,7 +730,14 @@ export const initialSuppliers: SupplierProfile[] = [
     totalVans: 8,
     activeCreditLinesCount: 42,
     isVerified: true,
+    businessType: 'wholesaler',
+    verificationStatus: 'verified_business',
     serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_najaf_center', 'zone_najaf_kufa', 'zone_karbala_center'],
+    orderRules: {
+      minOrderValueIQD: 150000,
+      minCartons: 3,
+      minSkuCount: 2
+    },
     createdAt: '2023-01-15'
   },
   {
@@ -745,7 +752,12 @@ export const initialSuppliers: SupplierProfile[] = [
     totalVans: 12,
     activeCreditLinesCount: 65,
     isVerified: true,
+    businessType: 'warehouse',
+    verificationStatus: 'verified',
     serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_babil_hilla', 'zone_babil_musayyib', 'zone_karbala_center', 'zone_karbala_hindiya'],
+    orderRules: {
+      minOrderValueIQD: 120000
+    },
     createdAt: '2023-03-20'
   },
   {
@@ -760,7 +772,13 @@ export const initialSuppliers: SupplierProfile[] = [
     totalVans: 6,
     activeCreditLinesCount: 28,
     isVerified: true,
+    businessType: 'authorized_distributor',
+    verificationStatus: 'authorized_distributor',
     serviceZoneIds: ['zone_baghdad_rusafa', 'zone_najaf_center', 'zone_babil_hilla'],
+    orderRules: {
+      minCartons: 5,
+      minTotalQuantity: 6
+    },
     createdAt: '2023-06-10'
   }
 ];

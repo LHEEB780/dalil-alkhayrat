@@ -28,6 +28,7 @@ import {
 } from '../data/nearbySuppliers.ts';
 import { Language, Currency, SupplierReviewSummary } from '../types/index.ts';
 import { formatCurrency } from '../utils/format.ts';
+import { getSellerBusinessTypeLabel, getVerificationStatusLabel } from '../utils/translations.ts';
 import { fetchWithRetry } from '../utils/fetchWithRetry.ts';
 import { SupplierRatingModal } from '../components/SupplierRatingSection.tsx';
 
@@ -582,7 +583,7 @@ export const SuppliersDirectoryView: React.FC<SuppliersDirectoryViewProps> = ({
                     <h3 className="text-sm sm:text-base font-black text-[#142018] leading-snug group-hover:text-[#0B5D32] transition-colors">
                       {isAr ? supplier.nameAr : supplier.nameEn}
                     </h3>
-                    <BadgeCheck className="w-5 h-5 text-[#0B5D32] shrink-0" />
+                    {supplier.isVerified && <BadgeCheck className="w-5 h-5 text-[#0B5D32] shrink-0" />}
                   </div>
                   <p className="text-[11px] text-[#5F7164] mt-1 flex items-center gap-1">
                     <Building2 className="w-3.5 h-3.5 shrink-0" />
@@ -590,6 +591,20 @@ export const SuppliersDirectoryView: React.FC<SuppliersDirectoryViewProps> = ({
                       {supplier.districtAr} • {supplier.addressAr}
                     </span>
                   </p>
+                  <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                    <span className="px-2 py-0.5 rounded-full bg-[#F4F4EA] border border-[#DCE5DC] text-[#3D5244] text-[10px] font-bold whitespace-nowrap">
+                      {getSellerBusinessTypeLabel(supplier.businessType, language)}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full border text-[10px] font-black whitespace-nowrap ${
+                        (supplier.verificationStatus || (supplier.isVerified ? 'verified' : 'pending')) === 'pending'
+                          ? 'bg-[#FEF9C3] border-[#FDE047] text-[#854D0E]'
+                          : 'bg-[#EBF4EE] border-[#DCE5DC] text-[#0B5D32]'
+                      }`}
+                    >
+                      {getVerificationStatusLabel(supplier.verificationStatus, supplier.isVerified, language)}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Authorized Brand Agencies */}

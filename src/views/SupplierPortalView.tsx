@@ -23,7 +23,18 @@ import {
   RefreshCw,
   MapPin,
   Wallet,
-  X
+  X,
+  Minus,
+  Search,
+  Wheat,
+  Droplets,
+  Milk,
+  Coffee,
+  Sparkles,
+  Check,
+  Grid3X3,
+  LayoutGrid,
+  LayoutList
 } from 'lucide-react';
 import { CreditAccountItem, CreditUpgradeRequestItem, LedgerEntryItem, Currency, OrderItem, Language } from '../types/index.ts';
 import { formatCurrency, formatDate } from '../utils/format.ts';
@@ -34,6 +45,63 @@ interface SupplierPortalViewProps {
   orders: OrderItem[];
   onRefreshOrders: () => void;
   language?: Language;
+}
+
+function resolveFleetProductImage(
+  barcode: string,
+  nameAr: string,
+  imageUrl?: string
+): string {
+  if (imageUrl) return imageUrl;
+  const lower = `${barcode} ${nameAr || ''}`.toLowerCase();
+  if (lower.includes('أرز') || lower.includes('ارز') || lower.includes('rice')) {
+    return '/assets/images/white_basmati_rice.jpg';
+  }
+  if (lower.includes('زيت') || lower.includes('سمن') || lower.includes('oil')) {
+    return '/assets/images/white_sunflower_oil.jpg';
+  }
+  if (lower.includes('حليب') || lower.includes('لبن') || lower.includes('جبن') || lower.includes('milk')) {
+    return '/assets/images/white_milk_powder.jpg';
+  }
+  if (lower.includes('معجون') || lower.includes('طماطم') || lower.includes('tomato')) {
+    return '/assets/images/white_tomato_paste.jpg';
+  }
+  if (lower.includes('شاي') || lower.includes('tea')) {
+    return '/assets/images/white_ceylon_tea.jpg';
+  }
+  if (lower.includes('سكر') || lower.includes('sugar')) {
+    return '/assets/images/white_sugar_pack.jpg';
+  }
+  if (lower.includes('معكرون') || lower.includes('مكرون') || lower.includes('pasta')) {
+    return '/assets/images/white_pasta_pack.jpg';
+  }
+  if (lower.includes('قهوة') || lower.includes('نسكافيه') || lower.includes('coffee')) {
+    return '/assets/images/white_espresso_coffee.jpg';
+  }
+  if (lower.includes('منظف') || lower.includes('مسحوق') || lower.includes('ديتول') || lower.includes('clean')) {
+    return '/assets/images/white_cleaner_bottles.jpg';
+  }
+  return '/assets/images/white_canned_goods.jpg';
+}
+
+function getFleetCategoryIcon(category?: string, nameAr?: string) {
+  const text = `${category || ''} ${nameAr || ''}`.toLowerCase();
+  if (text.includes('زيت') || text.includes('سمن') || text.includes('oil') || text.includes('زيوت')) {
+    return { Icon: Droplets, color: 'text-amber-600', bg: 'bg-amber-50 border-amber-200' };
+  }
+  if (text.includes('حليب') || text.includes('لبن') || text.includes('ألبان') || text.includes('milk')) {
+    return { Icon: Milk, color: 'text-sky-600', bg: 'bg-sky-50 border-sky-200' };
+  }
+  if (text.includes('شاي') || text.includes('قهوة') || text.includes('مشروب') || text.includes('tea') || text.includes('coffee')) {
+    return { Icon: Coffee, color: 'text-orange-700', bg: 'bg-orange-50 border-orange-200' };
+  }
+  if (text.includes('منظف') || text.includes('مسحوق') || text.includes('تنظيف') || text.includes('clean')) {
+    return { Icon: Sparkles, color: 'text-indigo-600', bg: 'bg-indigo-50 border-indigo-200' };
+  }
+  if (text.includes('أرز') || text.includes('ارز') || text.includes('سكر') || text.includes('حبوب') || text.includes('معكرون') || text.includes('مواد غذائية')) {
+    return { Icon: Wheat, color: 'text-[#0B5D32]', bg: 'bg-[#ECFDF5] border-[#A7F3D0]' };
+  }
+  return { Icon: Package, color: 'text-[#00A046]', bg: 'bg-emerald-50 border-emerald-200' };
 }
 
 export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
@@ -73,10 +141,14 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
   const [selectedDriverId, setSelectedDriverId] = useState<string>('drv_ahmed_baghdad');
   const [loadingFleet, setLoadingFleet] = useState(false);
 
-  // Morning Load-Out form
-  const [loadBarcode, setLoadBarcode] = useState('6281007000123');
-  const [loadQuantity, setLoadQuantity] = useState('15');
+  // Morning Load-Out Mini Cashier & Isolated Van Stock Sub-mode
+  const [vanStockSubMode, setVanStockSubMode] = useState<'load_cashier' | 'current_stock'>('load_cashier');
+  const [loadCatalogView, setLoadCatalogView] = useState<'mini' | 'grid' | 'list'>('mini');
+  const [morningLoadBasket, setMorningLoadBasket] = useState<Record<string, number>>({});
+  const [loadCategoryFilter, setLoadCategoryFilter] = useState<string>('الكل');
   const [isLoadingStock, setIsLoadingStock] = useState(false);
+  const [loadProductSearch, setLoadProductSearch] = useState('');
+  const [adjustingStockBarcode, setAdjustingStockBarcode] = useState<string | null>(null);
 
   // Add Route Stop form
   const [newStopStoreId, setNewStopStoreId] = useState('store_almansoor');
@@ -119,9 +191,6 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
         });
         if (data.fleet?.length > 0 && !data.fleet.some((f: any) => f.driver.id === selectedDriverId)) {
           setSelectedDriverId(data.fleet[0].driver.id);
-        }
-        if (data.catalogProducts?.length > 0 && !loadBarcode) {
-          setLoadBarcode(data.catalogProducts[0].barcode);
         }
       }
     } catch (err) {
@@ -212,26 +281,44 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
     loadFleetData();
   }, []);
 
-  const handleLoadStockToVan = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedDriverId || !loadBarcode || !loadQuantity || isLoadingStock) return;
+  const handleAdjustMorningBasket = (barcode: string, delta: number) => {
+    setMorningLoadBasket((prev) => {
+      const next = (prev[barcode] || 0) + delta;
+      if (next <= 0) {
+        const copy = { ...prev };
+        delete copy[barcode];
+        return copy;
+      }
+      return { ...prev, [barcode]: next };
+    });
+  };
+
+  const handleDispatchMorningLoadBasket = async () => {
+    const entries = Object.entries(morningLoadBasket).filter(([, qty]) => qty > 0);
+    if (!selectedDriverId || entries.length === 0 || isLoadingStock) return;
     setIsLoadingStock(true);
     try {
-      const res = await fetch('/api/van/load-stock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          driverId: selectedDriverId,
-          barcode: loadBarcode,
-          quantity: Number(loadQuantity)
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
+      const results = await Promise.all(
+        entries.map(([barcode, quantity]) =>
+          fetch('/api/van/load-stock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              driverId: selectedDriverId,
+              barcode,
+              quantity
+            })
+          }).then((r) => r.json())
+        )
+      );
+      const loadedCount = results.filter((r) => r.success).length;
+      const totalUnits = entries.reduce((s, [, q]) => s + q, 0);
+      if (loadedCount > 0) {
+        setMorningLoadBasket({});
         setStatusMessage(
           isAr
-            ? `تم تحميل ${loadQuantity} وحدة بنجاح في عهدة الفان وتحديث المخزون المتنقل.`
-            : `Loaded ${loadQuantity} units into van inventory.`
+            ? `تم تحميل ${totalUnits} وحدة (${loadedCount} أصناف) بنجاح في عهدة الفان.`
+            : `Loaded ${totalUnits} units (${loadedCount} items) into van inventory.`
         );
         await loadFleetData();
       }
@@ -239,6 +326,41 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
       console.error(err);
     } finally {
       setIsLoadingStock(false);
+    }
+  };
+
+  const handleAdjustLoadedVanStock = async (barcode: string, delta: number) => {
+    if (!selectedDriverId || adjustingStockBarcode) return;
+    setAdjustingStockBarcode(barcode);
+    try {
+      const res = await fetch('/api/van/adjust-stock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          driverId: selectedDriverId,
+          barcode,
+          delta
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setStatusMessage(data.message || (isAr ? 'تعذر تعديل الكمية في الفان.' : 'Could not update van stock.'));
+        return;
+      }
+      setStatusMessage(
+        delta > 0
+          ? isAr
+            ? `تمت زيادة الكمية المحمّلة في الفان (+${delta}).`
+            : `Increased van stock (+${delta}).`
+          : isAr
+          ? `تم إنقاص الكمية المحمّلة في الفان (${delta}).`
+          : `Decreased van stock (${delta}).`
+      );
+      await loadFleetData();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAdjustingStockBarcode(null);
     }
   };
 
@@ -1116,20 +1238,60 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
                           <div className="bg-white rounded-lg border border-[#E5E7EB] divide-y divide-[#F1F3F5]">
                             {(req.items || []).map((item: any) => {
                               const currentQty = adjMap[item.barcode] ?? item.requestedQuantity;
+                              const catalogMatch = fleetCatalog.find((p) => p.barcode === item.barcode);
+                              const itemThumb = resolveFleetProductImage(
+                                item.barcode,
+                                item.productName,
+                                catalogMatch?.imageUrl
+                              );
+                              const { Icon: CatIcon, color: catColor, bg: catBg } = getFleetCategoryIcon(
+                                catalogMatch?.category,
+                                item.productName
+                              );
+
                               return (
-                                <div key={item.barcode} className="px-3 py-2 flex items-center justify-between gap-3 text-xs">
-                                  <div className="min-w-0">
-                                    <div className="font-bold text-[#1F2328] truncate">{item.productName}</div>
-                                    <div className="text-[10.5px] text-[#6B7280]">
-                                      {item.unit} · {formatCurrency(item.unitPriceIQD, currency, language)}
-                                      {' · '}
-                                      {isAr ? `المطلوب: ${item.requestedQuantity}` : `Req: ${item.requestedQuantity}`}
+                                <div key={item.barcode} className="px-3 py-2.5 flex items-center justify-between gap-2.5 text-xs">
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <div className="w-10 h-10 rounded-lg bg-white border border-[#E5E7EB] p-1 flex items-center justify-center shrink-0">
+                                      <img
+                                        src={itemThumb}
+                                        alt={item.productName}
+                                        referrerPolicy="no-referrer"
+                                        className="max-h-full max-w-full object-contain mix-blend-multiply"
+                                      />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="font-bold text-[#1F2328] truncate flex items-center gap-1.5">
+                                        <span className={`w-5 h-5 rounded-md border inline-flex items-center justify-center shrink-0 ${catBg}`}>
+                                          <CatIcon className={`w-3 h-3 ${catColor}`} />
+                                        </span>
+                                        <span className="truncate">{item.productName}</span>
+                                      </div>
+                                      <div className="text-[10.5px] text-[#6B7280] mt-0.5 tabular-nums">
+                                        {item.unit} · {formatCurrency(item.unitPriceIQD, currency, language)}
+                                        {' · '}
+                                        {isAr ? `المطلوب: ${item.requestedQuantity}` : `Req: ${item.requestedQuantity}`}
+                                      </div>
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <label className="text-[10.5px] font-bold text-[#6B7280]">
-                                      {isAr ? 'الكمية المعتمدة:' : 'Approved Qty:'}
-                                    </label>
+
+                                  <div className="flex items-center gap-1 bg-[#F7F8FA] border border-[#E5E7EB] rounded-lg p-0.5 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setAdjustedLoadQty((prev) => ({
+                                          ...prev,
+                                          [req.id]: {
+                                            ...(prev[req.id] || {}),
+                                            [item.barcode]: Math.max(0, currentQty - 1)
+                                          }
+                                        }))
+                                      }
+                                      className="w-7 h-7 rounded-md bg-white hover:bg-gray-100 border border-[#E5E7EB] flex items-center justify-center text-[#1F2328] cursor-pointer"
+                                      aria-label={isAr ? 'إنقاص الكمية' : 'Decrease quantity'}
+                                    >
+                                      <Minus className="w-3.5 h-3.5" />
+                                    </button>
                                     <input
                                       type="number"
                                       min={0}
@@ -1138,11 +1300,27 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
                                         const val = Math.max(0, Number(e.target.value) || 0);
                                         setAdjustedLoadQty((prev) => ({
                                           ...prev,
-                                          [req.id]: { ...(prev[req.id] || {}), [item.barcode]: val },
+                                          [req.id]: { ...(prev[req.id] || {}), [item.barcode]: val }
                                         }));
                                       }}
-                                      className="w-16 bg-[#F7F8FA] border border-[#E5E7EB] rounded-lg px-2 py-1 text-center font-mono font-bold text-xs"
+                                      className="w-11 bg-transparent text-center font-mono font-black text-xs focus:outline-hidden tabular-nums"
                                     />
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setAdjustedLoadQty((prev) => ({
+                                          ...prev,
+                                          [req.id]: {
+                                            ...(prev[req.id] || {}),
+                                            [item.barcode]: currentQty + 1
+                                          }
+                                        }))
+                                      }
+                                      className="w-7 h-7 rounded-md bg-[#00A046] hover:bg-[#008a3c] text-white flex items-center justify-center cursor-pointer"
+                                      aria-label={isAr ? 'زيادة الكمية' : 'Increase quantity'}
+                                    >
+                                      <Plus className="w-3.5 h-3.5" />
+                                    </button>
                                   </div>
                                 </div>
                               );
@@ -1330,92 +1508,707 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
                     )}
                   </div>
 
-                  {/* Morning Load-Out Form (تحميل بضاعة للفان) */}
-                  <div className="bg-white rounded-xl border border-[#E5E7EB] p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-black text-sm text-[#1F2328] flex items-center gap-1.5">
-                        <Package className="w-4 h-4 text-[#00A046]" />
-                        <span>{isAr ? 'التحميل الصباحي ومخزون الفان المتنقل' : 'Morning Load-Out & Van Stock'}</span>
-                      </h4>
-                      <span className="text-xs font-mono font-bold text-[#6B7280] tabular-nums">
-                        {isAr
-                          ? `محمّل ${selectedFleet.totalLoadedUnits} · مباع ${selectedFleet.totalSoldUnits} · متبقي ${selectedFleet.totalRemainingUnits}`
-                          : `Loaded ${selectedFleet.totalLoadedUnits} · Sold ${selectedFleet.totalSoldUnits} · Left ${selectedFleet.totalRemainingUnits}`}
-                      </span>
-                    </div>
+                  {/* Isolated Morning Load-Out Mini Cashier vs Current Van Stock */}
+                  {(() => {
+                    const catalogCategories = Array.from(
+                      new Set(
+                        fleetCatalog
+                          .map((p) => (p.category || '').trim())
+                          .filter(Boolean)
+                      )
+                    );
 
-                    <form onSubmit={handleLoadStockToVan} className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs bg-[#F7F8FA] p-3 rounded-xl border border-[#E5E7EB]">
-                      <div className="sm:col-span-7">
-                        <label className="text-[11px] font-bold text-[#6B7280] block mb-1">
-                          {isAr ? 'اختر الصنف لتحميله في الفان:' : 'Select Product to Load:'}
-                        </label>
-                        <select
-                          value={loadBarcode}
-                          onChange={(e) => setLoadBarcode(e.target.value)}
-                          className="w-full bg-white border border-[#E5E7EB] rounded-lg px-2.5 py-2 text-xs font-bold"
-                        >
-                          {fleetCatalog.map((prod) => (
-                            <option key={prod.barcode} value={prod.barcode}>
-                              {prod.nameAr} — {prod.unit} ({prod.defaultPriceIQD.toLocaleString()} د.ع)
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="sm:col-span-2">
-                        <label className="text-[11px] font-bold text-[#6B7280] block mb-1">
-                          {isAr ? 'الكمية:' : 'Qty:'}
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          required
-                          value={loadQuantity}
-                          onChange={(e) => setLoadQuantity(e.target.value)}
-                          className="w-full bg-white border border-[#E5E7EB] rounded-lg px-2.5 py-2 font-mono font-bold text-xs"
-                        />
-                      </div>
-                      <div className="sm:col-span-3 flex items-end">
-                        <button
-                          type="submit"
-                          disabled={isLoadingStock}
-                          className="w-full py-2 px-3 rounded-lg bg-[#00A046] hover:bg-[#008a3c] disabled:bg-gray-300 text-white font-bold text-xs cursor-pointer"
-                        >
-                          {isAr ? '+ تحميل للفان' : '+ Load Van'}
-                        </button>
-                      </div>
-                    </form>
+                    const pickerQuery = loadProductSearch.trim().toLowerCase();
+                    const filteredCashierProducts = fleetCatalog.filter((prod) => {
+                      if (
+                        loadCategoryFilter !== 'الكل' &&
+                        (prod.category || '').trim() !== loadCategoryFilter
+                      ) {
+                        return false;
+                      }
+                      if (!pickerQuery) return true;
+                      return (
+                        (prod.nameAr || '').toLowerCase().includes(pickerQuery) ||
+                        (prod.barcode || '').toLowerCase().includes(pickerQuery) ||
+                        (prod.category || '').toLowerCase().includes(pickerQuery) ||
+                        (prod.unit || '').toLowerCase().includes(pickerQuery)
+                      );
+                    });
 
-                    {/* Van Inventory Table */}
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="border-b border-[#E5E7EB] text-[#6B7280] text-[11px]">
-                            <th className="py-2 text-start font-bold">{isAr ? 'الصنف' : 'Product'}</th>
-                            <th className="py-2 text-center font-bold">{isAr ? 'محمّل' : 'Loaded'}</th>
-                            <th className="py-2 text-center font-bold">{isAr ? 'مباع' : 'Sold'}</th>
-                            <th className="py-2 text-center font-bold">{isAr ? 'متبقي' : 'Left'}</th>
-                            <th className="py-2 text-end font-bold">{isAr ? 'السعر' : 'Price'}</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[#F1F3F5] tabular-nums">
-                          {selectedFleet.inventory.map((inv: any) => (
-                            <tr key={inv.id}>
-                              <td className="py-2.5 font-bold text-[#1F2328]">
-                                <div>{inv.productName}</div>
-                                <div className="text-[10px] text-[#6B7280] font-normal">{inv.unit}</div>
-                              </td>
-                              <td className="py-2.5 text-center font-mono">{inv.loadedQuantity}</td>
-                              <td className="py-2.5 text-center font-mono text-[#00A046] font-bold">{inv.soldQuantity}</td>
-                              <td className="py-2.5 text-center font-mono font-black">{inv.remainingQuantity}</td>
-                              <td className="py-2.5 text-end font-mono font-bold">
-                                {formatCurrency(inv.unitPriceIQD, currency, language)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                    const basketEntries = Object.entries(morningLoadBasket)
+                      .filter(([, qty]) => qty > 0)
+                      .map(([barcode, qty]) => {
+                        const prod = fleetCatalog.find((p) => p.barcode === barcode);
+                        return prod ? { prod, qty } : null;
+                      })
+                      .filter(Boolean) as Array<{ prod: any; qty: number }>;
+
+                    const basketUnitsCount = basketEntries.reduce((s, e) => s + e.qty, 0);
+                    const basketTotalIQD = basketEntries.reduce(
+                      (s, e) => s + e.qty * (e.prod.defaultPriceIQD || 0),
+                      0
+                    );
+
+                    return (
+                      <div className="bg-white rounded-xl border border-[#E5E7EB] p-4 space-y-3.5">
+                        {/* Header + Strict Isolation Mode Switcher */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[#F1F3F5]">
+                          <div>
+                            <h4 className="font-black text-sm text-[#1F2328] flex items-center gap-1.5">
+                              <Package className="w-4 h-4 text-[#00A046]" />
+                              <span>
+                                {vanStockSubMode === 'load_cashier'
+                                  ? isAr
+                                    ? 'كاشير التحميل الصباحي للفان'
+                                    : 'Morning Load-Out Mini Cashier'
+                                  : isAr
+                                  ? 'مخزون الفان الحالي (معزول)'
+                                  : 'Current Van Stock (Isolated)'}
+                              </span>
+                            </h4>
+                            <p className="text-[11px] text-[#6B7280] mt-0.5">
+                              {vanStockSubMode === 'load_cashier'
+                                ? isAr
+                                  ? 'اضغط على أي صنف مصغّر لإضافته إلى سلة التحميل الصباحي، مع عزل مخزون الفان الحالي في تبويب مستقل.'
+                                  : 'Tap mini product cards to stage morning load-out; current van stock is isolated in its own tab.'
+                                : isAr
+                                ? `عرض وتعديل العهدة الحالية داخل ${selectedFleet.driver.vanWarehouseName} فقط.`
+                                : `Isolated view & adjustments for current stock inside ${selectedFleet.driver.vanWarehouseName}.`}
+                            </p>
+                          </div>
+
+                          {/* Segmented Switcher isolating Load Cashier from Current Van Stock */}
+                          <div className="grid grid-cols-2 sm:flex items-center bg-[#F4F4EA] border border-[#DCE5DC] p-1 rounded-xl gap-1 shrink-0 text-xs font-black">
+                            <button
+                              type="button"
+                              onClick={() => setVanStockSubMode('load_cashier')}
+                              className={`px-3 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap flex items-center justify-center gap-1.5 ${
+                                vanStockSubMode === 'load_cashier'
+                                  ? 'bg-[#00A046] text-white shadow-2xs'
+                                  : 'text-[#4B6352] hover:text-[#142018]'
+                              }`}
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>{isAr ? 'كاشير التحميل' : 'Load Cashier'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setVanStockSubMode('current_stock')}
+                              className={`px-3 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap flex items-center justify-center gap-1.5 tabular-nums ${
+                                vanStockSubMode === 'current_stock'
+                                  ? 'bg-[#1F2328] text-white shadow-2xs'
+                                  : 'text-[#4B6352] hover:text-[#142018]'
+                              }`}
+                            >
+                              <Truck className="w-3.5 h-3.5" />
+                              <span>
+                                {isAr
+                                  ? `مخزون الفان (${selectedFleet.inventory.length})`
+                                  : `Van Stock (${selectedFleet.inventory.length})`}
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {vanStockSubMode === 'load_cashier' ? (
+                          <div className="space-y-3">
+                            {/* Search + View Mode Switcher (Mini / Grid / List) + Category Filter Bar */}
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <div className="relative flex-1">
+                                  <Search className="w-3.5 h-3.5 text-[#6B7280] absolute top-1/2 -translate-y-1/2 start-3" />
+                                  <input
+                                    type="text"
+                                    value={loadProductSearch}
+                                    onChange={(e) => setLoadProductSearch(e.target.value)}
+                                    placeholder={
+                                      isAr
+                                        ? 'ابحث بالاسم أو القسم أو الباركود...'
+                                        : 'Search by name, category, barcode...'
+                                    }
+                                    className="w-full h-9 bg-[#F7F8FA] border border-[#E5E7EB] focus:border-[#00A046] focus:bg-white rounded-xl ps-8 pe-8 text-xs font-bold focus:outline-hidden"
+                                  />
+                                  {loadProductSearch && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setLoadProductSearch('')}
+                                      className="absolute top-1/2 -translate-y-1/2 end-2.5 text-[#6B7280] hover:text-[#1F2328] cursor-pointer"
+                                      aria-label={isAr ? 'مسح البحث' : 'Clear search'}
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+
+                                {/* Mini / Grid / List View Switcher Buttons */}
+                                <div className="flex items-center bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl p-0.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => setLoadCatalogView('mini')}
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition cursor-pointer ${
+                                      loadCatalogView === 'mini'
+                                        ? 'bg-[#00A046] text-white shadow-2xs'
+                                        : 'text-[#4B6352] hover:text-[#142018]'
+                                    }`}
+                                    title={isAr ? 'عرض مصغّر' : 'Mini Grid'}
+                                    aria-label={isAr ? 'عرض مصغّر' : 'Mini Grid'}
+                                  >
+                                    <Grid3X3 className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setLoadCatalogView('grid')}
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition cursor-pointer ${
+                                      loadCatalogView === 'grid'
+                                        ? 'bg-[#00A046] text-white shadow-2xs'
+                                        : 'text-[#4B6352] hover:text-[#142018]'
+                                    }`}
+                                    title={isAr ? 'عرض شبكي' : 'Grid View'}
+                                    aria-label={isAr ? 'عرض شبكي' : 'Grid View'}
+                                  >
+                                    <LayoutGrid className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setLoadCatalogView('list')}
+                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition cursor-pointer ${
+                                      loadCatalogView === 'list'
+                                        ? 'bg-[#00A046] text-white shadow-2xs'
+                                        : 'text-[#4B6352] hover:text-[#142018]'
+                                    }`}
+                                    title={isAr ? 'عرض قائمة' : 'List View'}
+                                    aria-label={isAr ? 'عرض قائمة' : 'List View'}
+                                  >
+                                    <LayoutList className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {catalogCategories.length > 0 && (
+                                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setLoadCategoryFilter('الكل')}
+                                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer shrink-0 whitespace-nowrap ${
+                                      loadCategoryFilter === 'الكل'
+                                        ? 'bg-[#00A046] border-[#00A046] text-white'
+                                        : 'bg-[#F7F8FA] border-[#E5E7EB] text-[#4B6352] hover:border-[#00A046]/50'
+                                    }`}
+                                  >
+                                    {isAr ? 'الكل' : 'All'}
+                                  </button>
+                                  {catalogCategories.map((cat) => {
+                                    const active = loadCategoryFilter === cat;
+                                    const { Icon: CatIcon } = getFleetCategoryIcon(cat, cat);
+                                    return (
+                                      <button
+                                        key={cat}
+                                        type="button"
+                                        onClick={() => setLoadCategoryFilter(cat)}
+                                        className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold flex items-center gap-1 transition cursor-pointer shrink-0 whitespace-nowrap ${
+                                          active
+                                            ? 'bg-[#00A046] border-[#00A046] text-white'
+                                            : 'bg-[#F7F8FA] border-[#E5E7EB] text-[#4B6352] hover:border-[#00A046]/50'
+                                        }`}
+                                      >
+                                        <CatIcon className="w-3 h-3 shrink-0" />
+                                        <span>{isAr ? cat : getLocalizedText(cat, 'en')}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Product Cashier Views (Mini / Grid / List) */}
+                            {filteredCashierProducts.length === 0 ? (
+                              <div className="py-8 text-center text-xs text-[#6B7280] font-bold bg-[#F7F8FA] rounded-xl border border-dashed border-[#E5E7EB]">
+                                {isAr ? 'لا توجد أصناف مطابقة للبحث في الكتالوج.' : 'No matching catalog products.'}
+                              </div>
+                            ) : loadCatalogView === 'mini' ? (
+                              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-[420px] overflow-y-auto pe-0.5">
+                                {filteredCashierProducts.map((prod) => {
+                                  const qtyInBasket = morningLoadBasket[prod.barcode] || 0;
+                                  const thumb = resolveFleetProductImage(
+                                    prod.barcode,
+                                    prod.nameAr,
+                                    prod.imageUrl
+                                  );
+                                  const { Icon: CatIcon, color: catColor, bg: catBg } = getFleetCategoryIcon(
+                                    prod.category,
+                                    prod.nameAr
+                                  );
+
+                                  return (
+                                    <div
+                                      key={prod.barcode}
+                                      onClick={() => handleAdjustMorningBasket(prod.barcode, 1)}
+                                      className={`group rounded-xl border bg-white p-1.5 flex flex-col justify-between transition-all cursor-pointer select-none ${
+                                        qtyInBasket > 0
+                                          ? 'border-[#00A046] ring-1 ring-[#00A046]/25 shadow-2xs bg-[#ECFDF5]/20'
+                                          : 'border-[#DCE5DC] hover:border-[#00A046]/60'
+                                      }`}
+                                    >
+                                      <div className="relative h-14 sm:h-16 w-full rounded-lg bg-white p-1 mb-1 flex items-center justify-center overflow-hidden border border-[#F1F5F2]">
+                                        <img
+                                          src={thumb}
+                                          alt={prod.nameAr}
+                                          referrerPolicy="no-referrer"
+                                          loading="lazy"
+                                          className="max-h-full max-w-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-200"
+                                        />
+
+                                        <span
+                                          className={`absolute top-1 start-1 w-4 h-4 rounded-md border flex items-center justify-center ${catBg}`}
+                                        >
+                                          <CatIcon className={`w-2.5 h-2.5 ${catColor}`} />
+                                        </span>
+
+                                        {qtyInBasket > 0 && (
+                                          <span className="absolute top-1 end-1 min-w-[18px] h-[18px] px-1 rounded-md bg-[#00A046] text-white text-[9.5px] font-black font-mono tabular-nums flex items-center justify-center shadow-xs">
+                                            {qtyInBasket}
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div className="space-y-1 flex-1 flex flex-col justify-between">
+                                        <h5
+                                          className="text-[10px] sm:text-[10.5px] font-black text-[#142018] line-clamp-2 leading-tight min-h-[25px]"
+                                          title={prod.nameAr}
+                                        >
+                                          {prod.nameAr}
+                                        </h5>
+
+                                        <div className="pt-1 border-t border-[#F0F3EE] flex items-center justify-between gap-1">
+                                          <span className="text-[9.5px] sm:text-[10px] font-black font-mono tabular-nums text-[#0B5D32] truncate">
+                                            {formatCurrency(prod.defaultPriceIQD, currency, language)}
+                                          </span>
+
+                                          {qtyInBasket === 0 ? (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleAdjustMorningBasket(prod.barcode, 1);
+                                              }}
+                                              className="w-6 h-6 rounded-md bg-[#00A046] hover:bg-[#008a3c] text-white flex items-center justify-center transition cursor-pointer shrink-0"
+                                              aria-label={isAr ? 'إضافة للتحميل' : 'Add to load'}
+                                            >
+                                              <Plus className="w-3 h-3 stroke-[2.5]" />
+                                            </button>
+                                          ) : (
+                                            <div
+                                              onClick={(e) => e.stopPropagation()}
+                                              className="h-6 flex items-center bg-[#00A046] text-white rounded-md overflow-hidden shrink-0"
+                                            >
+                                              <button
+                                                type="button"
+                                                onClick={() => handleAdjustMorningBasket(prod.barcode, -1)}
+                                                className="px-1 h-full hover:bg-black/15 cursor-pointer flex items-center justify-center"
+                                                aria-label={isAr ? 'إنقاص' : 'Decrease'}
+                                              >
+                                                <Minus className="w-2.5 h-2.5 stroke-[3]" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleAdjustMorningBasket(prod.barcode, 1)}
+                                                className="px-1 h-full hover:bg-black/15 cursor-pointer flex items-center justify-center"
+                                                aria-label={isAr ? 'زيادة' : 'Increase'}
+                                              >
+                                                <Plus className="w-2.5 h-2.5 stroke-[3]" />
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : loadCatalogView === 'grid' ? (
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[440px] overflow-y-auto pe-0.5">
+                                {filteredCashierProducts.map((prod) => {
+                                  const qtyInBasket = morningLoadBasket[prod.barcode] || 0;
+                                  const thumb = resolveFleetProductImage(
+                                    prod.barcode,
+                                    prod.nameAr,
+                                    prod.imageUrl
+                                  );
+                                  const { Icon: CatIcon, color: catColor, bg: catBg } = getFleetCategoryIcon(
+                                    prod.category,
+                                    prod.nameAr
+                                  );
+
+                                  return (
+                                    <div
+                                      key={prod.barcode}
+                                      onClick={() => handleAdjustMorningBasket(prod.barcode, 1)}
+                                      className={`group rounded-2xl border bg-white p-2.5 flex flex-col justify-between transition-all cursor-pointer select-none ${
+                                        qtyInBasket > 0
+                                          ? 'border-[#00A046] ring-1 ring-[#00A046]/25 shadow-xs bg-[#ECFDF5]/20'
+                                          : 'border-[#DCE5DC] hover:border-[#00A046]/60'
+                                      }`}
+                                    >
+                                      <div className="relative h-24 w-full rounded-xl bg-white p-1.5 mb-2 flex items-center justify-center overflow-hidden border border-[#F1F5F2]">
+                                        <img
+                                          src={thumb}
+                                          alt={prod.nameAr}
+                                          referrerPolicy="no-referrer"
+                                          loading="lazy"
+                                          className="max-h-full max-w-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-200"
+                                        />
+                                        <span
+                                          className={`absolute top-1.5 start-1.5 w-5 h-5 rounded-md border flex items-center justify-center ${catBg}`}
+                                        >
+                                          <CatIcon className={`w-3 h-3 ${catColor}`} />
+                                        </span>
+                                        {qtyInBasket > 0 && (
+                                          <span className="absolute top-1.5 end-1.5 min-w-[22px] h-[22px] px-1.5 rounded-full bg-[#00A046] text-white text-[10.5px] font-black font-mono tabular-nums flex items-center justify-center shadow-xs">
+                                            {qtyInBasket}
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div className="space-y-1 flex-1 flex flex-col justify-between">
+                                        <div>
+                                          <h5 className="text-xs font-black text-[#142018] line-clamp-2 leading-snug min-h-[32px]">
+                                            {prod.nameAr}
+                                          </h5>
+                                          <div className="text-[10.5px] text-[#6B7280] truncate mt-0.5">
+                                            {prod.unit}
+                                          </div>
+                                        </div>
+
+                                        <div className="pt-2 mt-1.5 border-t border-[#F0F3EE] flex items-center justify-between gap-1.5">
+                                          <span className="text-xs font-black font-mono tabular-nums text-[#0B5D32] truncate">
+                                            {formatCurrency(prod.defaultPriceIQD, currency, language)}
+                                          </span>
+
+                                          {qtyInBasket === 0 ? (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleAdjustMorningBasket(prod.barcode, 1);
+                                              }}
+                                              className="h-7 px-2.5 rounded-lg bg-[#00A046] hover:bg-[#008a3c] text-white text-[11px] font-bold flex items-center gap-1 transition cursor-pointer shrink-0"
+                                            >
+                                              <Plus className="w-3 h-3 stroke-[2.5]" />
+                                              <span>{isAr ? 'أضف' : 'Add'}</span>
+                                            </button>
+                                          ) : (
+                                            <div
+                                              onClick={(e) => e.stopPropagation()}
+                                              className="h-7 flex items-center bg-[#00A046] text-white rounded-lg overflow-hidden shrink-0"
+                                            >
+                                              <button
+                                                type="button"
+                                                onClick={() => handleAdjustMorningBasket(prod.barcode, -1)}
+                                                className="px-1.5 h-full hover:bg-black/15 cursor-pointer flex items-center justify-center"
+                                              >
+                                                <Minus className="w-3 h-3 stroke-[3]" />
+                                              </button>
+                                              <span className="px-1.5 text-[11px] font-mono font-black tabular-nums">
+                                                {qtyInBasket}
+                                              </span>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleAdjustMorningBasket(prod.barcode, 1)}
+                                                className="px-1.5 h-full hover:bg-black/15 cursor-pointer flex items-center justify-center"
+                                              >
+                                                <Plus className="w-3 h-3 stroke-[3]" />
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="bg-white rounded-xl border border-[#DCE5DC] divide-y divide-[#F1F3F5] max-h-[440px] overflow-y-auto">
+                                {filteredCashierProducts.map((prod) => {
+                                  const qtyInBasket = morningLoadBasket[prod.barcode] || 0;
+                                  const thumb = resolveFleetProductImage(
+                                    prod.barcode,
+                                    prod.nameAr,
+                                    prod.imageUrl
+                                  );
+                                  const { Icon: CatIcon, color: catColor, bg: catBg } = getFleetCategoryIcon(
+                                    prod.category,
+                                    prod.nameAr
+                                  );
+
+                                  return (
+                                    <div
+                                      key={prod.barcode}
+                                      onClick={() => handleAdjustMorningBasket(prod.barcode, 1)}
+                                      className={`p-2.5 flex items-center justify-between gap-2.5 transition cursor-pointer ${
+                                        qtyInBasket > 0 ? 'bg-[#ECFDF5]/35' : 'hover:bg-[#F8FAF7]'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                        <div className="w-11 h-11 rounded-xl bg-white border border-[#EAEFEA] p-1 flex items-center justify-center shrink-0">
+                                          <img
+                                            src={thumb}
+                                            alt={prod.nameAr}
+                                            referrerPolicy="no-referrer"
+                                            className="max-h-full max-w-full object-contain mix-blend-multiply"
+                                          />
+                                        </div>
+                                        <div className="min-w-0">
+                                          <h5 className="text-xs font-black text-[#142018] truncate flex items-center gap-1.5">
+                                            <span
+                                              className={`w-5 h-5 rounded-md border inline-flex items-center justify-center shrink-0 ${catBg}`}
+                                            >
+                                              <CatIcon className={`w-3 h-3 ${catColor}`} />
+                                            </span>
+                                            <span className="truncate">{prod.nameAr}</span>
+                                          </h5>
+                                          <div className="text-[10.5px] text-[#5F7164] tabular-nums flex items-center gap-1.5 flex-wrap mt-0.5">
+                                            <span>{prod.unit}</span>
+                                            <span>·</span>
+                                            <span className="font-mono font-bold text-[#0B5D32]">
+                                              {formatCurrency(prod.defaultPriceIQD, currency, language)}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <div
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="shrink-0"
+                                      >
+                                        {qtyInBasket === 0 ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleAdjustMorningBasket(prod.barcode, 1)}
+                                            className="h-8 px-3 rounded-xl bg-[#00A046] hover:bg-[#008a3c] text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                                          >
+                                            <Plus className="w-3.5 h-3.5" />
+                                            <span>{isAr ? 'أضف' : 'Add'}</span>
+                                          </button>
+                                        ) : (
+                                          <div className="h-8 flex items-center bg-[#00A046] text-white rounded-xl overflow-hidden">
+                                            <button
+                                              type="button"
+                                              onClick={() => handleAdjustMorningBasket(prod.barcode, -1)}
+                                              className="px-2 h-full hover:bg-black/15 cursor-pointer"
+                                            >
+                                              <Minus className="w-3 h-3 stroke-[3]" />
+                                            </button>
+                                            <span className="px-2 text-xs font-mono font-black tabular-nums">
+                                              {qtyInBasket}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleAdjustMorningBasket(prod.barcode, 1)}
+                                              className="px-2 h-full hover:bg-black/15 cursor-pointer"
+                                            >
+                                              <Plus className="w-3 h-3 stroke-[3]" />
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Cashier Load-Out Dispatch Footer Bar */}
+                            <div className="bg-[#F7F8FA] border border-[#DCE5DC] rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                              <div className="min-w-0 text-xs tabular-nums">
+                                {basketEntries.length === 0 ? (
+                                  <span className="text-[#5F7164] font-bold">
+                                    {isAr
+                                      ? 'اختر الأصناف من الكاشير أعلاه لتجهيز حمولة الفان الصباحية.'
+                                      : 'Tap mini product cards above to stage morning van load.'}
+                                  </span>
+                                ) : (
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-black text-[#142018]">
+                                      {isAr
+                                        ? `سلة التحميل: ${basketEntries.length} صنف · ${basketUnitsCount} وحدة`
+                                        : `Load Basket: ${basketEntries.length} items · ${basketUnitsCount} units`}
+                                    </span>
+                                    <span className="text-[#CBD5E1]" aria-hidden="true">|</span>
+                                    <span className="font-mono font-black text-[#00A046]">
+                                      {formatCurrency(basketTotalIQD, currency, language)}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                {basketEntries.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setMorningLoadBasket({})}
+                                    className="h-9 px-3 rounded-xl bg-white border border-[#DCE5DC] hover:bg-red-50 hover:text-red-700 text-xs font-bold text-[#5F7164] cursor-pointer transition"
+                                  >
+                                    {isAr ? 'تفريغ' : 'Clear'}
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  disabled={basketEntries.length === 0 || isLoadingStock}
+                                  onClick={handleDispatchMorningLoadBasket}
+                                  className="h-9 px-4 rounded-xl bg-[#00A046] hover:bg-[#008a3c] disabled:bg-gray-300 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition whitespace-nowrap"
+                                >
+                                  <Check className="w-4 h-4 stroke-[2.5]" />
+                                  <span>
+                                    {isLoadingStock
+                                      ? isAr
+                                        ? 'جاري التحميل...'
+                                        : 'Loading...'
+                                      : isAr
+                                      ? `تحميل للفان (${basketUnitsCount})`
+                                      : `Load Van (${basketUnitsCount})`}
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          /* Isolated Current Van Stock Tab (Completely Separated from Load Cashier) */
+                          <div className="space-y-3">
+                            <div className="bg-[#F7F8FA] border border-[#E5E7EB] rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs tabular-nums">
+                              <span className="font-bold text-[#4B6352]">
+                                {isAr ? 'ملخص عهدة الفان الحالية:' : 'Current Van Custody Summary:'}
+                              </span>
+                              <div className="flex items-center gap-3 font-mono font-bold">
+                                <span className="text-[#1F2328]">
+                                  {isAr ? `محمّل ${selectedFleet.totalLoadedUnits}` : `Loaded ${selectedFleet.totalLoadedUnits}`}
+                                </span>
+                                <span className="text-[#00A046]">
+                                  {isAr ? `مباع ${selectedFleet.totalSoldUnits}` : `Sold ${selectedFleet.totalSoldUnits}`}
+                                </span>
+                                <span className="text-[#0B5D32] font-black">
+                                  {isAr ? `متبقي ${selectedFleet.totalRemainingUnits}` : `Left ${selectedFleet.totalRemainingUnits}`}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="divide-y divide-[#F1F3F5]">
+                              {selectedFleet.inventory.length === 0 ? (
+                                <div className="py-8 text-center text-xs text-[#6B7280] font-bold space-y-2">
+                                  <p>
+                                    {isAr
+                                      ? 'لا توجد أصناف محمّلة في هذا الفان حالياً.'
+                                      : 'No inventory loaded in this van yet.'}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => setVanStockSubMode('load_cashier')}
+                                    className="px-3.5 py-1.5 rounded-xl bg-[#00A046] text-white text-xs font-black cursor-pointer"
+                                  >
+                                    {isAr ? 'الانتقال إلى كاشير التحميل' : 'Go to Load Cashier'}
+                                  </button>
+                                </div>
+                              ) : (
+                                selectedFleet.inventory.map((inv: any) => {
+                                  const catalogMatch = fleetCatalog.find((p) => p.barcode === inv.barcode);
+                                  const thumb = resolveFleetProductImage(
+                                    inv.barcode,
+                                    inv.productName,
+                                    inv.imageUrl || catalogMatch?.imageUrl
+                                  );
+                                  const { Icon: CatIcon, color: catColor, bg: catBg } = getFleetCategoryIcon(
+                                    inv.category || catalogMatch?.category,
+                                    inv.productName
+                                  );
+                                  const isBusy = adjustingStockBarcode === inv.barcode;
+
+                                  return (
+                                    <div
+                                      key={inv.id}
+                                      className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs"
+                                    >
+                                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                        <div className="w-12 h-12 rounded-xl bg-white border border-[#E5E7EB] p-1 flex items-center justify-center shrink-0">
+                                          <img
+                                            src={thumb}
+                                            alt={inv.productName}
+                                            referrerPolicy="no-referrer"
+                                            className="max-h-full max-w-full object-contain mix-blend-multiply"
+                                          />
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                          <div className="font-black text-[#1F2328] flex items-center gap-1.5">
+                                            <span
+                                              className={`w-5 h-5 rounded-md border inline-flex items-center justify-center shrink-0 ${catBg}`}
+                                            >
+                                              <CatIcon className={`w-3 h-3 ${catColor}`} />
+                                            </span>
+                                            <span className="truncate">{inv.productName}</span>
+                                          </div>
+                                          <div className="text-[11px] text-[#6B7280] mt-0.5 flex items-center gap-2 flex-wrap tabular-nums">
+                                            <span>{inv.unit}</span>
+                                            <span>·</span>
+                                            <span className="font-mono font-bold text-[#1F2328]">
+                                              {formatCurrency(inv.unitPriceIQD, currency, language)}
+                                            </span>
+                                          </div>
+                                          <div className="text-[11px] mt-1 flex items-center gap-3 tabular-nums">
+                                            <span className="text-[#6B7280]">
+                                              {isAr ? 'محمّل:' : 'Loaded:'}{' '}
+                                              <strong className="font-mono text-[#1F2328]">{inv.loadedQuantity}</strong>
+                                            </span>
+                                            <span className="text-[#00A046] font-bold">
+                                              {isAr ? 'مباع:' : 'Sold:'}{' '}
+                                              <strong className="font-mono">{inv.soldQuantity}</strong>
+                                            </span>
+                                            <span className="text-[#1F2328] font-black">
+                                              {isAr ? 'متبقي:' : 'Left:'}{' '}
+                                              <strong className="font-mono text-[#0B5D32]">{inv.remainingQuantity}</strong>
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* Inline +/- Adjustment Controls for Isolated Current Van Stock */}
+                                      <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+                                        <span className="text-[10.5px] font-bold text-[#6B7280] sm:hidden">
+                                          {isAr ? 'تعديل المخزون:' : 'Adjust Stock:'}
+                                        </span>
+                                        <div className="flex items-center gap-1 bg-[#F7F8FA] border border-[#DCE5DC] rounded-xl p-1">
+                                          <button
+                                            type="button"
+                                            disabled={isBusy || inv.remainingQuantity <= 0}
+                                            onClick={() => handleAdjustLoadedVanStock(inv.barcode, -1)}
+                                            className="w-8 h-8 rounded-lg bg-white hover:bg-red-50 hover:text-red-700 border border-[#E5E7EB] disabled:opacity-40 flex items-center justify-center text-[#1F2328] cursor-pointer transition"
+                                            title={isAr ? 'إنقاص وحدة (-1)' : 'Decrease (-1)'}
+                                            aria-label={isAr ? 'إنقاص وحدة' : 'Decrease by 1'}
+                                          >
+                                            <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+                                          </button>
+                                          <span className="min-w-[30px] text-center font-mono font-black text-xs text-[#0B5D32] tabular-nums">
+                                            {inv.remainingQuantity}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            disabled={isBusy}
+                                            onClick={() => handleAdjustLoadedVanStock(inv.barcode, 1)}
+                                            className="w-8 h-8 rounded-lg bg-[#00A046] hover:bg-[#008a3c] disabled:opacity-40 text-white flex items-center justify-center cursor-pointer transition"
+                                            title={isAr ? 'زيادة وحدة (+1)' : 'Increase (+1)'}
+                                            aria-label={isAr ? 'زيادة وحدة' : 'Increase by 1'}
+                                          >
+                                            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Right 5 Cols: Route Stops + Recent Field Transactions + Shift Approvals */}

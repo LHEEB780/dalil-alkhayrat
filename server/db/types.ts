@@ -3,6 +3,9 @@
  * Multi-role architecture: Store, Supplier, Driver/Van Distributor, Platform Admin, Store B2C Customer
  */
 
+import type { SupplierOrderRules } from '../../shared/orderRules.ts';
+export type { SupplierOrderRules };
+
 export type UserRole = 'store' | 'supplier' | 'driver' | 'admin' | 'customer';
 
 export type PaymentMethod = 'cod' | 'credit' | 'wallet' | 'online';
@@ -135,6 +138,22 @@ export interface DeliveryZone {
   estimatedDeliveryHours: number;
 }
 
+export type SellerBusinessType =
+  | 'manufacturer'
+  | 'importer'
+  | 'wholesaler'
+  | 'distributor'
+  | 'trader'
+  | 'warehouse'
+  | 'brand_owner'
+  | 'authorized_distributor';
+
+export type VerificationStatus =
+  | 'pending'
+  | 'verified'
+  | 'verified_business'
+  | 'authorized_distributor';
+
 export interface SupplierProfile {
   id: string;
   companyName: string;
@@ -147,7 +166,10 @@ export interface SupplierProfile {
   totalVans: number;
   activeCreditLinesCount: number;
   isVerified: boolean;
+  businessType: SellerBusinessType;
+  verificationStatus: VerificationStatus;
   serviceZoneIds: string[];
+  orderRules?: SupplierOrderRules;
   createdAt: string;
 }
 
