@@ -31,15 +31,19 @@ import {
   Send,
   MessageCircle,
   CheckCheck,
-  Receipt
+  Receipt,
+  AlertTriangle
 } from 'lucide-react';
 import { Currency, Language } from '../types/index.ts';
 import { formatCurrency } from '../utils/format.ts';
 import { fetchWithRetry } from '../utils/fetchWithRetry.ts';
+import { NearExpiryAlertsCard } from '../components/NearExpiryAlertsCard.tsx';
 
 interface StorefrontManagementViewProps {
   currency: Currency;
   language?: Language;
+  authToken?: string | null;
+  onRefreshProducts?: () => Promise<void> | void;
   onPreviewStorefront: () => void;
   onOpenStorePOS?: () => void;
   onOpenQRPoster?: () => void;
@@ -48,12 +52,15 @@ interface StorefrontManagementViewProps {
 export const StorefrontManagementView: React.FC<StorefrontManagementViewProps> = ({
   currency,
   language = 'ar',
+  authToken,
+  onRefreshProducts,
   onPreviewStorefront,
   onOpenStorePOS,
   onOpenQRPoster
 }) => {
   const isAr = language === 'ar';
   const storeId = 'store_almansoor';
+  const [nearExpiryCount, setNearExpiryCount] = useState<number>(0);
 
   // Navigation tab inside management studio - default to dashboard
   const [activeSubTab, setActiveSubTab] = useState<
@@ -309,6 +316,14 @@ export const StorefrontManagementView: React.FC<StorefrontManagementViewProps> =
   useEffect(() => {
     const controller = new AbortController();
     loadStorefrontData(controller.signal);
+    fetch(`/api/store/${encodeURIComponent(storeId)}/near-expiry?mode=month`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (!controller.signal.aborted && json?.success && typeof json.summary?.nearExpiryCount === 'number') {
+          setNearExpiryCount(json.summary.nearExpiryCount);
+        }
+      })
+      .catch(() => {});
     return () => controller.abort();
   }, [analyticsDays]);
 
@@ -759,6 +774,26 @@ export const StorefrontManagementView: React.FC<StorefrontManagementViewProps> =
          ========================================================================= */}
       {activeSubTab === 'dashboard' && (
         <div className="space-y-4">
+          {nearExpiryCount > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start sm:items-center gap-2.5 text-xs text-amber-900">
+                <AlertTriangle className="w-4.5 h-4.5 text-amber-700 shrink-0 mt-0.5 sm:mt-0" />
+                <span>
+                  {isAr
+                    ? `يوجد ${nearExpiryCount} منتجات في مخزون المتجر قريبة انتهاء الصلاحية خلال شهر — يمكنك تحويلها مباشرة إلى عروض متجر التجزئة.`
+                    : `${nearExpiryCount} store items are expiring within 1 month — convert them straight into retail offers.`}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('promotions')}
+                className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white text-xs font-black transition cursor-pointer shrink-0 whitespace-nowrap"
+              >
+                {isAr ? 'مراجعة وتحويل للعروض' : 'Review & Convert'}
+              </button>
+            </div>
+          )}
+
           {/* Dashboard Header & Timeframe Selector */}
           <div className="bg-white rounded-2xl border border-[#DCE5DC] p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -1840,6 +1875,20 @@ export const StorefrontManagementView: React.FC<StorefrontManagementViewProps> =
             </button>
           </div>
 
+          <NearExpiryAlertsCard
+            modeContext="retail_store"
+            storeId={storeId}
+            authToken={authToken}
+            currency={currency}
+            language={language}
+            onCountChange={setNearExpiryCount}
+            onConverted={async () => {
+              await loadStorefrontData();
+              await onRefreshProducts?.();
+            }}
+            onOpenRetailPromotions={onPreviewStorefront}
+          />
+
           <div className="space-y-3">
             <h3 className="text-sm font-black text-[#142018] flex items-center gap-2">
               <Flame className="w-4 h-4 text-[#E11D48]" />
@@ -1869,6 +1918,20 @@ export const StorefrontManagementView: React.FC<StorefrontManagementViewProps> =
                         <div className="font-bold text-xs text-[#142018] line-clamp-1">
                           {prod.productName}
                         </div>
+                        {(prod.promoBadge || prod.expiryDate) && (
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap text-[10px]">
+                            {prod.promoBadge && (
+                              <span className="bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded font-bold">
+                                {prod.promoBadge}
+                              </span>
+                            )}
+                            {prod.expiryDate && (
+                              <span className="text-red-600 font-mono font-bold tabular-nums" dir="ltr">
+                                EXP: {prod.expiryDate}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         <div className="flex items-center gap-1.5 mt-1 tabular-nums flex-wrap">
                           <span className="bg-[#E11D48] text-white text-[10px] font-black px-1.5 py-0.5 rounded-md">
                             -{prod.discountPercent}%

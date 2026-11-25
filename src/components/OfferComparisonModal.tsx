@@ -26,7 +26,8 @@ import {
   TrendingUp,
   Award,
   ExternalLink,
-  FileText
+  FileText,
+  Maximize2
 } from 'lucide-react';
 import { ProductWithOffers, SupplierOfferItem, Currency, Language } from '../types/index.ts';
 import { formatCurrency } from '../utils/format.ts';
@@ -116,6 +117,8 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
   const [isProfitCalcOpen, setIsProfitCalcOpen] = useState(false);
   const [isProfitCompareOpen, setIsProfitCompareOpen] = useState(false);
   const [isSupplyTermsOpen, setIsSupplyTermsOpen] = useState(false);
+  const [isGalleryLightboxOpen, setIsGalleryLightboxOpen] = useState(false);
+  const [localFavoriteFallback, setLocalFavoriteFallback] = useState(false);
 
   // Reset state whenever active product changes
   useEffect(() => {
@@ -135,6 +138,8 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
       setIsProfitCalcOpen(false);
       setIsProfitCompareOpen(false);
       setIsSupplyTermsOpen(false);
+      setIsGalleryLightboxOpen(false);
+      setLocalFavoriteFallback(false);
       setImageLoadFailed(false);
       setFailedSlideImages({});
       setAddedBottomBar(false);
@@ -146,15 +151,21 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
     }
   }, [product, isAr]);
 
-  // Close on Escape key
+  // Close on Escape key (close lightbox first if open)
   useEffect(() => {
     if (!product) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        if (isGalleryLightboxOpen) {
+          setIsGalleryLightboxOpen(false);
+        } else {
+          onClose();
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [product, onClose]);
+  }, [product, onClose, isGalleryLightboxOpen]);
 
   const similarProducts = useMemo(() => {
     if (!product || allProducts.length === 0) return [];
@@ -258,6 +269,18 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
   const displayUnit = getLocalizedText(product.unit, language);
   const activeOffer =
     product.offers.find((o) => o.id === selectedOfferId) || product.offers[0];
+
+  const isProductInStock = activeOffer
+    ? activeOffer.availableStock > 0
+    : product.offers.some((o) => o.availableStock > 0);
+  const effectiveIsFavorite = onToggleFavorite ? isFavorite : localFavoriteFallback;
+  const handleToggleFav = () => {
+    if (onToggleFavorite) {
+      onToggleFavorite(product.barcode);
+    } else {
+      setLocalFavoriteFallback((prev) => !prev);
+    }
+  };
 
   const activeQty = activeOffer
     ? quantities[activeOffer.id] || activeOffer.minOrderQuantity || 1
@@ -427,7 +450,15 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
                 const currentSrc = currentSlide?.src || product.imageUrl || '';
                 const hasFailed = !currentSrc || Boolean(failedSlideImages[`slide-${activeSlideIndex}`]) || imageLoadFailed;
                 return (
-                  <div className="w-full h-full flex items-center justify-center px-6 pt-5 pb-12 sm:px-12 sm:pt-6 sm:pb-12 transition-opacity duration-200">
+                  <button
+                    type="button"
+                    onClick={() => !hasFailed && setIsGalleryLightboxOpen(true)}
+                    disabled={hasFailed}
+                    aria-label={isAr ? 'فتح معرض صور المنتج' : 'Open product image gallery'}
+                    className={`w-full h-full flex items-center justify-center px-6 pt-5 pb-12 sm:px-12 sm:pt-6 sm:pb-12 transition-opacity duration-200 ${
+                      hasFailed ? 'cursor-default' : 'cursor-zoom-in group/gallery'
+                    }`}
+                  >
                     {!hasFailed ? (
                       <img
                         src={currentSrc}
@@ -439,7 +470,7 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
                             [`slide-${activeSlideIndex}`]: true
                           }))
                         }
-                        className="max-h-full max-w-full object-contain rounded-xl transition-transform duration-300"
+                        className="max-h-full max-w-full object-contain rounded-xl transition-transform duration-300 group-hover/gallery:scale-[1.02]"
                       />
                     ) : (
                       <div className="flex flex-col items-center justify-center text-gray-400">
@@ -447,12 +478,12 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
                         <span className="text-xs mt-2 font-medium">{displayName}</span>
                       </div>
                     )}
-                  </div>
+                  </button>
                 );
               })()}
 
               {/* Photo Counter & Role Label */}
-              <div className="absolute top-3 start-3 flex items-center gap-1.5 bg-white/95 backdrop-blur-xs border border-[#E5E7EB] px-2.5 py-1 rounded-lg shadow-2xs text-[11px] font-bold text-[#0F3D24] tabular-nums">
+              <div className="absolute top-3 start-3 flex items-center gap-1.5 bg-white/95 backdrop-blur-xs border border-[#E5E7EB] px-2.5 py-1 rounded-lg shadow-2xs text-[11px] font-bold text-[#0F3D24] tabular-nums pointer-events-none">
                 <span>
                   {activeSlideIndex + 1} / {slides.length}
                 </span>
@@ -460,6 +491,44 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
                 <span className="text-[#4B5563] font-semibold">
                   {slides[activeSlideIndex]?.label}
                 </span>
+              </div>
+
+              {/* Stock Availability Indicator Over Gallery Image + Expand Gallery Trigger */}
+              <div className="absolute top-3 end-3 flex items-center gap-1.5">
+                <div
+                  data-testid="inline-gallery-stock-indicator"
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-2xs text-[11px] font-bold backdrop-blur-xs ${
+                    isProductInStock
+                      ? 'bg-white/95 border-[#BBF7D0] text-[#0F3D24]'
+                      : 'bg-white/95 border-gray-200 text-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                      isProductInStock
+                        ? 'bg-[#00A046] ring-2 ring-[#00A046]/25'
+                        : 'bg-gray-400 ring-2 ring-gray-300/60'
+                    }`}
+                  />
+                  <span>
+                    {isProductInStock
+                      ? isAr
+                        ? 'متوفر حالياً'
+                        : 'In Stock'
+                      : isAr
+                      ? 'بانتظار التوريد'
+                      : 'Awaiting Supply'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsGalleryLightboxOpen(true)}
+                  aria-label={isAr ? 'تكبير المعرض' : 'Expand gallery'}
+                  title={isAr ? 'فتح معرض الصور' : 'Open gallery'}
+                  className="w-7 h-7 rounded-full bg-white/95 hover:bg-[#EFFAF3] border border-[#E5E7EB] shadow-2xs flex items-center justify-center text-[#0F3D24] transition cursor-pointer"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                </button>
               </div>
 
               {/* Carousel Navigation Arrows */}
@@ -1449,6 +1518,204 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
           </div>
         )}
       </div>
+
+      {/* Dedicated Fullscreen Photo Gallery Lightbox (Opens when clicking product image) */}
+      {isGalleryLightboxOpen && (
+        <div
+          data-testid="product-photo-gallery-lightbox"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-sm p-2.5 sm:p-6 font-brand"
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsGalleryLightboxOpen(false);
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl border border-[#E5E7EB] flex flex-col max-h-[94vh]"
+          >
+            {/* Gallery Top Header */}
+            <div className="px-4 py-3 border-b border-[#E5E7EB] flex items-center justify-between gap-2 bg-white shrink-0">
+              <div className="min-w-0">
+                <div className="text-xs sm:text-sm font-extrabold text-[#111827] truncate">
+                  {displayName}
+                </div>
+                <div className="text-[11px] font-semibold text-[#6B7280] tabular-nums">
+                  {activeSlideIndex + 1} / {slides.length} · {slides[activeSlideIndex]?.label}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsGalleryLightboxOpen(false)}
+                className="w-9 h-9 rounded-full hover:bg-gray-100 flex items-center justify-center text-[#6B7280] transition cursor-pointer shrink-0"
+                aria-label={isAr ? 'إغلاق المعرض' : 'Close gallery'}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Gallery Image Stage with Stock Status Visual Indicator */}
+            <div
+              className="relative flex-1 min-h-[280px] sm:min-h-[390px] bg-white flex items-center justify-center p-5 sm:p-8 overflow-hidden select-none"
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
+            >
+              {/* Visual Stock Availability Indicator (Green / Gray dot) over the gallery photo */}
+              <div
+                data-testid="gallery-stock-indicator"
+                className={`absolute top-3 start-3 z-10 flex items-center gap-1.5 px-3 py-1 rounded-full border shadow-xs text-xs font-bold backdrop-blur-xs ${
+                  isProductInStock
+                    ? 'bg-white/95 border-[#BBF7D0] text-[#0F3D24]'
+                    : 'bg-white/95 border-gray-200 text-gray-600'
+                }`}
+              >
+                <span
+                  data-testid="gallery-stock-dot"
+                  className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                    isProductInStock
+                      ? 'bg-[#00A046] ring-2 ring-[#00A046]/25'
+                      : 'bg-gray-400 ring-2 ring-gray-300/60'
+                  }`}
+                />
+                <span>
+                  {isProductInStock
+                    ? isAr
+                      ? 'متوفر حالياً'
+                      : 'Currently Available'
+                    : isAr
+                    ? 'بانتظار التوريد'
+                    : 'Awaiting Supply'}
+                </span>
+              </div>
+
+              {(() => {
+                const activeSlide = slides[activeSlideIndex] || slides[0];
+                const src = activeSlide?.src || product.imageUrl || '';
+                const hasFailed = !src || Boolean(failedSlideImages[`slide-${activeSlideIndex}`]) || imageLoadFailed;
+                return !hasFailed ? (
+                  <img
+                    src={src}
+                    alt={`${displayName} — ${activeSlide?.label || ''}`}
+                    referrerPolicy="no-referrer"
+                    className="max-h-[48vh] sm:max-h-[54vh] max-w-full object-contain rounded-xl"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-gray-400">
+                    <Package className="w-16 h-16 stroke-1" />
+                    <span className="text-xs mt-2 font-medium">{displayName}</span>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Thumbnail Preview Strip */}
+            {slides.length > 1 && (
+              <div className="px-4 py-2 bg-[#FAFDFB] border-t border-[#F1F5F9] flex items-center justify-center gap-2 overflow-x-auto shrink-0">
+                {slides.map((slide, idx) => (
+                  <button
+                    key={slide.id}
+                    type="button"
+                    onClick={() => setActiveSlideIndex(idx)}
+                    className={`w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-white p-1 border-2 overflow-hidden transition shrink-0 cursor-pointer ${
+                      activeSlideIndex === idx
+                        ? 'border-[#00A046] ring-2 ring-[#00A046]/20'
+                        : 'border-[#E5E7EB] opacity-75 hover:opacity-100'
+                    }`}
+                  >
+                    <img
+                      src={slide.src}
+                      alt={slide.label}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-contain"
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Bottom Controls Below Photos: Prev/Next Scroll Buttons, Add to Favorites, Supplier Store & Back Button */}
+            <div className="px-3 sm:px-5 py-3 bg-[#F8FAFC] border-t border-[#E5E7EB] flex flex-wrap items-center justify-between gap-2 shrink-0">
+              {/* Scroll Prev / Next Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="gallery-prev-btn"
+                  onClick={handlePrevSlide}
+                  disabled={slides.length <= 1}
+                  className="h-10 px-3 sm:px-4 rounded-xl bg-[#DCFCE7] hover:bg-[#BBF7D0] border border-[#86EFAC] text-[#15803D] font-bold text-xs sm:text-sm flex items-center gap-1 transition cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+                >
+                  {isAr ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+                  <span>{isAr ? 'السابق' : 'Prev'}</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="gallery-next-btn"
+                  onClick={handleNextSlide}
+                  disabled={slides.length <= 1}
+                  className="h-10 px-3 sm:px-4 rounded-xl bg-[#DCFCE7] hover:bg-[#BBF7D0] border border-[#86EFAC] text-[#15803D] font-bold text-xs sm:text-sm flex items-center gap-1 transition cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+                >
+                  <span>{isAr ? 'التالي' : 'Next'}</span>
+                  {isAr ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                </button>
+              </div>
+
+              {/* Favorite + Supplier Store + Back Buttons */}
+              <div className="flex items-center flex-wrap sm:flex-nowrap gap-1.5 sm:gap-2">
+                <button
+                  type="button"
+                  data-testid="gallery-favorite-btn"
+                  onClick={handleToggleFav}
+                  className={`h-10 px-2.5 sm:px-3.5 rounded-xl border font-bold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+                    effectiveIsFavorite
+                      ? 'bg-[#FFFBEB] border-[#FCD34D] text-[#B45309]'
+                      : 'bg-white hover:bg-amber-50 border-[#E5E7EB] text-[#374151]'
+                  }`}
+                >
+                  <Heart
+                    className={`w-4 h-4 transition shrink-0 ${
+                      effectiveIsFavorite ? 'fill-[#FFA300] text-[#FFA300]' : 'text-[#6B7280]'
+                    }`}
+                  />
+                  <span>
+                    {effectiveIsFavorite
+                      ? isAr
+                        ? 'مضاف للمفضلة'
+                        : 'Favorited'
+                      : isAr
+                      ? 'إضافة للمفضلة'
+                      : 'Add to Favorites'}
+                  </span>
+                </button>
+
+                {onOpenSupplierStore && activeOffer && (
+                  <button
+                    type="button"
+                    data-testid="gallery-supplier-store-btn"
+                    onClick={() => {
+                      setIsGalleryLightboxOpen(false);
+                      onOpenSupplierStore(activeOffer);
+                    }}
+                    title={getLocalizedText(activeOffer.supplierName, language)}
+                    className="h-10 px-2.5 sm:px-3.5 rounded-xl bg-[#EFFAF3] hover:bg-[#DCFCE7] border border-[#BFEAD1] text-[#008A3C] font-bold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap shadow-2xs"
+                  >
+                    <Store className="w-4 h-4 shrink-0" />
+                    <span>{isAr ? 'متجر المورد' : 'Supplier Store'}</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  data-testid="gallery-back-btn"
+                  onClick={() => setIsGalleryLightboxOpen(false)}
+                  className="h-10 px-3 sm:px-4 rounded-xl bg-[#0F3D24] hover:bg-[#0B2E1B] text-white font-bold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer shadow-2xs whitespace-nowrap"
+                >
+                  {isAr ? <ArrowRight className="w-4 h-4" /> : <ArrowLeft className="w-4 h-4" />}
+                  <span>{isAr ? 'رجوع' : 'Back'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

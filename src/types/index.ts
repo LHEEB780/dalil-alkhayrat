@@ -1,7 +1,23 @@
 import type { SupplierOrderRules } from '../../shared/orderRules.ts';
 export type { SupplierOrderRules };
 
-export type Role = 'store' | 'cashier' | 'supplier' | 'driver' | 'admin' | 'customer';
+export type Role = 'store' | 'cashier' | 'accountant' | 'supplier' | 'driver' | 'admin' | 'customer';
+
+export type StoreStaffRole = 'cashier' | 'accountant';
+
+export interface StoreStaffMember {
+  id: string;
+  storeId: string;
+  storeName: string;
+  name: string;
+  role: StoreStaffRole;
+  phone: string;
+  branchId: string;
+  branchName: string;
+  isActive: boolean;
+  createdAt: string;
+  lastLoginAt?: string;
+}
 
 export type SellerBusinessType =
   | 'manufacturer'
@@ -239,6 +255,18 @@ export interface OrderItem {
   notes?: string;
 }
 
+export type VanModuleSection =
+  | 'pos_sell'
+  | 'deliveries'
+  | 'customers_credit'
+  | 'returns_rma'
+  | 'inventory_audit'
+  | 'restock'
+  | 'navigation'
+  | 'manage'
+  | 'finance_settlement'
+  | 'performance';
+
 export interface VanStockItem {
   id: string;
   driverId: string;
@@ -251,6 +279,81 @@ export interface VanStockItem {
   damagedQuantity: number;
   remainingQuantity: number;
   unitPriceIQD: number;
+  category?: string;
+  subCategory?: string;
+  batchNumber?: string;
+  expiryDate?: string;
+  bulkDiscountMinQty?: number;
+  bulkUnitPriceIQD?: number;
+  lastPhysicalCountQty?: number;
+  lastAuditAt?: string;
+}
+
+export interface VanExpenseItem {
+  id: string;
+  driverId: string;
+  supplierId: string;
+  category: 'fuel' | 'toll_parking' | 'loading_labor' | 'maintenance' | 'other';
+  description: string;
+  amountIQD: number;
+  receiptRef?: string;
+  createdAt: string;
+}
+
+export interface VanReturnItem {
+  id: string;
+  rmaNumber: string;
+  driverId: string;
+  supplierId: string;
+  storeId?: string;
+  storeName?: string;
+  barcode: string;
+  productName: string;
+  unit: string;
+  quantity: number;
+  unitPriceIQD: number;
+  creditNoteAmountIQD: number;
+  type: 'return' | 'damage' | 'exchange';
+  batchNumber?: string;
+  expiryDate?: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface VanShiftReportItem {
+  id: string;
+  driverId: string;
+  driverName: string;
+  supplierId: string;
+  date: string;
+  expectedCashIQD: number;
+  actualCashIQD: number;
+  cashVarianceIQD: number;
+  totalOrdersDelivered: number;
+  totalDirectVanSales: number;
+  returnsCount: number;
+  totalExpensesIQD?: number;
+  totalCreditSalesIQD?: number;
+  totalDebtCollectedIQD?: number;
+  odometerStartKm?: number;
+  odometerEndKm?: number;
+  strikeRatePercent?: number;
+  notes?: string;
+  status: 'pending_supplier_approval' | 'settled';
+  settledAt?: string;
+}
+
+export interface VanKPIs {
+  totalStops: number;
+  visitedOrSoldStops: number;
+  soldStops: number;
+  visitCompliancePercent: number;
+  strikeRatePercent: number;
+  averageDropSizeIQD: number;
+  totalLoadedValueIQD: number;
+  remainingStockValueIQD: number;
+  totalExpensesIQD: number;
+  netCashDueIQD: number;
 }
 
 export interface CollectivePool {
@@ -290,5 +393,44 @@ export interface SupplierReviewSummary {
   serviceAvg: number;
   qualityAvg: number;
   distribution: Record<1 | 2 | 3 | 4 | 5, number>;
+}
+
+export type ExpiryAlertChannel = 'retail' | 'wholesale' | 'both';
+
+export interface NearExpiryAlertItem {
+  id: string;
+  source: 'store_inventory' | 'supplier_stock';
+  storeId?: string;
+  supplierId?: string;
+  supplierName?: string;
+  barcode: string;
+  productName: string;
+  category: string;
+  unit: string;
+  imageUrl?: string;
+  stockQuantity: number;
+  costPriceIQD: number;
+  sellingPriceIQD: number;
+  capitalAtRiskIQD: number;
+  expiryDate: string;
+  daysRemaining: number;
+  isExpired: boolean;
+  urgency: 'expired' | 'critical' | 'warning' | 'upcoming' | 'safe';
+  retailOffer?: {
+    active: boolean;
+    barcode: string;
+    priceIQD: number;
+    oldPrice?: number;
+    discountPercent: number;
+    promoBadge?: string;
+  } | null;
+  wholesaleOffer?: {
+    active: boolean;
+    offerId: string;
+    priceIQD: number;
+    clearanceDiscountPercent: number;
+    expiryDate?: string;
+    supplierName: string;
+  } | null;
 }
 

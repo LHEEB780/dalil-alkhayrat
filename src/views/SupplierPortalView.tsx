@@ -39,11 +39,14 @@ import {
 import { CreditAccountItem, CreditUpgradeRequestItem, LedgerEntryItem, Currency, OrderItem, Language } from '../types/index.ts';
 import { formatCurrency, formatDate } from '../utils/format.ts';
 import { getLocalizedText } from '../utils/translations.ts';
+import { NearExpiryAlertsCard } from '../components/NearExpiryAlertsCard.tsx';
 
 interface SupplierPortalViewProps {
   currency: Currency;
   orders: OrderItem[];
   onRefreshOrders: () => void;
+  onRefreshProducts?: () => Promise<void> | void;
+  authToken?: string | null;
   language?: Language;
 }
 
@@ -108,10 +111,13 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
   currency,
   orders,
   onRefreshOrders,
+  onRefreshProducts,
+  authToken,
   language = 'ar'
 }) => {
   const isAr = language === 'ar';
-  const [activeSubTab, setActiveSubTab] = useState<'credit' | 'orders' | 'vans'>('credit');
+  const [activeSubTab, setActiveSubTab] = useState<'credit' | 'orders' | 'vans' | 'expiry_offers'>('credit');
+  const [nearExpiryCount, setNearExpiryCount] = useState<number>(0);
   const [creditAccounts, setCreditAccounts] = useState<CreditAccountItem[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntryItem[]>([]);
@@ -642,6 +648,25 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
                 }`}
               >
                 {vanLoadRequests.filter((r) => r.status === 'pending_approval').length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            data-testid="supplier-tab-expiry-offers"
+            onClick={() => setActiveSubTab('expiry_offers')}
+            className={`px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
+              activeSubTab === 'expiry_offers' ? 'bg-[#00A046] text-white shadow-xs' : 'text-[#6B7280] hover:text-[#1F2328]'
+            }`}
+          >
+            <span>{isAr ? 'تنبيهات الصلاحية والعروض' : 'Expiry & Offers'}</span>
+            {nearExpiryCount > 0 && (
+              <span
+                className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded-full ${
+                  activeSubTab === 'expiry_offers' ? 'bg-amber-400 text-[#1F2328]' : 'bg-amber-100 text-amber-800'
+                }`}
+              >
+                {nearExpiryCount}
               </span>
             )}
           </button>
@@ -2372,6 +2397,21 @@ export const SupplierPortalView: React.FC<SupplierPortalViewProps> = ({
           </div>
         );
       })()}
+
+      {/* SUB-TAB 4: WHOLESALE NEAR-EXPIRY BATCHES & CLEARANCE OFFERS */}
+      {activeSubTab === 'expiry_offers' && (
+        <NearExpiryAlertsCard
+          modeContext="wholesale_supplier"
+          supplierId="supp_rafidain"
+          authToken={authToken}
+          currency={currency}
+          language={language}
+          onCountChange={setNearExpiryCount}
+          onConverted={async () => {
+            await onRefreshProducts?.();
+          }}
+        />
+      )}
 
       {/* MODAL: Record Payment Receipt */}
       {showPaymentModal && (

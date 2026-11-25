@@ -32,7 +32,7 @@ import { Role, Language, SellerBusinessType } from '../types/index.ts';
 import { SELLER_BUSINESS_TYPES, getSellerBusinessTypeLabel } from '../utils/translations.ts';
 
 interface WelcomeAuthViewProps {
-  onLoginAsRole: (role: Role, userProfile: UserSession) => void;
+  onLoginAsRole: (role: Role, userProfile: UserSession, authToken?: string) => void;
   language?: Language;
   onLanguageChange?: (lang: Language) => void;
 }
@@ -46,6 +46,7 @@ export interface UserSession {
   phone: string;
   avatarColor: string;
   entityId?: string;
+  branchName?: string;
   businessType?: SellerBusinessType;
 }
 
@@ -70,6 +71,8 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
   const [ownerName, setOwnerName] = useState('');
   const [city, setCity] = useState('بغداد');
   const [supplierBusinessType, setSupplierBusinessType] = useState<SellerBusinessType>('wholesaler');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isSubmittingAuth, setIsSubmittingAuth] = useState(false);
 
   // Unified list of commercial roles - each presented ONCE without duplication
   const unifiedRoles = [
@@ -294,22 +297,97 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
     setSelectedRole(roleItem.role);
     setPhoneNumber(roleItem.phone);
     setPassword('');
+    setAuthError(null);
     setShowCustomAuth(true);
   };
 
   // Submit custom form
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAuthError(null);
     const matched = unifiedRoles.find(r => r.role === selectedRole);
     const entityId =
-      selectedRole === 'store' || selectedRole === 'cashier'
+      selectedRole === 'store' || selectedRole === 'cashier' || selectedRole === 'accountant'
         ? 'store_almansoor'
         : selectedRole === 'supplier'
         ? 'supp_rafidain'
         : selectedRole === 'driver'
         ? 'drv_1'
         : 'store_almansoor';
-    
+
+    if (authMode === 'login' && (selectedRole === 'cashier' || selectedRole === 'accountant')) {
+      setIsSubmittingAuth(true);
+      try {
+        const res = await fetch('/api/staff/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: phoneNumber, password })
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.success && data.staff) {
+          const staff = data.staff;
+          const isAcct = staff.role === 'accountant';
+          onLoginAsRole(
+            staff.role,
+            {
+              role: staff.role,
+              name: staff.name,
+              entityName: staff.storeName,
+              city: isAr ? 'بغداد' : 'Baghdad',
+              phone: staff.phone,
+              branchName: staff.branchName,
+              badge: isAcct
+                ? isAr
+                  ? 'محاسب مالي'
+                  : 'Accountant'
+                : isAr
+                ? 'كاشير مقيد (POS Only)'
+                : 'Restricted Cashier',
+              avatarColor: isAcct ? 'bg-indigo-50' : 'bg-teal-50',
+              entityId: staff.storeId
+            },
+            data.token
+          );
+          return;
+        }
+
+        // Static demo cashier fallback ONLY if phone is not registered in staff DB and matches demo card
+        if (
+          res.status === 404 &&
+          selectedRole === 'cashier' &&
+          matched &&
+          phoneNumber.replace(/\s+/g, '') === matched.phone.replace(/\s+/g, '') &&
+          password === matched.pass
+        ) {
+          onLoginAsRole('cashier', {
+            role: 'cashier',
+            name: matched.personName,
+            entityName: matched.entityName,
+            city: matched.city,
+            phone: matched.phone,
+            badge: isAr ? matched.badge : matched.englishBadge,
+            avatarColor: matched.bgAccent,
+            entityId: matched.entityId
+          });
+          return;
+        }
+
+        setAuthError(
+          data?.message ||
+            (isAr
+              ? 'تعذر تسجيل الدخول. تأكد من رقم الهاتف وكلمة المرور.'
+              : 'Login failed. Please check phone and password.')
+        );
+      } catch {
+        setAuthError(
+          isAr ? 'تعذر الاتصال بالخادم، حاول مجدداً.' : 'Unable to connect to server.'
+        );
+      } finally {
+        setIsSubmittingAuth(false);
+      }
+      return;
+    }
+
     if (authMode === 'login') {
       onLoginAsRole(selectedRole, {
         role: selectedRole,
@@ -512,18 +590,37 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
           {showCustomAuth && (
             <div className="mt-4 pt-4 border-t border-gray-100 animate-fadeIn space-y-4">
               
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">
-                  {isAr ? 'الدور المحدد: ' : 'Selected Role: '}
-                  <strong className="text-[#00A046]">
-                    {unifiedRoles.find(r => r.role === selectedRole)?.title}
-                  </strong>
-                </span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-gray-500">
+                    {isAr ? 'نوع الحساب:' : 'Account Role:'}
+                  </span>
+                  <select
+                    data-testid="custom-auth-role-select"
+                    value={selectedRole}
+                    onChange={(e) => {
+                      setSelectedRole(e.target.value as Role);
+                      setAuthError(null);
+                    }}
+                    className="bg-[#F7F8FA] border border-[#E5E7EB] rounded-lg px-2.5 py-1 text-xs font-bold text-[#0B5D32] focus:outline-hidden focus:border-[#00A046]"
+                  >
+                    <option value="store">{isAr ? 'تاجر تجزئة / سوبرماركت (المالك)' : 'Store Owner'}</option>
+                    <option value="cashier">{isAr ? 'موظف كاشير / أمين صندوق (POS)' : 'Store Cashier (POS Only)'}</option>
+                    <option value="accountant">{isAr ? 'محاسب مالي (الفواتير والائتمان)' : 'Store Accountant (Financials Only)'}</option>
+                    <option value="supplier">{isAr ? 'شركة ومورد جملة' : 'Wholesale Supplier'}</option>
+                    <option value="driver">{isAr ? 'سائق ومندوب فان' : 'Van Driver'}</option>
+                    <option value="customer">{isAr ? 'زبون متجر التجزئة' : 'Retail Customer'}</option>
+                    <option value="admin">{isAr ? 'مدير النظام والمطورين' : 'System Admin'}</option>
+                  </select>
+                </div>
 
                 <div className="flex bg-[#F7F8FA] border border-[#E5E7EB] rounded-xl p-0.5 text-xs font-bold">
                   <button
                     type="button"
-                    onClick={() => setAuthMode('login')}
+                    onClick={() => {
+                      setAuthMode('login');
+                      setAuthError(null);
+                    }}
                     className={`px-3 py-1 rounded-lg transition cursor-pointer ${
                       authMode === 'login' ? 'bg-[#00A046] text-white shadow-2xs' : 'text-gray-600'
                     }`}
@@ -532,7 +629,10 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAuthMode('register')}
+                    onClick={() => {
+                      setAuthMode('register');
+                      setAuthError(null);
+                    }}
                     className={`px-3 py-1 rounded-lg transition cursor-pointer ${
                       authMode === 'register' ? 'bg-[#00A046] text-white shadow-2xs' : 'text-gray-600'
                     }`}
@@ -541,6 +641,15 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
                   </button>
                 </div>
               </div>
+
+              {authError && (
+                <div
+                  data-testid="custom-auth-error"
+                  className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold"
+                >
+                  {authError}
+                </div>
+              )}
 
               <form onSubmit={handleFormSubmit} className="space-y-3.5 text-xs">
                 
@@ -674,13 +783,29 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
 
                 <button
                   type="submit"
-                  className="w-full py-2.5 bg-[#00A046] text-white font-black text-xs rounded-xl hover:bg-[#008a3c] transition shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                  disabled={isSubmittingAuth}
+                  data-testid="custom-auth-submit-btn"
+                  className="w-full py-2.5 bg-[#00A046] text-white font-black text-xs rounded-xl hover:bg-[#008a3c] disabled:opacity-60 transition shadow-xs flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <LogIn className="w-4 h-4" />
                   <span>
-                    {authMode === 'login' 
-                      ? (isAr ? `تأكيد الدخول كـ (${unifiedRoles.find(r => r.role === selectedRole)?.title})` : `Sign In`)
-                      : (isAr ? 'إنشاء الحساب وتفعيل الواجهة' : 'Create Account')}
+                    {isSubmittingAuth
+                      ? isAr
+                        ? 'جارٍ التحقق...'
+                        : 'Verifying...'
+                      : authMode === 'login'
+                      ? isAr
+                        ? `تأكيد الدخول (${
+                            selectedRole === 'accountant'
+                              ? 'محاسب مالي'
+                              : selectedRole === 'cashier'
+                              ? 'موظف كاشير'
+                              : unifiedRoles.find((r) => r.role === selectedRole)?.title || 'المتجر'
+                          })`
+                        : 'Sign In'
+                      : isAr
+                      ? 'إنشاء الحساب وتفعيل الواجهة'
+                      : 'Create Account'}
                   </span>
                 </button>
 

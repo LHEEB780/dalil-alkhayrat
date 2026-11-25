@@ -6,7 +6,26 @@
 import type { SupplierOrderRules } from '../../shared/orderRules.ts';
 export type { SupplierOrderRules };
 
-export type UserRole = 'store' | 'supplier' | 'driver' | 'admin' | 'customer';
+export type UserRole = 'store' | 'cashier' | 'accountant' | 'supplier' | 'driver' | 'admin' | 'customer';
+
+export type StoreStaffRole = 'cashier' | 'accountant';
+
+export interface StoreStaffAccount {
+  id: string;
+  storeId: string;
+  storeName: string;
+  name: string;
+  role: StoreStaffRole;
+  phone: string;
+  branchId: string;
+  branchName: string;
+  isActive: boolean;
+  passwordHash: string;
+  createdAt: string;
+  lastLoginAt?: string;
+}
+
+export type StoreStaffPublic = Omit<StoreStaffAccount, 'passwordHash'>;
 
 export type PaymentMethod = 'cod' | 'credit' | 'wallet' | 'online';
 
@@ -191,8 +210,20 @@ export interface DriverProfile {
   todayCashSalesIQD?: number;
   todayCreditSalesIQD?: number;
   todayDebtCollectedIQD?: number;
+  todayExpensesIQD?: number;
   availabilityStatus?: 'available' | 'busy';
   busyReason?: string;
+  odometerStartKm?: number;
+  odometerEndKm?: number;
+  fuelLevelPercent?: number;
+  chillerTempC?: number;
+  inspectionChecklist?: {
+    tiresOk: boolean;
+    chillerOk: boolean;
+    lightsOk: boolean;
+    hygieneOk: boolean;
+    checkedAt?: string;
+  };
 }
 
 export interface VanRouteStop {
@@ -227,7 +258,11 @@ export interface VanTransactionRecord {
     quantity: number;
     unitPriceIQD: number;
     totalIQD: number;
+    tierApplied?: boolean;
+    imageUrl?: string;
   }[];
+  grossAmountIQD?: number;
+  discountIQD?: number;
   totalAmountIQD: number;
   createdAt: string;
   notes?: string;
@@ -271,6 +306,12 @@ export interface VanInventoryItem {
   damagedQuantity: number;
   remainingQuantity: number;
   unitPriceIQD: number;
+  batchNumber?: string;
+  expiryDate?: string;
+  bulkDiscountMinQty?: number;
+  bulkUnitPriceIQD?: number;
+  lastPhysicalCountQty?: number;
+  lastAuditAt?: string;
 }
 
 export interface ShiftCloseReport {
@@ -285,6 +326,12 @@ export interface ShiftCloseReport {
   totalOrdersDelivered: number;
   totalDirectVanSales: number;
   returnsCount: number;
+  totalExpensesIQD?: number;
+  totalCreditSalesIQD?: number;
+  totalDebtCollectedIQD?: number;
+  odometerStartKm?: number;
+  odometerEndKm?: number;
+  strikeRatePercent?: number;
   notes?: string;
   status: 'pending_supplier_approval' | 'settled';
   settledAt?: string;
@@ -501,4 +548,65 @@ export interface SupplierReviewSummary {
   qualityAvg: number;
   distribution: Record<1 | 2 | 3 | 4 | 5, number>;
 }
+
+export interface SupplierInventoryBatch {
+  id: string;
+  supplierId: string;
+  barcode: string;
+  productName: string;
+  category: string;
+  unit: string;
+  stockQuantity: number;
+  costPriceIQD: number;
+  wholesalePriceIQD: number;
+  expiryDate: string;
+  batchCode: string;
+}
+
+export type VanExpenseCategory = 'fuel' | 'toll_parking' | 'loading_labor' | 'maintenance' | 'other';
+
+export interface VanExpenseRecord {
+  id: string;
+  driverId: string;
+  supplierId: string;
+  category: VanExpenseCategory;
+  description: string;
+  amountIQD: number;
+  receiptRef?: string;
+  createdAt: string;
+}
+
+export interface VanReturnRecord {
+  id: string;
+  rmaNumber: string;
+  driverId: string;
+  supplierId: string;
+  storeId?: string;
+  storeName?: string;
+  barcode: string;
+  productName: string;
+  unit: string;
+  quantity: number;
+  unitPriceIQD: number;
+  creditNoteAmountIQD: number;
+  type: 'return' | 'damage' | 'exchange';
+  batchNumber?: string;
+  expiryDate?: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface VanUnloadRecord {
+  id: string;
+  manifestNumber: string;
+  driverId: string;
+  supplierId: string;
+  itemsCount: number;
+  totalUnitsReturned: number;
+  totalValueIQD: number;
+  damagedUnits: number;
+  notes?: string;
+  createdAt: string;
+}
+
 

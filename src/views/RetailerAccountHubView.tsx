@@ -35,7 +35,14 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
-  Star
+  Star,
+  Users,
+  UserPlus,
+  UserCheck,
+  Calculator,
+  Eye,
+  EyeOff,
+  Edit3
 } from 'lucide-react';
 import {
   AccountSectionId,
@@ -47,6 +54,8 @@ import {
   OrderItem,
   ProductWithOffers,
   StoreBranchAddress,
+  StoreStaffMember,
+  StoreStaffRole,
   SupplierOfferItem
 } from '../types/index.ts';
 import { UserSession } from './WelcomeAuthView.tsx';
@@ -62,6 +71,7 @@ import { SupplierRatingModal } from '../components/SupplierRatingSection.tsx';
 import { SupplierLedgerDetailView } from '../components/SupplierLedgerDetailView.tsx';
 import { RetailerPaymentLedgerView } from './RetailerPaymentLedgerView.tsx';
 import { RetailerInvoicesView } from './RetailerInvoicesView.tsx';
+import { NearExpiryAlertsCard } from '../components/NearExpiryAlertsCard.tsx';
 
 interface ChatThreadMessage {
   id: string;
@@ -86,6 +96,7 @@ interface RetailerAccountHubViewProps {
   onBackToMarketplace: () => void;
   onBrowseMarketplace?: () => void;
   userSession: UserSession;
+  authToken?: string | null;
   onUpdateProfile: (updated: Partial<UserSession>) => void;
   onDeleteAccount: () => void;
   currency: Currency;
@@ -106,6 +117,9 @@ interface RetailerAccountHubViewProps {
   onUpdateAddresses: (addresses: StoreBranchAddress[]) => void;
   unreadMessagesCount: number;
   onMarkMessagesRead: () => void;
+  onRefreshProducts?: () => Promise<void> | void;
+  onOpenStoreManagement?: () => void;
+  onOpenCollectiveDeals?: () => void;
 }
 
 export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
@@ -114,6 +128,7 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
   onBackToMarketplace,
   onBrowseMarketplace,
   userSession,
+  authToken,
   onUpdateProfile,
   onDeleteAccount,
   currency,
@@ -133,9 +148,16 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
   savedAddresses,
   onUpdateAddresses,
   unreadMessagesCount,
-  onMarkMessagesRead
+  onMarkMessagesRead,
+  onRefreshProducts,
+  onOpenStoreManagement,
+  onOpenCollectiveDeals
 }) => {
   const isAr = language === 'ar';
+  const isAccountantUser = userSession.role === 'accountant';
+  const isStoreOwner = userSession.role === 'store';
+  const activeStoreId = userSession.entityId || 'store_almansoor';
+  const [nearExpiryCount, setNearExpiryCount] = useState<number>(0);
 
   // 1. Profile state
   const [profileName, setProfileName] = useState(userSession.name);
@@ -149,6 +171,23 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
     }
   });
   const [profileSavedToast, setProfileSavedToast] = useState(false);
+
+  // 1B. Store Staff Accounts (Cashier & Accountant) state — Owner only
+  const [staffList, setStaffList] = useState<StoreStaffMember[]>([]);
+  const [loadingStaff, setLoadingStaff] = useState(false);
+  const [isStaffFormOpen, setIsStaffFormOpen] = useState(false);
+  const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
+  const [staffName, setStaffName] = useState('');
+  const [staffRole, setStaffRole] = useState<StoreStaffRole>('cashier');
+  const [staffBranchId, setStaffBranchId] = useState<string>(savedAddresses[0]?.id || 'branch_main');
+  const [staffPhone, setStaffPhone] = useState('');
+  const [staffPassword, setStaffPassword] = useState('');
+  const [showStaffPassword, setShowStaffPassword] = useState(false);
+  const [submittingStaff, setSubmittingStaff] = useState(false);
+  const [staffError, setStaffError] = useState<string | null>(null);
+  const [staffFeedback, setStaffFeedback] = useState<string | null>(null);
+  const [togglingStaffId, setTogglingStaffId] = useState<string | null>(null);
+  const [confirmDeleteStaffId, setConfirmDeleteStaffId] = useState<string | null>(null);
 
   // 2. Orders state
   const [orderStatusFilter, setOrderStatusFilter] = useState<'all' | 'active' | 'delivered'>('all');
@@ -204,6 +243,221 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
       setShowPaymentLedgerView(false);
     }
   }, [userSession.entityName, activeSection]);
+
+  // Load Store Staff Accounts when Store Owner opens My Profile (ملفي)
+  useEffect(() => {
+    if (!isStoreOwner || !authToken || activeSection !== 'profile') return;
+    let active = true;
+    setLoadingStaff(true);
+    fetch(`/api/stores/${encodeURIComponent(activeStoreId)}/staff`, {
+      headers: { Authorization: `Bearer ${authToken}` }
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (active && json?.success && Array.isArray(json.data)) {
+          setStaffList(json.data);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setLoadingStaff(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isStoreOwner, authToken, activeSection, activeStoreId]);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/store/${encodeURIComponent(activeStoreId)}/near-expiry?mode=month`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (active && json?.success && typeof json.summary?.nearExpiryCount === 'number') {
+          setNearExpiryCount(json.summary.nearExpiryCount);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [activeStoreId]);
+
+  const branchOptions = useMemo(() => {
+    if (savedAddresses.length > 0) {
+      return savedAddresses.map((b) => ({
+        id: b.id,
+        name: isAr ? b.labelAr : b.labelEn
+      }));
+    }
+    return [
+      {
+        id: 'branch_main',
+        name: isAr ? 'الفرع الرئيسي' : 'Main Branch'
+      }
+    ];
+  }, [savedAddresses, isAr]);
+
+  const resetStaffForm = () => {
+    setEditingStaffId(null);
+    setStaffName('');
+    setStaffRole('cashier');
+    setStaffBranchId(branchOptions[0]?.id || 'branch_main');
+    setStaffPhone('');
+    setStaffPassword('');
+    setShowStaffPassword(false);
+    setStaffError(null);
+  };
+
+  const openNewStaffForm = () => {
+    resetStaffForm();
+    setIsStaffFormOpen(true);
+  };
+
+  const openEditStaffForm = (member: StoreStaffMember) => {
+    setEditingStaffId(member.id);
+    setStaffName(member.name);
+    setStaffRole(member.role);
+    setStaffBranchId(member.branchId || branchOptions[0]?.id || 'branch_main');
+    setStaffPhone(member.phone);
+    setStaffPassword('');
+    setShowStaffPassword(false);
+    setStaffError(null);
+    setIsStaffFormOpen(true);
+  };
+
+  const handleSubmitStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStaffError(null);
+    if (!authToken) {
+      setStaffError(
+        isAr
+          ? 'جارٍ تهيئة جلسة المتجر، يرجى المحاولة بعد لحظات.'
+          : 'Store session initializing, please try again.'
+      );
+      return;
+    }
+
+    const selectedBranch =
+      branchOptions.find((b) => b.id === staffBranchId) || branchOptions[0];
+
+    setSubmittingStaff(true);
+    try {
+      const url = editingStaffId
+        ? `/api/stores/${encodeURIComponent(activeStoreId)}/staff/${encodeURIComponent(editingStaffId)}`
+        : `/api/stores/${encodeURIComponent(activeStoreId)}/staff`;
+      const method = editingStaffId ? 'PATCH' : 'POST';
+
+      const payload: Record<string, any> = {
+        storeName: profileEntity || userSession.entityName,
+        name: staffName.trim(),
+        role: staffRole,
+        phone: staffPhone.trim(),
+        branchId: selectedBranch.id,
+        branchName: selectedBranch.name
+      };
+      if (!editingStaffId || staffPassword.trim().length > 0) {
+        payload.password = staffPassword;
+      }
+
+      const res = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        setStaffError(
+          json?.message ||
+            (isAr ? 'تعذر حفظ حساب الموظف' : 'Failed to save staff account')
+        );
+        return;
+      }
+
+      if (editingStaffId) {
+        setStaffList((prev) =>
+          prev.map((m) => (m.id === editingStaffId ? json.data : m))
+        );
+        setStaffFeedback(
+          isAr ? 'تم تحديث بيانات وصلاحيات الموظف بنجاح' : 'Staff account updated'
+        );
+      } else {
+        setStaffList((prev) => [json.data, ...prev]);
+        setStaffFeedback(
+          isAr
+            ? `تم إنشاء حساب ${staffRole === 'cashier' ? 'الكاشير' : 'المحاسب'} بنجاح`
+            : 'Staff account created successfully'
+        );
+      }
+      resetStaffForm();
+      setIsStaffFormOpen(false);
+      window.setTimeout(() => setStaffFeedback(null), 4000);
+    } catch {
+      setStaffError(
+        isAr ? 'تعذر الاتصال بالخادم، حاول مجدداً.' : 'Network error, please retry.'
+      );
+    } finally {
+      setSubmittingStaff(false);
+    }
+  };
+
+  const handleToggleStaffActive = async (member: StoreStaffMember) => {
+    if (!authToken) return;
+    setTogglingStaffId(member.id);
+    try {
+      const res = await fetch(
+        `/api/stores/${encodeURIComponent(activeStoreId)}/staff/${encodeURIComponent(member.id)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ isActive: !member.isActive })
+        }
+      );
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success && json.data) {
+        setStaffList((prev) => prev.map((m) => (m.id === member.id ? json.data : m)));
+        setStaffFeedback(
+          json.data.isActive
+            ? isAr
+              ? `تم تفعيل حساب ${member.name}`
+              : `${member.name} activated`
+            : isAr
+            ? `تم إيقاف حساب ${member.name} مؤقتاً`
+            : `${member.name} suspended`
+        );
+        window.setTimeout(() => setStaffFeedback(null), 3500);
+      }
+    } finally {
+      setTogglingStaffId(null);
+    }
+  };
+
+  const handleDeleteStaff = async (staffId: string) => {
+    if (!authToken) return;
+    try {
+      const res = await fetch(
+        `/api/stores/${encodeURIComponent(activeStoreId)}/staff/${encodeURIComponent(staffId)}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${authToken}` }
+        }
+      );
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success) {
+        setStaffList((prev) => prev.filter((m) => m.id !== staffId));
+        setConfirmDeleteStaffId(null);
+        setStaffFeedback(isAr ? 'تم حذف حساب الموظف' : 'Staff account removed');
+        window.setTimeout(() => setStaffFeedback(null), 3500);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     if (!selectedCreditAccountId || activeSection !== 'credit_ledger') return;
@@ -380,7 +634,12 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
     icon: React.ElementType;
     badge?: string | number | null;
   }[] = [
-    { id: 'profile', label: isAr ? 'ملفي' : 'My Profile', icon: User },
+    {
+      id: 'profile',
+      label: isAr ? 'ملفي' : 'My Profile',
+      icon: User,
+      badge: nearExpiryCount > 0 ? nearExpiryCount : null
+    },
     {
       id: 'orders',
       label: isAr ? 'الطلبات' : 'Orders',
@@ -418,6 +677,13 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
     { id: 'terms', label: isAr ? 'البنود والشروط' : 'Terms', icon: FileCheck2 },
     { id: 'privacy', label: isAr ? 'الخصوصية' : 'Privacy', icon: ShieldCheck }
   ];
+
+  const visibleNavTabs = useMemo(() => {
+    if (isAccountantUser) {
+      return navTabs.filter((t) => ['profile', 'invoices', 'credit_ledger', 'orders'].includes(t.id));
+    }
+    return navTabs;
+  }, [isAccountantUser, navTabs]);
 
   const wishlistProducts = useMemo(
     () => products.filter((p) => wishlistBarcodes.includes(p.barcode)),
@@ -646,25 +912,35 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
       {/* ================= TOP WORKSPACE HEADER (POS Aesthetic) ================= */}
       <header className="flex flex-wrap items-center justify-between gap-3 pb-1">
         <div className="flex items-center gap-2.5 min-w-0">
-          <button
-            type="button"
-            onClick={onBackToMarketplace}
-            className="min-h-[38px] px-3.5 py-2 rounded-full bg-[#0B5D32] hover:bg-[#084726] text-white text-xs font-black flex items-center gap-1.5 transition shadow-2xs cursor-pointer shrink-0 whitespace-nowrap"
-          >
-            {isAr ? <ArrowRight className="w-4 h-4" /> : <ArrowLeft className="w-4 h-4" />}
-            <span>{isAr ? 'رجوع' : 'Back'}</span>
-          </button>
+          {!isAccountantUser && (
+            <button
+              type="button"
+              onClick={onBackToMarketplace}
+              className="min-h-[38px] px-3.5 py-2 rounded-full bg-[#0B5D32] hover:bg-[#084726] text-white text-xs font-black flex items-center gap-1.5 transition shadow-2xs cursor-pointer shrink-0 whitespace-nowrap"
+            >
+              {isAr ? <ArrowRight className="w-4 h-4" /> : <ArrowLeft className="w-4 h-4" />}
+              <span>{isAr ? 'رجوع' : 'Back'}</span>
+            </button>
+          )}
 
           <div className="w-10 h-10 rounded-2xl bg-white border border-[#DCE5DC] text-[#0B5D32] hidden sm:flex items-center justify-center shrink-0">
-            <Store className="w-5 h-5" />
+            {isAccountantUser ? <Calculator className="w-5 h-5 text-indigo-700" /> : <Store className="w-5 h-5" />}
           </div>
 
           <div className="min-w-0">
             <h1 className="text-base sm:text-lg font-black text-[#0B5D32] leading-tight truncate">
-              {isAr ? 'مركز حساب التاجر والخدمات' : 'Retailer Account & Services'}
+              {isAccountantUser
+                ? isAr
+                  ? 'لوحة المحاسب المالي والفواتير'
+                  : 'Accountant Financial Hub'
+                : isAr
+                ? 'مركز حساب التاجر والخدمات'
+                : 'Retailer Account & Services'}
             </h1>
             <p className="text-[11px] text-[#5F7164] truncate">
-              {userSession.entityName} • {isAr ? currentDistrict.nameAr : currentDistrict.nameEn}
+              {userSession.entityName}
+              {userSession.branchName ? ` • ${userSession.branchName}` : ''} •{' '}
+              {isAr ? currentDistrict.nameAr : currentDistrict.nameEn}
             </p>
           </div>
         </div>
@@ -686,7 +962,7 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
       {/* ================= HORIZONTAL SECTION TABS RAIL ================= */}
       <div className="bg-white rounded-2xl border border-[#DCE5DC] p-1.5 overflow-x-auto no-scrollbar shadow-[0_1px_4px_rgba(11,93,50,0.04)]">
         <div className="flex items-center gap-1.5 min-w-max">
-          {navTabs.map((tab) => {
+          {visibleNavTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeSection === tab.id;
             return (
@@ -731,7 +1007,15 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
               <div className="min-w-0">
                 <span className="inline-flex items-center gap-1 text-[10px] font-black bg-[#EBF4EE] text-[#0B5D32] px-2 py-0.5 rounded-full border border-[#DCE5DC]">
                   <CheckCircle2 className="w-3 h-3" />
-                  <span>{isAr ? 'حساب تاجر تجزئة موثق' : 'Verified Retailer'}</span>
+                  <span>
+                    {isAccountantUser
+                      ? isAr
+                        ? 'حساب محاسب مالي معتمد'
+                        : 'Verified Store Accountant'
+                      : isAr
+                      ? 'حساب تاجر تجزئة موثق'
+                      : 'Verified Retailer'}
+                  </span>
                 </span>
                 <h2 className="text-base font-black text-[#142018] truncate mt-1">
                   {profileEntity}
@@ -749,10 +1033,10 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
               </div>
               <div className="bg-[#F4F4EA] rounded-xl p-3 border border-[#DCE5DC]">
                 <span className="text-[10.5px] text-[#5F7164] block">
-                  {isAr ? 'قائمة الرغبات' : 'Saved Items'}
+                  {isAr ? 'قرب انتهاء الصلاحية' : 'Near Expiry'}
                 </span>
-                <span className="text-base font-black text-[#0B5D32]">
-                  {wishlistBarcodes.length}
+                <span className="text-base font-black text-amber-700">
+                  {nearExpiryCount}
                 </span>
               </div>
               <div className="bg-[#F4F4EA] rounded-xl p-3 border border-[#DCE5DC]">
@@ -765,99 +1049,637 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
               </div>
               <div className="bg-[#F4F4EA] rounded-xl p-3 border border-[#DCE5DC]">
                 <span className="text-[10.5px] text-[#5F7164] block">
-                  {isAr ? 'موردون مفضلون' : 'Saved Suppliers'}
+                  {isAr ? 'قائمة الرغبات' : 'Saved Items'}
                 </span>
-                <span className="text-base font-black text-[#B45309]">
-                  {favoriteSupplierIds.length}
+                <span className="text-base font-black text-[#0B5D32]">
+                  {wishlistBarcodes.length}
                 </span>
               </div>
             </div>
           </div>
 
-          <form
-            onSubmit={handleSaveProfile}
-            className="lg:col-span-2 bg-white rounded-2xl border border-[#DCE5DC] p-4 sm:p-5 space-y-4"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#DCE5DC] pb-3">
-              <div>
-                <h3 className="text-sm font-black text-[#142018]">
-                  {isAr ? 'تعديل البيانات التجارية للمتجر' : 'Edit Commercial Store Profile'}
-                </h3>
-                <p className="text-[11px] text-[#5F7164]">
-                  {isAr
-                    ? 'تظهر هذه البيانات في فواتير الجملة وطلبات فانات التوزيع'
-                    : 'Used on wholesale invoices & van delivery dispatches'}
-                </p>
+          {isStoreOwner ? (
+            <form
+              onSubmit={handleSaveProfile}
+              className="lg:col-span-2 bg-white rounded-2xl border border-[#DCE5DC] p-4 sm:p-5 space-y-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#DCE5DC] pb-3">
+                <div>
+                  <h3 className="text-sm font-black text-[#142018]">
+                    {isAr ? 'تعديل البيانات التجارية للمتجر' : 'Edit Commercial Store Profile'}
+                  </h3>
+                  <p className="text-[11px] text-[#5F7164]">
+                    {isAr
+                      ? 'تظهر هذه البيانات في فواتير الجملة وطلبات فانات التوزيع'
+                      : 'Used on wholesale invoices & van delivery dispatches'}
+                  </p>
+                </div>
+                {profileSavedToast && (
+                  <span className="px-3 py-1 rounded-xl bg-[#EBF4EE] text-[#0B5D32] border border-[#DCE5DC] text-xs font-bold flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{isAr ? 'تم الحفظ بنجاح' : 'Saved'}</span>
+                  </span>
+                )}
               </div>
-              {profileSavedToast && (
-                <span className="px-3 py-1 rounded-xl bg-[#EBF4EE] text-[#0B5D32] border border-[#DCE5DC] text-xs font-bold flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5" />
-                  <span>{isAr ? 'تم الحفظ بنجاح' : 'Saved'}</span>
-                </span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
+                <div className="space-y-1">
+                  <label className="font-bold text-[#3D5244] block">
+                    {isAr ? 'اسم مدير السوبرماركت' : 'Manager Name'}
+                  </label>
+                  <input
+                    type="text"
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    className="w-full min-h-[42px] bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl px-3 py-2 focus:bg-white focus:border-[#0B5D32] outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-[#3D5244] block">
+                    {isAr ? 'اسم المتجر / السوبرماركت' : 'Store Name'}
+                  </label>
+                  <input
+                    type="text"
+                    value={profileEntity}
+                    onChange={(e) => setProfileEntity(e.target.value)}
+                    className="w-full min-h-[42px] bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl px-3 py-2 focus:bg-white focus:border-[#0B5D32] outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-[#3D5244] block">
+                    {isAr ? 'رقم الهاتف لاستلام الفانات' : 'Delivery Contact Phone'}
+                  </label>
+                  <input
+                    type="text"
+                    value={profilePhone}
+                    onChange={(e) => setProfilePhone(e.target.value)}
+                    dir="ltr"
+                    className="w-full min-h-[42px] bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl px-3 py-2 font-mono text-left tabular-nums focus:bg-white focus:border-[#0B5D32] outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-[#3D5244] block">
+                    {isAr ? 'رقم الإجازة التجارية / الضريبي' : 'Trade License / Tax ID'}
+                  </label>
+                  <input
+                    type="text"
+                    value={taxRegNo}
+                    onChange={(e) => setTaxRegNo(e.target.value)}
+                    dir="ltr"
+                    className="w-full min-h-[42px] bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl px-3 py-2 font-mono text-left focus:bg-white focus:border-[#0B5D32] outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="submit"
+                  className="min-h-[42px] px-5 py-2.5 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white text-xs font-black transition shadow-2xs cursor-pointer"
+                >
+                  {isAr ? 'حفظ وتحديث بيانات المتجر' : 'Save Store Profile'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="lg:col-span-2 bg-white rounded-2xl border border-[#DCE5DC] p-4 sm:p-5 space-y-4">
+              <div className="flex items-start gap-3 border-b border-[#DCE5DC] pb-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center justify-center shrink-0">
+                  <Calculator className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-black text-[#142018]">
+                    {isAr ? 'ملف المحاسب المالي ومراقبة المخزون' : 'Accountant Profile & Inventory Controls'}
+                  </h3>
+                  <p className="text-[11px] text-[#5F7164] mt-0.5">
+                    {isAr
+                      ? 'صلاحية مراجعة الفواتير والائتمان ورصد صلاحية المخزون وتحويله للعروض التجارية'
+                      : 'Access to invoices, credit ledgers, expiry monitoring, and offer conversions'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl p-3">
+                  <span className="text-[10.5px] text-[#5F7164] block">{isAr ? 'الاسم المسجل' : 'Staff Name'}</span>
+                  <strong className="text-[#142018] font-black block mt-0.5">{userSession.name}</strong>
+                </div>
+                <div className="bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl p-3">
+                  <span className="text-[10.5px] text-[#5F7164] block">{isAr ? 'المتجر والفرع' : 'Store & Branch'}</span>
+                  <strong className="text-[#142018] font-black block mt-0.5">
+                    {userSession.entityName}
+                    {userSession.branchName ? ` • ${userSession.branchName}` : ''}
+                  </strong>
+                </div>
+                <div className="bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl p-3">
+                  <span className="text-[10.5px] text-[#5F7164] block">{isAr ? 'نطاق الصلاحيات' : 'Permissions'}</span>
+                  <strong className="text-[#0B5D32] font-black block mt-0.5">
+                    {isAr ? 'محاسبة + تنبيهات الصلاحية والعروض' : 'Accounting + Expiry Offers'}
+                  </strong>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Near-Expiry Inventory Alerts & Offer Conversion Card directly inside My Profile (ملفي) */}
+          <div className="lg:col-span-3">
+            <NearExpiryAlertsCard
+              modeContext="accountant_profile"
+              storeId={activeStoreId}
+              authToken={authToken}
+              currency={currency}
+              language={language}
+              onCountChange={setNearExpiryCount}
+              onConverted={async () => {
+                await onRefreshProducts?.();
+              }}
+              onOpenRetailPromotions={onOpenStoreManagement}
+              onOpenWholesaleDeals={onOpenCollectiveDeals}
+            />
+          </div>
+
+          {/* Store Staff Accounts Card (Cashier & Accountant) directly inside My Profile */}
+          {isStoreOwner && (
+            <div
+              data-testid="staff-accounts-card"
+              className="lg:col-span-3 bg-white rounded-2xl border border-[#DCE5DC] p-4 sm:p-5 space-y-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#DCE5DC] pb-3.5">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-[#EBF4EE] border border-[#CBE0D0] text-[#0B5D32] flex items-center justify-center shrink-0">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-sm sm:text-base font-black text-[#142018]">
+                      {isAr
+                        ? 'إدارة حسابات الفريق (الكاشير والمحاسب)'
+                        : 'Team Access Accounts (Cashier & Accountant)'}
+                    </h3>
+                    <p className="text-[11px] text-[#5F7164] mt-0.5">
+                      {isAr
+                        ? 'أنشئ حسابات مقيدة لموظفي الصندوق والمحاسبة وحدد الفرع والصلاحية لكل موظف'
+                        : 'Create restricted staff logins for store cashiers and accountants per branch'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {staffList.length > 0 && (
+                    <div className="hidden sm:flex items-center gap-1.5 text-[11px] font-bold text-[#5F7164] bg-[#F4F4EA] border border-[#DCE5DC] px-2.5 py-1.5 rounded-xl tabular-nums">
+                      <span>
+                        {isAr ? 'كاشير:' : 'Cashiers:'}{' '}
+                        <strong className="text-[#0F766E]">
+                          {staffList.filter((s) => s.role === 'cashier').length}
+                        </strong>
+                      </span>
+                      <span className="text-[#CBD5E1]">|</span>
+                      <span>
+                        {isAr ? 'محاسب:' : 'Accountants:'}{' '}
+                        <strong className="text-indigo-700">
+                          {staffList.filter((s) => s.role === 'accountant').length}
+                        </strong>
+                      </span>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    data-testid="add-staff-btn"
+                    onClick={() => {
+                      if (isStaffFormOpen) {
+                        setIsStaffFormOpen(false);
+                        resetStaffForm();
+                      } else {
+                        openNewStaffForm();
+                      }
+                    }}
+                    className="min-h-[38px] px-3.5 py-2 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white text-xs font-black flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
+                  >
+                    {isStaffFormOpen ? <X className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+                    <span>
+                      {isStaffFormOpen
+                        ? isAr
+                          ? 'إلغاء'
+                          : 'Cancel'
+                        : isAr
+                        ? 'إضافة كاشير / محاسب'
+                        : 'Add Staff Account'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {staffFeedback && (
+                <div
+                  data-testid="staff-feedback-banner"
+                  className="p-3 rounded-xl bg-[#EBF4EE] border border-[#CBE0D0] text-[#0B5D32] text-xs font-bold flex items-center justify-between gap-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{staffFeedback}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setStaffFeedback(null)}
+                    className="text-[#5F7164] hover:text-[#142018] cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               )}
+
+              {/* Add / Edit Staff Form */}
+              {isStaffFormOpen && (
+                <form
+                  onSubmit={handleSubmitStaff}
+                  data-testid="staff-account-form"
+                  className="bg-[#F4F4EA]/70 border border-[#DCE5DC] rounded-2xl p-4 space-y-4 text-xs"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="font-black text-sm text-[#142018]">
+                      {editingStaffId
+                        ? isAr
+                          ? 'تعديل بيانات وصلاحيات الموظف'
+                          : 'Edit Staff Account'
+                        : isAr
+                        ? 'إنشاء حساب موظف جديد'
+                        : 'Create New Staff Account'}
+                    </h4>
+                  </div>
+
+                  {staffError && (
+                    <div
+                      data-testid="staff-form-error"
+                      className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 font-bold flex items-center gap-2"
+                    >
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{staffError}</span>
+                    </div>
+                  )}
+
+                  {/* Role Picker Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      data-testid="staff-role-cashier"
+                      onClick={() => setStaffRole('cashier')}
+                      className={`p-3 rounded-xl border text-start transition cursor-pointer flex items-start gap-2.5 ${
+                        staffRole === 'cashier'
+                          ? 'bg-teal-50 border-[#0F766E] ring-2 ring-[#0F766E]/20'
+                          : 'bg-white border-[#DCE5DC] hover:border-[#0B5D32]/50'
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-teal-100 text-[#0F766E] flex items-center justify-center shrink-0">
+                        <UserCheck className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-black text-[#142018]">
+                          {isAr ? 'موظف كاشير / أمين صندوق' : 'Store Cashier (POS)'}
+                        </div>
+                        <p className="text-[11px] text-[#5F7164] mt-0.5 leading-snug">
+                          {isAr
+                            ? 'نقطة البيع (POS) ومسح الباركود وجرد الرفوف فقط — بدون أسعار الجملة أو الائتمان.'
+                            : 'POS checkout, barcode & shelf counts only. Wholesale prices & credit hidden.'}
+                        </p>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="staff-role-accountant"
+                      onClick={() => setStaffRole('accountant')}
+                      className={`p-3 rounded-xl border text-start transition cursor-pointer flex items-start gap-2.5 ${
+                        staffRole === 'accountant'
+                          ? 'bg-indigo-50 border-indigo-600 ring-2 ring-indigo-600/20'
+                          : 'bg-white border-[#DCE5DC] hover:border-[#0B5D32]/50'
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                        <Calculator className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-black text-[#142018]">
+                          {isAr ? 'محاسب مالي' : 'Financial Accountant'}
+                        </div>
+                        <p className="text-[11px] text-[#5F7164] mt-0.5 leading-snug">
+                          {isAr
+                            ? 'سجل الفواتير، دفتر الائتمان والمدفوعات، ومراجعة الطلبيات فقط — بدون صلاحية الشراء أو الحذف.'
+                            : 'Invoices, credit ledger & order review only. No purchasing or store deletion.'}
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="font-bold text-[#3D5244] block">
+                        {isAr ? 'اسم الموظف الكامل *' : 'Employee Full Name *'}
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        data-testid="staff-name-input"
+                        value={staffName}
+                        onChange={(e) => setStaffName(e.target.value)}
+                        placeholder={isAr ? 'مثال: سيف الدين قاسم' : 'e.g. Saif Al-Deen'}
+                        className="w-full min-h-[40px] bg-white border border-[#DCE5DC] rounded-xl px-3 py-2 focus:border-[#0B5D32] outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="font-bold text-[#3D5244] block">
+                        {isAr ? 'الفرع المخصص *' : 'Assigned Branch *'}
+                      </label>
+                      <select
+                        data-testid="staff-branch-select"
+                        value={staffBranchId}
+                        onChange={(e) => setStaffBranchId(e.target.value)}
+                        className="w-full min-h-[40px] bg-white border border-[#DCE5DC] rounded-xl px-3 py-2 focus:border-[#0B5D32] outline-none"
+                      >
+                        {branchOptions.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="font-bold text-[#3D5244] block">
+                        {isAr ? 'رقم الهاتف (لتسجيل الدخول) *' : 'Login Phone Number *'}
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        dir="ltr"
+                        data-testid="staff-phone-input"
+                        value={staffPhone}
+                        onChange={(e) => setStaffPhone(e.target.value)}
+                        placeholder="0771 555 0010"
+                        className="w-full min-h-[40px] bg-white border border-[#DCE5DC] rounded-xl px-3 py-2 font-mono text-left tabular-nums focus:border-[#0B5D32] outline-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="font-bold text-[#3D5244] block">
+                        {editingStaffId
+                          ? isAr
+                            ? 'كلمة مرور جديدة (اختياري)'
+                            : 'New Password (Optional)'
+                          : isAr
+                          ? 'كلمة المرور / رمز الدخول *'
+                          : 'Password / Access PIN *'}
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showStaffPassword ? 'text' : 'password'}
+                          required={!editingStaffId}
+                          dir="ltr"
+                          data-testid="staff-password-input"
+                          value={staffPassword}
+                          onChange={(e) => setStaffPassword(e.target.value)}
+                          placeholder={editingStaffId ? '••••••' : isAr ? '4 أحرف أو أرقام على الأقل' : 'Min 4 chars'}
+                          className="w-full min-h-[40px] bg-white border border-[#DCE5DC] rounded-xl px-3 py-2 pl-9 font-mono text-left focus:border-[#0B5D32] outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowStaffPassword((v) => !v)}
+                          className="absolute left-2.5 top-2.5 text-[#5F7164] hover:text-[#142018] cursor-pointer"
+                          aria-label={showStaffPassword ? 'Hide password' : 'Show password'}
+                        >
+                          {showStaffPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsStaffFormOpen(false);
+                        resetStaffForm();
+                      }}
+                      className="min-h-[38px] px-4 py-2 rounded-xl bg-white border border-[#DCE5DC] text-[#3D5244] font-bold cursor-pointer"
+                    >
+                      {isAr ? 'إلغاء' : 'Cancel'}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={submittingStaff}
+                      data-testid="staff-submit-btn"
+                      className="min-h-[38px] px-5 py-2 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white font-black transition cursor-pointer disabled:opacity-60"
+                    >
+                      {submittingStaff
+                        ? isAr
+                          ? 'جارٍ الحفظ...'
+                          : 'Saving...'
+                        : editingStaffId
+                        ? isAr
+                          ? 'حفظ التعديلات'
+                          : 'Save Changes'
+                        : isAr
+                        ? 'إنشاء الحساب'
+                        : 'Create Account'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Staff List */}
+              {loadingStaff ? (
+                <div className="py-6 text-center text-xs text-[#5F7164]">
+                  {isAr ? 'جارٍ تحميل حسابات الفريق...' : 'Loading staff accounts...'}
+                </div>
+              ) : staffList.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-[#DCE5DC] bg-[#F4F4EA]/50 p-5 text-center space-y-2">
+                  <Users className="w-8 h-8 text-[#9CA3AF] mx-auto" />
+                  <div className="text-xs font-black text-[#142018]">
+                    {isAr
+                      ? 'لا توجد حسابات كاشير أو محاسب مضافة بعد'
+                      : 'No cashier or accountant accounts yet'}
+                  </div>
+                  <p className="text-[11px] text-[#5F7164] max-w-md mx-auto">
+                    {isAr
+                      ? 'أضف حساب كاشير لموظف الصندوق أو محاسب لمراجعة الفواتير ودفتر الائتمان، مع فصل تام عن صلاحياتك كمالك للمتجر.'
+                      : 'Add a cashier for POS sales or an accountant for invoices & ledgers with strict role isolation.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {staffList.map((member) => {
+                    const isCashier = member.role === 'cashier';
+                    const isDeleting = confirmDeleteStaffId === member.id;
+                    return (
+                      <div
+                        key={member.id}
+                        data-testid={`staff-card-${member.id}`}
+                        className={`rounded-xl border p-3.5 space-y-3 transition ${
+                          member.isActive
+                            ? 'bg-[#FAFDFB] border-[#DCE5DC]'
+                            : 'bg-gray-50/80 border-gray-200 opacity-85'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div
+                              className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                                isCashier
+                                  ? 'bg-teal-100 text-[#0F766E]'
+                                  : 'bg-indigo-100 text-indigo-700'
+                              }`}
+                            >
+                              {isCashier ? (
+                                <UserCheck className="w-5 h-5" />
+                              ) : (
+                                <Calculator className="w-5 h-5" />
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-black text-xs sm:text-sm text-[#142018] truncate">
+                                  {member.name}
+                                </span>
+                                <span
+                                  className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                                    isCashier
+                                      ? 'bg-teal-50 text-[#0F766E] border-teal-200'
+                                      : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                  }`}
+                                >
+                                  {isCashier
+                                    ? isAr
+                                      ? 'كاشير POS'
+                                      : 'Cashier'
+                                    : isAr
+                                    ? 'محاسب مالي'
+                                    : 'Accountant'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[11px] text-[#5F7164] mt-0.5 flex-wrap">
+                                <span className="font-mono tabular-nums" dir="ltr">
+                                  {member.phone}
+                                </span>
+                                <span>•</span>
+                                <span className="truncate">{member.branchName}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <span
+                            className={`text-[10px] font-black px-2 py-0.5 rounded-full shrink-0 border ${
+                              member.isActive
+                                ? 'bg-[#EBF4EE] text-[#0B5D32] border-[#CBE0D0]'
+                                : 'bg-red-50 text-red-700 border-red-200'
+                            }`}
+                          >
+                            {member.isActive
+                              ? isAr
+                                ? 'نشط'
+                                : 'Active'
+                              : isAr
+                              ? 'موقوف'
+                              : 'Suspended'}
+                          </span>
+                        </div>
+
+                        <div className="text-[11px] text-[#5F7164] bg-white border border-[#E5E7EB] rounded-lg px-2.5 py-1.5">
+                          {isCashier
+                            ? isAr
+                              ? 'الصلاحية: شاشة الكاشير (POS) والبيع المباشر وجرد الرفوف فقط'
+                              : 'Access: POS checkout & shelf stock counts only'
+                            : isAr
+                            ? 'الصلاحية: سجل الفواتير، دفتر الائتمان، ومراجعة الطلبيات فقط'
+                            : 'Access: Invoices, credit ledger & order review only'}
+                        </div>
+
+                        {isDeleting ? (
+                          <div className="flex items-center justify-between gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-[11px]">
+                            <span className="font-bold text-red-800">
+                              {isAr ? 'تأكيد حذف الحساب؟' : 'Confirm delete?'}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                data-testid={`staff-confirm-delete-${member.id}`}
+                                onClick={() => handleDeleteStaff(member.id)}
+                                className="px-2.5 py-1 rounded-lg bg-red-600 text-white font-black cursor-pointer"
+                              >
+                                {isAr ? 'حذف' : 'Delete'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteStaffId(null)}
+                                className="px-2.5 py-1 rounded-lg bg-white border border-gray-200 text-gray-700 font-bold cursor-pointer"
+                              >
+                                {isAr ? 'إلغاء' : 'Cancel'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-[#E5E7EB] text-[11px]">
+                            <button
+                              type="button"
+                              disabled={togglingStaffId === member.id}
+                              data-testid={`staff-toggle-${member.id}`}
+                              onClick={() => handleToggleStaffActive(member)}
+                              className={`px-2.5 py-1.5 rounded-lg border font-bold flex items-center gap-1 transition cursor-pointer ${
+                                member.isActive
+                                  ? 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
+                                  : 'bg-[#EBF4EE] border-[#CBE0D0] text-[#0B5D32] hover:bg-[#DCFCE7]'
+                              }`}
+                            >
+                              {member.isActive ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                              <span>
+                                {member.isActive
+                                  ? isAr
+                                    ? 'إيقاف مؤقت'
+                                    : 'Suspend'
+                                  : isAr
+                                  ? 'تفعيل'
+                                  : 'Activate'}
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              data-testid={`staff-edit-${member.id}`}
+                              onClick={() => openEditStaffForm(member)}
+                              className="px-2.5 py-1.5 rounded-lg border border-[#DCE5DC] bg-white hover:bg-[#F4F4EA] text-[#142018] font-bold flex items-center gap-1 transition cursor-pointer"
+                            >
+                              <Edit3 className="w-3 h-3" />
+                              <span>{isAr ? 'تعديل' : 'Edit'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              data-testid={`staff-delete-${member.id}`}
+                              onClick={() => setConfirmDeleteStaffId(member.id)}
+                              className="px-2.5 py-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50 text-red-700 font-bold flex items-center gap-1 transition cursor-pointer"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>{isAr ? 'حذف' : 'Delete'}</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="text-[11px] text-[#5F7164] bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl px-3 py-2 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-[#0B5D32] shrink-0" />
+                <span>
+                  {isAr
+                    ? 'يمكن للموظف تسجيل الدخول من البوابة الرئيسية باختيار نوع حسابه (كاشير أو محاسب) وإدخال رقم هاتفه وكلمة المرور.'
+                    : 'Staff members can sign in from the login portal by choosing Cashier or Accountant and entering their phone and password.'}
+                </span>
+              </div>
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
-              <div className="space-y-1">
-                <label className="font-bold text-[#3D5244] block">
-                  {isAr ? 'اسم مدير السوبرماركت' : 'Manager Name'}
-                </label>
-                <input
-                  type="text"
-                  value={profileName}
-                  onChange={(e) => setProfileName(e.target.value)}
-                  className="w-full min-h-[42px] bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl px-3 py-2 focus:bg-white focus:border-[#0B5D32] outline-none"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold text-[#3D5244] block">
-                  {isAr ? 'اسم المتجر / السوبرماركت' : 'Store Name'}
-                </label>
-                <input
-                  type="text"
-                  value={profileEntity}
-                  onChange={(e) => setProfileEntity(e.target.value)}
-                  className="w-full min-h-[42px] bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl px-3 py-2 focus:bg-white focus:border-[#0B5D32] outline-none"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold text-[#3D5244] block">
-                  {isAr ? 'رقم الهاتف لاستلام الفانات' : 'Delivery Contact Phone'}
-                </label>
-                <input
-                  type="text"
-                  value={profilePhone}
-                  onChange={(e) => setProfilePhone(e.target.value)}
-                  dir="ltr"
-                  className="w-full min-h-[42px] bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl px-3 py-2 font-mono text-left tabular-nums focus:bg-white focus:border-[#0B5D32] outline-none"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold text-[#3D5244] block">
-                  {isAr ? 'رقم الإجازة التجارية / الضريبي' : 'Trade License / Tax ID'}
-                </label>
-                <input
-                  type="text"
-                  value={taxRegNo}
-                  onChange={(e) => setTaxRegNo(e.target.value)}
-                  dir="ltr"
-                  className="w-full min-h-[42px] bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl px-3 py-2 font-mono text-left focus:bg-white focus:border-[#0B5D32] outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="pt-2 flex justify-end">
-              <button
-                type="submit"
-                className="min-h-[42px] px-5 py-2.5 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white text-xs font-black transition shadow-2xs cursor-pointer"
-              >
-                {isAr ? 'حفظ وتحديث بيانات المتجر' : 'Save Store Profile'}
-              </button>
-            </div>
-          </form>
+          )}
         </div>
       )}
 
@@ -989,58 +1811,60 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
                         </span>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setRatingOrderTarget({
-                              supplierId: matchedSupplier?.id || order.supplierId,
-                              supplierName: matchedSupplier
-                                ? isAr
-                                  ? matchedSupplier.nameAr
-                                  : matchedSupplier.nameEn
-                                : getLocalizedText(order.supplierName, language),
-                              orderId: order.id
-                            })
-                          }
-                          className="min-h-[36px] px-3 py-1.5 rounded-xl border border-[#FDE047] bg-[#FEF9C3] hover:bg-[#FEF08A] text-[#854D0E] text-[11px] font-black flex items-center gap-1 cursor-pointer transition"
-                        >
-                          <Star className="w-3.5 h-3.5 fill-[#EAB308] text-[#CA8A04]" />
-                          <span>{isAr ? 'تقييم المورد' : 'Rate Supplier'}</span>
-                        </button>
-
-                        {matchedSupplier && (
+                      {!isAccountantUser && (
+                        <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => onOpenSupplierStore(matchedSupplier)}
-                            className="min-h-[36px] px-3 py-1.5 rounded-xl border border-[#DCE5DC] bg-white hover:border-[#0B5D32] text-[#142018] text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                            onClick={() =>
+                              setRatingOrderTarget({
+                                supplierId: matchedSupplier?.id || order.supplierId,
+                                supplierName: matchedSupplier
+                                  ? isAr
+                                    ? matchedSupplier.nameAr
+                                    : matchedSupplier.nameEn
+                                  : getLocalizedText(order.supplierName, language),
+                                orderId: order.id
+                              })
+                            }
+                            className="min-h-[36px] px-3 py-1.5 rounded-xl border border-[#FDE047] bg-[#FEF9C3] hover:bg-[#FEF08A] text-[#854D0E] text-[11px] font-black flex items-center gap-1 cursor-pointer transition"
                           >
-                            <Store className="w-3.5 h-3.5 text-[#0B5D32]" />
-                            <span>{isAr ? 'متجر المورد' : 'Supplier Store'}</span>
+                            <Star className="w-3.5 h-3.5 fill-[#EAB308] text-[#CA8A04]" />
+                            <span>{isAr ? 'تقييم المورد' : 'Rate Supplier'}</span>
                           </button>
-                        )}
 
-                        <button
-                          type="button"
-                          onClick={() => handleReorder(order)}
-                          className={`min-h-[36px] px-3 py-1.5 rounded-xl text-white text-[11px] font-black flex items-center gap-1 cursor-pointer transition ${
-                            reorderedOrderId === order.id
-                              ? 'bg-[#084726]'
-                              : 'bg-[#0B5D32] hover:bg-[#084726]'
-                          }`}
-                        >
-                          <ShoppingCart className="w-3.5 h-3.5" />
-                          <span>
-                            {reorderedOrderId === order.id
-                              ? isAr
-                                ? 'أضيف للسلة'
-                                : 'Added'
-                              : isAr
-                              ? 'إعادة الطلب للسلة'
-                              : 'Reorder to Cart'}
-                          </span>
-                        </button>
-                      </div>
+                          {matchedSupplier && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenSupplierStore(matchedSupplier)}
+                              className="min-h-[36px] px-3 py-1.5 rounded-xl border border-[#DCE5DC] bg-white hover:border-[#0B5D32] text-[#142018] text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Store className="w-3.5 h-3.5 text-[#0B5D32]" />
+                              <span>{isAr ? 'متجر المورد' : 'Supplier Store'}</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleReorder(order)}
+                            className={`min-h-[36px] px-3 py-1.5 rounded-xl text-white text-[11px] font-black flex items-center gap-1 cursor-pointer transition ${
+                              reorderedOrderId === order.id
+                                ? 'bg-[#084726]'
+                                : 'bg-[#0B5D32] hover:bg-[#084726]'
+                            }`}
+                          >
+                            <ShoppingCart className="w-3.5 h-3.5" />
+                            <span>
+                              {reorderedOrderId === order.id
+                                ? isAr
+                                  ? 'أضيف للسلة'
+                                  : 'Added'
+                                : isAr
+                                ? 'إعادة الطلب للسلة'
+                                : 'Reorder to Cart'}
+                            </span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -1055,6 +1879,7 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
         <RetailerInvoicesView
           creditAccounts={storeCreditAccounts}
           orders={orders}
+          products={products}
           currency={currency}
           language={language}
           storeName={userSession.entityName}
@@ -1145,15 +1970,17 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
                   <span>{isAr ? 'سجل المعاملات وتاريخ السداد' : 'Payment & Transactions Ledger'}</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={openCreditUpgradeModal}
-                  disabled={!selectedCreditAccount}
-                  className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white text-xs font-black cursor-pointer whitespace-nowrap flex items-center gap-1.5 disabled:opacity-50"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-[#FDE047]" />
-                  <span>{isAr ? 'مراجعة ورفع السقف عبر المنصة' : 'Platform Limit Review'}</span>
-                </button>
+                {!isAccountantUser && (
+                  <button
+                    type="button"
+                    onClick={openCreditUpgradeModal}
+                    disabled={!selectedCreditAccount}
+                    className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white text-xs font-black cursor-pointer whitespace-nowrap flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-[#FDE047]" />
+                    <span>{isAr ? 'مراجعة ورفع السقف عبر المنصة' : 'Platform Limit Review'}</span>
+                  </button>
+                )}
               </div>
             </div>
 

@@ -17,7 +17,11 @@ import {
   District,
   Area,
   DeliveryZone,
-  Brand
+  Brand,
+  SupplierInventoryBatch,
+  VanExpenseRecord,
+  VanReturnRecord,
+  ShiftCloseReport
 } from './types.ts';
 import { buildBranchProductsAndOffers } from './branchProductsSeed.ts';
 
@@ -1444,7 +1448,20 @@ export const initialDrivers: DriverProfile[] = [
     commissionRatePercent: 1.5,
     todayCashSalesIQD: 950000,
     todayCreditSalesIQD: 420000,
-    todayDebtCollectedIQD: 500000
+    todayDebtCollectedIQD: 500000,
+    todayExpensesIQD: 45000,
+    availabilityStatus: 'available',
+    odometerStartKm: 118420,
+    odometerEndKm: 118468,
+    fuelLevelPercent: 78,
+    chillerTempC: 4.2,
+    inspectionChecklist: {
+      tiresOk: true,
+      chillerOk: true,
+      lightsOk: true,
+      hygieneOk: true,
+      checkedAt: '2026-11-24T07:15:00Z'
+    }
   },
   {
     id: 'drv_mustafa_karkh',
@@ -1496,7 +1513,11 @@ export const initialVanInventory: VanInventoryItem[] = [
     returnedQuantity: 0,
     damagedQuantity: 0,
     remainingQuantity: 22,
-    unitPriceIQD: 28500
+    unitPriceIQD: 28500,
+    batchNumber: 'LOT-RICE-2611',
+    expiryDate: '2027-08-15',
+    bulkDiscountMinQty: 5,
+    bulkUnitPriceIQD: 27000
   },
   {
     id: 'van_inv_2',
@@ -1509,7 +1530,11 @@ export const initialVanInventory: VanInventoryItem[] = [
     returnedQuantity: 1,
     damagedQuantity: 0,
     remainingQuantity: 24,
-    unitPriceIQD: 36000
+    unitPriceIQD: 36000,
+    batchNumber: 'LOT-OIL-2604',
+    expiryDate: '2026-12-18',
+    bulkDiscountMinQty: 5,
+    bulkUnitPriceIQD: 34250
   },
   {
     id: 'van_inv_3',
@@ -1522,7 +1547,11 @@ export const initialVanInventory: VanInventoryItem[] = [
     returnedQuantity: 0,
     damagedQuantity: 1,
     remainingQuantity: 14,
-    unitPriceIQD: 44000
+    unitPriceIQD: 44000,
+    batchNumber: 'LOT-SUG-2609',
+    expiryDate: '2027-11-30',
+    bulkDiscountMinQty: 4,
+    bulkUnitPriceIQD: 42000
   },
   {
     id: 'van_inv_4',
@@ -1535,7 +1564,11 @@ export const initialVanInventory: VanInventoryItem[] = [
     returnedQuantity: 0,
     damagedQuantity: 0,
     remainingQuantity: 28,
-    unitPriceIQD: 18500
+    unitPriceIQD: 18500,
+    batchNumber: 'LOT-PAS-2607',
+    expiryDate: '2026-12-22',
+    bulkDiscountMinQty: 6,
+    bulkUnitPriceIQD: 17500
   },
   {
     id: 'van_inv_5',
@@ -1819,7 +1852,7 @@ export const initialStoreInventory: StoreInventoryItem[] = [
     reorderLevel: 10,
     costPriceIQD: 36000,
     retailSellingPriceIQD: 42000,
-    expiryDate: '2027-02-15',
+    expiryDate: '2027-01-12',
     isNearExpiry: false,
     isLowStock: false,
     monthlyAverageSales: 50
@@ -1835,7 +1868,7 @@ export const initialStoreInventory: StoreInventoryItem[] = [
     reorderLevel: 5,
     costPriceIQD: 64000,
     retailSellingPriceIQD: 74000,
-    expiryDate: '2026-11-20', // Near expiry alert!
+    expiryDate: '2026-12-06', // Near expiry within 1 month!
     isNearExpiry: true,
     isLowStock: false,
     monthlyAverageSales: 22
@@ -1899,8 +1932,8 @@ export const initialStoreInventory: StoreInventoryItem[] = [
     reorderLevel: 5,
     costPriceIQD: 53000,
     retailSellingPriceIQD: 62000,
-    expiryDate: '2027-06-18',
-    isNearExpiry: false,
+    expiryDate: '2026-12-16',
+    isNearExpiry: true,
     isLowStock: false,
     monthlyAverageSales: 20
   },
@@ -1915,7 +1948,7 @@ export const initialStoreInventory: StoreInventoryItem[] = [
     reorderLevel: 8,
     costPriceIQD: 18500,
     retailSellingPriceIQD: 23000,
-    expiryDate: '2028-03-14',
+    expiryDate: '2027-01-25',
     isNearExpiry: false,
     isLowStock: false,
     monthlyAverageSales: 44
@@ -1947,8 +1980,8 @@ export const initialStoreInventory: StoreInventoryItem[] = [
     reorderLevel: 6,
     costPriceIQD: 32000,
     retailSellingPriceIQD: 38500,
-    expiryDate: '2027-11-30',
-    isNearExpiry: false,
+    expiryDate: '2026-12-22',
+    isNearExpiry: true,
     isLowStock: false,
     monthlyAverageSales: 30
   },
@@ -2190,3 +2223,162 @@ export const initialStorePOSSales = [
     createdAt: '2026-11-15T14:20:00Z'
   }
 ];
+
+export const initialSupplierInventoryBatches: SupplierInventoryBatch[] = [
+  {
+    id: 'sup_batch_raf_1',
+    supplierId: 'supp_rafidain',
+    barcode: '6281001234501',
+    productName: 'حليب بودرة كامل الدسم فوري (دفعة مستودع الشورجة)',
+    category: 'ألبان وبيض',
+    unit: 'كرتون (24 × 400 غرام)',
+    stockQuantity: 65,
+    costPriceIQD: 56000,
+    wholesalePriceIQD: 64000,
+    expiryDate: '2026-12-08',
+    batchCode: 'BATCH-RAF-2601'
+  },
+  {
+    id: 'sup_batch_raf_2',
+    supplierId: 'supp_rafidain',
+    barcode: '5201002345678',
+    productName: 'معجون طماطم تركي مركز لونا',
+    category: 'معلبات وأغذية محفوظة',
+    unit: 'كرتون (48 × 800 غرام)',
+    stockQuantity: 42,
+    costPriceIQD: 37000,
+    wholesalePriceIQD: 42000,
+    expiryDate: '2026-12-15',
+    batchCode: 'BATCH-RAF-2602'
+  },
+  {
+    id: 'sup_batch_raf_3',
+    supplierId: 'supp_rafidain',
+    barcode: '6281005551234',
+    productName: 'معكرونة إسباغيتي قمح صلب',
+    category: 'مواد غذائية أساسية',
+    unit: 'كرتون (20 × 500 غرام)',
+    stockQuantity: 110,
+    costPriceIQD: 15500,
+    wholesalePriceIQD: 18500,
+    expiryDate: '2026-12-21',
+    batchCode: 'BATCH-RAF-2603'
+  },
+  {
+    id: 'sup_batch_raf_4',
+    supplierId: 'supp_rafidain',
+    barcode: '6210001234567',
+    productName: 'زيت دوار الشمس النقي مكرر عافية',
+    category: 'زيوت وسمن ودهون',
+    unit: 'كرتون (12 × 1 لتر)',
+    stockQuantity: 85,
+    costPriceIQD: 32500,
+    wholesalePriceIQD: 36000,
+    expiryDate: '2027-01-10',
+    batchCode: 'BATCH-RAF-2604'
+  },
+  {
+    id: 'sup_batch_raf_5',
+    supplierId: 'supp_rafidain',
+    barcode: '6281008765432',
+    productName: 'سكر أبيض نقي مكرر عالي النقاوة',
+    category: 'مواد غذائية أساسية',
+    unit: 'شوال (50 كغم)',
+    stockQuantity: 54,
+    costPriceIQD: 39000,
+    wholesalePriceIQD: 44000,
+    expiryDate: '2027-01-24',
+    batchCode: 'BATCH-RAF-2605'
+  }
+];
+
+export const initialVanExpenses: VanExpenseRecord[] = [
+  {
+    id: 'vexp_1',
+    driverId: 'drv_ahmed_baghdad',
+    supplierId: 'supp_rafidain',
+    category: 'fuel',
+    description: 'تعبئة وقود ديزل للفان — محطة المنصور',
+    amountIQD: 30000,
+    receiptRef: 'FUEL-8821',
+    createdAt: '2026-11-24T07:50:00Z'
+  },
+  {
+    id: 'vexp_2',
+    driverId: 'drv_ahmed_baghdad',
+    supplierId: 'supp_rafidain',
+    category: 'loading_labor',
+    description: 'أجور عمال تنزيل دفعة الأرز والسكر',
+    amountIQD: 15000,
+    receiptRef: 'LAB-104',
+    createdAt: '2026-11-24T08:55:00Z'
+  }
+];
+
+export const initialVanReturns: VanReturnRecord[] = [
+  {
+    id: 'vret_1',
+    rmaNumber: 'RMA-2026-401',
+    driverId: 'drv_ahmed_baghdad',
+    supplierId: 'supp_rafidain',
+    storeId: 'store_almansoor',
+    storeName: 'سوبرماركت المنصور المركزي',
+    barcode: '6210001234567',
+    productName: 'زيت دوار الشمس النقي مكرر',
+    unit: 'كرتون (12 × 1 لتر)',
+    quantity: 1,
+    unitPriceIQD: 36000,
+    creditNoteAmountIQD: 36000,
+    type: 'return',
+    batchNumber: 'LOT-OIL-2604',
+    expiryDate: '2026-12-18',
+    reason: 'زيادة طلب عند الزبون — عبوة سليمة أُعيدت لمخزون الفان',
+    createdAt: '2026-11-24T09:10:00Z'
+  },
+  {
+    id: 'vret_2',
+    rmaNumber: 'RMA-2026-402',
+    driverId: 'drv_ahmed_baghdad',
+    supplierId: 'supp_rafidain',
+    storeId: 'store_karrada',
+    storeName: 'أسواق دجلة الخير - الكرادة',
+    barcode: '6281008765432',
+    productName: 'سكر أبيض نقي مكرر',
+    unit: 'شوال (50 كغم)',
+    quantity: 1,
+    unitPriceIQD: 44000,
+    creditNoteAmountIQD: 44000,
+    type: 'damage',
+    batchNumber: 'LOT-SUG-2609',
+    expiryDate: '2027-11-30',
+    reason: 'تمزق في الشوال أثناء المناولة — تم عزله عن البيع',
+    createdAt: '2026-11-24T10:25:00Z'
+  }
+];
+
+export const initialShiftReports: ShiftCloseReport[] = [
+  {
+    id: 'SHIFT-20261123-01',
+    driverId: 'drv_ahmed_baghdad',
+    driverName: 'أحمد كاظم البغدادي',
+    supplierId: 'supp_rafidain',
+    date: '2026-11-23T18:10:00Z',
+    expectedCashIQD: 1840000,
+    actualCashIQD: 1840000,
+    cashVarianceIQD: 0,
+    totalOrdersDelivered: 4,
+    totalDirectVanSales: 72,
+    returnsCount: 1,
+    totalExpensesIQD: 35000,
+    totalCreditSalesIQD: 540000,
+    totalDebtCollectedIQD: 650000,
+    odometerStartKm: 118340,
+    odometerEndKm: 118420,
+    strikeRatePercent: 85,
+    notes: 'مطابقة تامة للصندوق واعتماد المحاسب',
+    status: 'settled',
+    settledAt: '2026-11-23T18:45:00Z'
+  }
+];
+
+

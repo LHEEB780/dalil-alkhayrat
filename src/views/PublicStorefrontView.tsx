@@ -37,7 +37,8 @@ import {
   ChevronDown,
   ChevronUp,
   FileText,
-  ShoppingCart
+  ShoppingCart,
+  Maximize2
 } from 'lucide-react';
 import { Currency, Language } from '../types/index.ts';
 import { formatCurrency } from '../utils/format.ts';
@@ -400,6 +401,7 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
   const [isDetailInfoExpanded, setIsDetailInfoExpanded] = useState(false);
   const [detailQty, setDetailQty] = useState(1);
   const [detailAddedToast, setDetailAddedToast] = useState(false);
+  const [isDetailLightboxOpen, setIsDetailLightboxOpen] = useState(false);
   const detailTouchStartXRef = React.useRef<number | null>(null);
 
   // In-app chat messages
@@ -598,6 +600,7 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
     setSelectedDetailProduct(product);
     setDetailSlideIndex(0);
     setIsDetailInfoExpanded(false);
+    setIsDetailLightboxOpen(false);
     const existingQty = getProductCartQty(product.barcode);
     setDetailQty(existingQty > 0 ? existingQty : 1);
     setDetailAddedToast(false);
@@ -1265,6 +1268,16 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
                       {cleanTitle}
                     </h4>
 
+                    {(product.promoBadge || product.expiryDate) && (
+                      <div className="flex items-center gap-1 flex-wrap mb-1 text-[10px]">
+                        {product.promoBadge && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 font-bold truncate max-w-full">
+                            {product.promoBadge}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
                     {/* Single Unboxed Rating & Delivery Line */}
                     <div className="flex items-center gap-1.5 text-[11px] text-[#6B7280] mb-1 tabular-nums">
                       <span className="inline-flex items-center gap-0.5 text-[#111827] font-bold shrink-0">
@@ -1805,6 +1818,7 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
         const dpReviewsCount = dp.reviewsCount || 85;
         const dpDiscount = dp.discountPercent && dp.discountPercent > 0 ? dp.discountPercent : null;
         const dpFavorited = favoriteProductBarcodes.includes(dp.barcode);
+        const dpInStock = (dp.stockQuantity ?? 0) > 0;
         const similarItems = products
           .filter((p) => p.barcode !== dp.barcode)
           .sort((a, b) => (a.category === dp.category ? -1 : 1) - (b.category === dp.category ? -1 : 1))
@@ -1817,7 +1831,10 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
         return (
           <div
             className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs sm:p-4"
-            onClick={() => setSelectedDetailProduct(null)}
+            onClick={() => {
+              setIsDetailLightboxOpen(false);
+              setSelectedDetailProduct(null);
+            }}
           >
             <div
               onClick={(e) => e.stopPropagation()}
@@ -1899,29 +1916,75 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
                       </span>
                     )}
 
+                    {/* Stock Availability Visual Indicator Over Gallery Image */}
+                    <div className="absolute top-3 end-3 z-10 flex items-center gap-1.5">
+                      <div
+                        data-testid="b2c-inline-gallery-stock-indicator"
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-2xs text-[11px] font-bold backdrop-blur-xs ${
+                          dpInStock
+                            ? 'bg-white/95 border-[#BBF7D0] text-[#0F3D24]'
+                            : 'bg-white/95 border-gray-200 text-gray-600'
+                        }`}
+                      >
+                        <span
+                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                            dpInStock
+                              ? 'bg-[#00A046] ring-2 ring-[#00A046]/25'
+                              : 'bg-gray-400 ring-2 ring-gray-300/60'
+                          }`}
+                        />
+                        <span>
+                          {dpInStock
+                            ? isAr
+                              ? 'متوفر حالياً'
+                              : 'In Stock'
+                            : isAr
+                            ? 'بانتظار التوريد'
+                            : 'Awaiting Supply'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsDetailLightboxOpen(true)}
+                        aria-label={isAr ? 'فتح معرض الصور' : 'Open gallery'}
+                        className="w-7 h-7 rounded-full bg-white/95 hover:bg-[#EFFAF3] border border-[#E5E7EB] shadow-2xs flex items-center justify-center text-[#0F3D24] transition cursor-pointer"
+                      >
+                        <Maximize2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
                     {/* Slide 0: Hero Showcase */}
                     {detailSlideIndex === 0 && (
-                      <div className="w-full h-full flex items-center justify-center px-6 pt-5 pb-12 sm:px-10 sm:pt-8 sm:pb-14">
+                      <button
+                        type="button"
+                        onClick={() => setIsDetailLightboxOpen(true)}
+                        aria-label={isAr ? 'فتح معرض صور المنتج' : 'Open product gallery'}
+                        className="w-full h-full flex items-center justify-center px-6 pt-5 pb-12 sm:px-10 sm:pt-8 sm:pb-14 cursor-zoom-in"
+                      >
                         <img
                           src={sanitizeB2CImageUrl(dp.imageUrl, dp.category)}
                           alt={dpName}
                           referrerPolicy="no-referrer"
-                          className="max-h-full max-w-full object-contain drop-shadow-sm rounded-xl"
+                          className="max-h-full max-w-full object-contain drop-shadow-sm rounded-xl hover:scale-[1.02] transition-transform"
                         />
-                      </div>
+                      </button>
                     )}
 
                     {/* Slide 1: Packaging & Availability */}
                     {detailSlideIndex === 1 && (
                       <div className="w-full h-full flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-6 px-4 pt-4 pb-12 sm:p-10 sm:pb-14 bg-linear-to-br from-emerald-50/40 via-white to-slate-50">
-                        <div className="w-28 h-28 sm:w-44 sm:h-44 bg-white rounded-2xl border border-[#E5E7EB] p-3 flex items-center justify-center shadow-xs shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setIsDetailLightboxOpen(true)}
+                          className="w-28 h-28 sm:w-44 sm:h-44 bg-white rounded-2xl border border-[#E5E7EB] p-3 flex items-center justify-center shadow-xs shrink-0 cursor-zoom-in"
+                        >
                           <img
                             src={sanitizeB2CImageUrl(dp.imageUrl, dp.category)}
                             alt={dpName}
                             referrerPolicy="no-referrer"
                             className="max-h-full max-w-full object-contain scale-105"
                           />
-                        </div>
+                        </button>
                         <div className="text-center sm:text-start max-w-xs space-y-1">
                           <div className="text-[11px] font-bold text-[#00A046]">
                             {isAr ? 'مواصفات العبوة والبيع المفرد' : 'Retail Packaging Specs'}
@@ -2214,6 +2277,139 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Dedicated B2C Fullscreen Gallery Lightbox */}
+            {isDetailLightboxOpen && (
+              <div
+                data-testid="b2c-photo-gallery-lightbox"
+                className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-sm p-2.5 sm:p-6 font-brand"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsDetailLightboxOpen(false);
+                }}
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="bg-white w-full max-w-xl rounded-3xl overflow-hidden shadow-2xl border border-[#E5E7EB] flex flex-col max-h-[92vh]"
+                >
+                  <div className="px-4 py-3 border-b border-[#E5E7EB] flex items-center justify-between gap-2 bg-white">
+                    <div className="min-w-0">
+                      <div className="text-xs sm:text-sm font-extrabold text-[#111827] truncate">
+                        {dpName}
+                      </div>
+                      <div className="text-[11px] font-semibold text-[#6B7280] tabular-nums">
+                        {detailSlideIndex + 1} / {slidesCount}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsDetailLightboxOpen(false)}
+                      className="w-9 h-9 rounded-full hover:bg-gray-100 flex items-center justify-center text-[#6B7280] transition cursor-pointer shrink-0"
+                      aria-label={isAr ? 'إغلاق المعرض' : 'Close gallery'}
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div className="relative min-h-[280px] sm:min-h-[360px] bg-white flex items-center justify-center p-6 sm:p-8 select-none">
+                    <div
+                      data-testid="b2c-gallery-stock-indicator"
+                      className={`absolute top-3 start-3 z-10 flex items-center gap-1.5 px-3 py-1 rounded-full border shadow-xs text-xs font-bold backdrop-blur-xs ${
+                        dpInStock
+                          ? 'bg-white/95 border-[#BBF7D0] text-[#0F3D24]'
+                          : 'bg-white/95 border-gray-200 text-gray-600'
+                      }`}
+                    >
+                      <span
+                        className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                          dpInStock
+                            ? 'bg-[#00A046] ring-2 ring-[#00A046]/25'
+                            : 'bg-gray-400 ring-2 ring-gray-300/60'
+                        }`}
+                      />
+                      <span>
+                        {dpInStock
+                          ? isAr
+                            ? 'متوفر حالياً'
+                            : 'Currently Available'
+                          : isAr
+                          ? 'بانتظار التوريد'
+                          : 'Awaiting Supply'}
+                      </span>
+                    </div>
+
+                    <img
+                      src={sanitizeB2CImageUrl(dp.imageUrl, dp.category)}
+                      alt={dpName}
+                      referrerPolicy="no-referrer"
+                      className="max-h-[46vh] max-w-full object-contain rounded-xl"
+                    />
+                  </div>
+
+                  {/* Bottom Controls Below Photo: Prev/Next Scroll Buttons, Back & Favorite */}
+                  <div className="px-3 sm:px-5 py-3 bg-[#F8FAFC] border-t border-[#E5E7EB] flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        data-testid="b2c-gallery-prev-btn"
+                        onClick={prevSlide}
+                        className="h-10 px-3 sm:px-4 rounded-xl bg-[#DCFCE7] hover:bg-[#BBF7D0] border border-[#86EFAC] text-[#15803D] font-bold text-xs sm:text-sm flex items-center gap-1 transition cursor-pointer"
+                      >
+                        {isAr ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+                        <span>{isAr ? 'السابق' : 'Prev'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="b2c-gallery-next-btn"
+                        onClick={nextSlide}
+                        className="h-10 px-3 sm:px-4 rounded-xl bg-[#DCFCE7] hover:bg-[#BBF7D0] border border-[#86EFAC] text-[#15803D] font-bold text-xs sm:text-sm flex items-center gap-1 transition cursor-pointer"
+                      >
+                        <span>{isAr ? 'التالي' : 'Next'}</span>
+                        {isAr ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        data-testid="b2c-gallery-favorite-btn"
+                        onClick={() => handleToggleProductFavorite(dp.barcode)}
+                        className={`h-10 px-3 sm:px-4 rounded-xl border font-bold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer ${
+                          dpFavorited
+                            ? 'bg-[#FFFBEB] border-[#FCD34D] text-[#B45309]'
+                            : 'bg-white hover:bg-amber-50 border-[#E5E7EB] text-[#374151]'
+                        }`}
+                      >
+                        <Heart
+                          className={`w-4 h-4 transition ${
+                            dpFavorited ? 'fill-[#FFA300] text-[#FFA300]' : 'text-[#6B7280]'
+                          }`}
+                        />
+                        <span>
+                          {dpFavorited
+                            ? isAr
+                              ? 'مضاف للمفضلة'
+                              : 'Favorited'
+                            : isAr
+                            ? 'إضافة للمفضلة'
+                            : 'Add to Favorites'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="b2c-gallery-back-btn"
+                        onClick={() => setIsDetailLightboxOpen(false)}
+                        className="h-10 px-3.5 sm:px-4 rounded-xl bg-[#0F3D24] hover:bg-[#0B2E1B] text-white font-bold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+                      >
+                        {isAr ? <ArrowRight className="w-4 h-4" /> : <ArrowLeft className="w-4 h-4" />}
+                        <span>{isAr ? 'رجوع' : 'Back'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
       })()}

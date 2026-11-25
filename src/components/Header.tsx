@@ -82,13 +82,15 @@ export const Header: React.FC<HeaderProps> = ({
   const isAr = language === 'ar';
   const isStoreUser = userSession?.role === 'store';
   const isCashierUser = userSession?.role === 'cashier';
+  const isAccountantUser = userSession?.role === 'accountant';
+  const isDriverUser = userSession?.role === 'driver';
   const isB2CWorkspace = isStoreUser && workspaceMode === 'b2c';
 
   return (
     <header className="sticky top-0 z-40 w-full max-w-full bg-white border-b border-[#E5E7EB] shadow-xs overflow-x-clip">
       
-      {/* Top Wholesale Promo Banner — Shown ONLY in B2B Wholesale mode (never for B2C or Cashier) */}
-      {!isB2CWorkspace && !isCashierUser && (
+      {/* Top Wholesale Promo Banner — Shown ONLY in B2B Wholesale mode (never for B2C, Cashier, Accountant, or Driver DSD) */}
+      {!isB2CWorkspace && !isCashierUser && !isAccountantUser && !isDriverUser && (
         <div className="bg-[#FFE600] text-[#221F1F] py-1.5 px-3 sm:px-4 text-xs font-bold text-center flex items-center justify-center gap-2 border-b border-yellow-300">
           <span className="bg-[#221F1F] text-[#FFE600] text-[10px] px-2 py-0.5 rounded font-black tracking-wider shrink-0">
             9-15.11
@@ -113,14 +115,34 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Logo & Mode Identity */}
           <div className="flex items-center gap-2 min-w-0 flex-1 md:flex-initial">
             <div 
-              onClick={() => setActiveTab(isCashierUser || isB2CWorkspace ? 'store_pos' : 'marketplace')}
+              onClick={() =>
+                setActiveTab(
+                  isDriverUser
+                    ? 'driver'
+                    : isAccountantUser
+                    ? 'account_hub'
+                    : isCashierUser || isB2CWorkspace
+                    ? 'store_pos'
+                    : 'marketplace'
+                )
+              }
               className="flex items-center gap-2 sm:gap-2.5 cursor-pointer group min-w-0"
             >
               <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform shrink-0 ${
-                isCashierUser ? 'bg-[#0F766E]' : isB2CWorkspace ? 'bg-[#142018]' : 'bg-[#0B5D32]'
+                isCashierUser
+                  ? 'bg-[#0F766E]'
+                  : isAccountantUser
+                  ? 'bg-indigo-700'
+                  : isDriverUser
+                  ? 'bg-[#0B5D32]'
+                  : isB2CWorkspace
+                  ? 'bg-[#142018]'
+                  : 'bg-[#0B5D32]'
               }`}>
-                {isCashierUser || isB2CWorkspace ? (
-                  <Store className={`w-4.5 h-4.5 sm:w-5 sm:h-5 ${isCashierUser ? 'text-white' : 'text-[#FFE600]'}`} />
+                {isDriverUser ? (
+                  <Truck className="w-4.5 h-4.5 sm:w-5 sm:h-5 text-[#FFE600]" />
+                ) : isCashierUser || isAccountantUser || isB2CWorkspace ? (
+                  <Store className={`w-4.5 h-4.5 sm:w-5 sm:h-5 ${isCashierUser || isAccountantUser ? 'text-white' : 'text-[#FFE600]'}`} />
                 ) : (
                   <Smile className="w-5 h-5 sm:w-6 sm:h-6 text-white stroke-[2.2]" />
                 )}
@@ -128,27 +150,45 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <span className="text-sm sm:text-lg lg:text-xl font-black text-[#142018] tracking-tight font-brand transition-all truncate">
-                    {isCashierUser || isB2CWorkspace
+                    {isDriverUser
+                      ? (isAr ? 'دليل الخيرات · الفان' : 'Dalil · Van DSD')
+                      : isCashierUser || isAccountantUser || isB2CWorkspace
                       ? (userSession?.entityName || (isAr ? 'متجري' : 'My Store'))
                       : (isAr ? 'دليل الخيرات' : 'Dalil Al-Khairat')}
                   </span>
                   <span className={`hidden sm:inline-block text-[10px] font-black px-2 py-0.5 rounded-md font-brand shrink-0 border ${
                     isCashierUser
                       ? 'bg-teal-50 text-teal-800 border-teal-200'
+                      : isAccountantUser
+                      ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                      : isDriverUser
+                      ? 'bg-[#142018] text-[#FFE600] border-[#142018]'
                       : isB2CWorkspace
                       ? 'bg-[#142018] text-[#FFE600] border-[#142018]'
                       : 'bg-[#EBF4EE] text-[#0B5D32] border-[#CBE0D0]'
                   }`}>
                     {isCashierUser
                       ? (isAr ? 'كاشير مقيد' : 'Cashier POS')
+                      : isAccountantUser
+                      ? (isAr ? 'محاسب مالي' : 'Accountant')
+                      : isDriverUser
+                      ? (isAr ? 'توزيع مباشر DSD' : 'Van Sales DSD')
                       : isB2CWorkspace
                       ? (isAr ? 'متجري B2C' : 'Store B2C')
                       : (isAr ? 'جملة B2B' : 'Wholesale B2B')}
                   </span>
                 </div>
                 <span className="hidden sm:block text-[11px] text-[#5F7164] font-brand truncate">
-                  {isCashierUser
-                    ? (isAr ? 'صلاحية بيع مباشر ومراقبة الرفوف فقط' : 'POS Checkout & Shelf Counts Only')
+                  {isDriverUser
+                    ? (userSession?.entityName || (isAr ? 'منظومة التوزيع الميداني والمبيعات بالجملة' : 'Enterprise Direct Store Delivery'))
+                    : isCashierUser
+                    ? (isAr
+                        ? `${userSession?.branchName ? `${userSession.branchName} · ` : ''}صلاحية بيع مباشر ومراقبة الرفوف فقط`
+                        : 'POS Checkout & Shelf Counts Only')
+                    : isAccountantUser
+                    ? (isAr
+                        ? `${userSession?.branchName ? `${userSession.branchName} · ` : ''}مراجعة الفواتير ودفتر الائتمان فقط`
+                        : 'Invoices & Credit Ledger Review Only')
                     : isB2CWorkspace
                     ? (isAr ? 'كاشير المحل ومتجر التوصيل للمفرد' : 'In-Store POS & Consumer Storefront')
                     : (isAr ? 'منظومة التوريد بالجملة للمحلات والمطاعم' : 'B2B Wholesale Supply for Stores & Restaurants')}
@@ -157,8 +197,8 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Search bar with Barcode prompt (Desktop / Tablet — B2B Wholesale only) */}
-          {!isB2CWorkspace && !isCashierUser && (isStoreUser || activeTab === 'marketplace') && (
+          {/* Search bar with Barcode prompt (Desktop / Tablet — B2B Wholesale Store only) */}
+          {!isB2CWorkspace && !isCashierUser && !isAccountantUser && !isDriverUser && (isStoreUser || activeTab === 'marketplace') && (
             <div className="flex-1 max-w-lg hidden md:block">
               <div className="relative">
                 <input
@@ -186,13 +226,15 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
-          {/* B2C / Cashier Workspace Context Summary Strip on Desktop */}
-          {(isB2CWorkspace || isCashierUser) && (
+          {/* B2C / Cashier / Accountant Workspace Context Summary Strip on Desktop */}
+          {(isB2CWorkspace || isCashierUser || isAccountantUser) && (
             <div className="hidden md:flex items-center gap-2 bg-[#F4F4EA] border border-[#DCE5DC] rounded-xl px-3 py-1.5 text-xs font-bold text-[#3D5244]">
-              <Package className={`w-4 h-4 ${isCashierUser ? 'text-teal-700' : 'text-[#0B5D32]'}`} />
+              <Package className={`w-4 h-4 ${isCashierUser ? 'text-teal-700' : isAccountantUser ? 'text-indigo-700' : 'text-[#0B5D32]'}`} />
               <span>
                 {isCashierUser
                   ? (isAr ? 'صلاحية أمين الصندوق · سوق الجملة والأرباح والائتمان محجوبة' : 'Cashier Restricted · Wholesale & Profits Hidden')
+                  : isAccountantUser
+                  ? (isAr ? 'صلاحية المحاسب · الفواتير ودفتر الائتمان والمدفوعات فقط' : 'Accountant Restricted · Invoices & Ledger Only')
                   : (isAr ? 'وضع إدارة المحل والبيع للزبائن (مفرد)' : 'Store Operations & Retail Mode')}
               </span>
             </div>
@@ -298,6 +340,37 @@ export const Header: React.FC<HeaderProps> = ({
                     title={isAr ? 'تبديل الحساب / تسجيل خروج' : 'Switch Account'}
                   >
                     <Repeat className="w-4 h-4 text-[#0B5D32]" />
+                  </button>
+                )}
+              </>
+            ) : isDriverUser ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onLanguageChange(isAr ? 'en' : 'ar')}
+                  className="h-9 px-2.5 rounded-lg border border-[#DCE5DC] bg-[#F4F4EA] text-xs font-bold text-[#142018] cursor-pointer"
+                >
+                  {isAr ? 'EN' : 'عربي'}
+                </button>
+                {userSession && (
+                  <button
+                    type="button"
+                    onClick={onLogout}
+                    className="w-9 h-9 rounded-lg border border-[#DCE5DC] bg-[#F4F4EA] text-[#142018] flex items-center justify-center cursor-pointer"
+                    title={isAr ? 'تبديل الحساب' : 'Switch Account'}
+                  >
+                    <Repeat className="w-4 h-4 text-[#0B5D32]" />
+                  </button>
+                )}
+                {onToggleSidebar && (
+                  <button
+                    type="button"
+                    onClick={onToggleSidebar}
+                    className="w-9 h-9 rounded-lg border border-[#DCE5DC] bg-[#F4F4EA] hover:bg-[#EBF4EE] hover:border-[#0B5D32] text-[#142018] flex items-center justify-center transition cursor-pointer shrink-0"
+                    aria-label={isAr ? 'قائمة منظومة الفان' : 'Van Sales Menu'}
+                    title={isAr ? 'قائمة منظومة الفان' : 'Van Sales Menu'}
+                  >
+                    <Menu className="w-4.5 h-4.5" />
                   </button>
                 )}
               </>
@@ -488,6 +561,18 @@ export const Header: React.FC<HeaderProps> = ({
                   <Repeat className="w-3.5 h-3.5 text-[#00A046]" />
                   <span className="hidden lg:inline">{isAr ? 'تبديل الحساب' : 'Switch'}</span>
                 </button>
+
+                {isDriverUser && onToggleSidebar && (
+                  <button
+                    type="button"
+                    onClick={onToggleSidebar}
+                    className="w-9 h-9 rounded-lg border border-[#DCE5DC] bg-[#F4F4EA] hover:bg-[#EBF4EE] hover:border-[#0B5D32] text-[#142018] flex items-center justify-center transition cursor-pointer shrink-0"
+                    aria-label={isAr ? 'قائمة منظومة الفان' : 'Van Sales Menu'}
+                    title={isAr ? 'قائمة منظومة الفان' : 'Van Sales Menu'}
+                  >
+                    <Menu className="w-4.5 h-4.5" />
+                  </button>
+                )}
               </div>
             )}
 

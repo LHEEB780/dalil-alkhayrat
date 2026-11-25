@@ -8,6 +8,7 @@ import { QRPosterModal } from './components/QRPosterModal.tsx';
 import { LowStockNotificationModal, LowStockAlertItem } from './components/LowStockNotificationModal.tsx';
 import { RetailerBottomNav } from './components/RetailerBottomNav.tsx';
 import { RetailerSidebarDrawer } from './components/RetailerSidebarDrawer.tsx';
+import { VanSidebarDrawer } from './components/VanSidebarDrawer.tsx';
 import { BarcodeSearchModal } from './components/BarcodeSearchModal.tsx';
 
 import { WelcomeAuthView, UserSession } from './views/WelcomeAuthView.tsx';
@@ -38,7 +39,8 @@ import {
   AccountSectionId,
   StoreBranchAddress,
   StoreWorkspaceMode,
-  SupplierOrderRules
+  SupplierOrderRules,
+  VanModuleSection
 } from './types/index.ts';
 import {
   WholesaleSupplier,
@@ -90,6 +92,8 @@ export default function App() {
       return null;
     }
   });
+  // Bearer token held strictly in JS/React memory (never in localStorage/sessionStorage)
+  const [authToken, setAuthToken] = useState<string | null>(null);
 
   const [activeTab, setActiveTabState] = useState<AppTab>('marketplace');
   const [workspaceMode, setWorkspaceMode] = useState<StoreWorkspaceMode>('b2b');
@@ -107,6 +111,18 @@ export default function App() {
   const [activeAccountSection, setActiveAccountSection] = useState<AccountSectionId>('profile');
   const [branchesReturnTab, setBranchesReturnTab] = useState<'marketplace' | 'all_categories'>('marketplace');
   const [selectedBrandId, setSelectedBrandId] = useState<string | null>(null);
+  const [vanActiveSection, setVanActiveSection] = useState<VanModuleSection>('pos_sell');
+  const [vanOpenShiftSignal, setVanOpenShiftSignal] = useState<number>(0);
+  const [vanSummary, setVanSummary] = useState({
+    cashCustodyIQD: 0,
+    remainingUnits: 0,
+    pendingOrdersCount: 0,
+    pendingRestockCount: 0,
+    nearExpiryCount: 0,
+    creditClientsCount: 0,
+    vehiclePlate: '',
+    vanWarehouseName: ''
+  });
 
   const B2C_TABS: AppTab[] = ['store_pos', 'store_management', 'b2c'];
   const B2B_TABS: AppTab[] = ['marketplace', 'all_categories', 'category_branches', 'all_brands', 'suppliers', 'collective'];
@@ -135,11 +151,23 @@ export default function App() {
   };
 
   const isCashierUser = userSession?.role === 'cashier';
+  const isAccountantUser = userSession?.role === 'accountant';
+  const isRestrictedStaff = isCashierUser || isAccountantUser;
 
   const setActiveTab = (tab: AppTab) => {
+    if (userSession?.role === 'driver') {
+      setSelectedSupplierStore(null);
+      setActiveTabState('driver');
+      return;
+    }
     if (userSession?.role === 'cashier') {
       setSelectedSupplierStore(null);
       setActiveTabState(tab === 'low_stock_alerts' ? 'low_stock_alerts' : 'store_pos');
+      return;
+    }
+    if (userSession?.role === 'accountant') {
+      setSelectedSupplierStore(null);
+      setActiveTabState('account_hub');
       return;
     }
     let resolvedTab = tab;
@@ -164,6 +192,10 @@ export default function App() {
       setActiveTabState('store_pos');
       return;
     }
+    if (userSession?.role === 'accountant') {
+      setActiveTabState('account_hub');
+      return;
+    }
     if (mode === 'b2c' && !isStoreOpsEnabled) {
       handleToggleStoreOpsEnabled(true);
     }
@@ -185,6 +217,12 @@ export default function App() {
     if (userSession?.role === 'cashier') {
       setSelectedSupplierStore(null);
       setActiveTabState('store_pos');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    if (userSession?.role === 'accountant') {
+      setSelectedSupplierStore(null);
+      setActiveTabState('account_hub');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -398,6 +436,10 @@ export default function App() {
       case 'cashier':
         setActiveTabState('store_pos');
         break;
+      case 'accountant':
+        setActiveAccountSection('invoices');
+        setActiveTabState('account_hub');
+        break;
       case 'supplier':
         setActiveTab('supplier');
         break;
@@ -414,6 +456,28 @@ export default function App() {
         setActiveTab('marketplace');
     }
   }, [userSession?.role]);
+
+  // Obtain in-memory store-owner token for managing store staff in Account Hub
+  useEffect(() => {
+    if (userSession?.role !== 'store') return;
+    let active = true;
+    const storeId = userSession.entityId || 'store_almansoor';
+    fetch('/api/auth/store-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ storeId })
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data?.success && data.token) {
+          setAuthToken(data.token);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [userSession?.role, userSession?.entityId]);
 
   // Fetch products
   const fetchProducts = async (signal?: AbortSignal) => {
@@ -499,13 +563,14 @@ export default function App() {
     return () => controller.abort();
   }, [userSession?.entityId]);
 
-  // Login handler (Always starts Store accounts in clean B2B Wholesale mode; Cashiers directly in POS)
-  const handleLoginAsRole = (role: Role, profile: UserSession) => {
+  // Login handler (Always starts Store accounts in clean B2B Wholesale mode; Cashiers directly in POS; Accountants in Invoices)
+  const handleLoginAsRole = (role: Role, profile: UserSession, token?: string) => {
     try {
       localStorage.setItem('souq_user_session', JSON.stringify(profile));
     } catch (e) {
       console.error(e);
     }
+    setAuthToken(token || null);
     setComparingProduct(null);
     setIsCartOpen(false);
     setIsAssistantOpen(false);
@@ -517,8 +582,16 @@ export default function App() {
     if (role === 'store') {
       setWorkspaceMode('b2b');
     }
+    if (role === 'driver') {
+      setVanActiveSection('pos_sell');
+      setActiveTabState('driver');
+    }
     if (role === 'cashier') {
       setActiveTabState('store_pos');
+    }
+    if (role === 'accountant') {
+      setActiveAccountSection('invoices');
+      setActiveTabState('account_hub');
     }
     setUserSession(profile);
   };
@@ -530,6 +603,7 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
+    setAuthToken(null);
     setComparingProduct(null);
     setIsCartOpen(false);
     setIsAssistantOpen(false);
@@ -544,7 +618,7 @@ export default function App() {
 
   // Add to cart
   const handleAddToCart = (product: ProductWithOffers, offer: SupplierOfferItem, quantity: number) => {
-    if (userSession?.role === 'cashier') return;
+    if (userSession?.role === 'cashier' || userSession?.role === 'accountant') return;
     setCartItems(prev => {
       const existingIndex = prev.findIndex(item => item.offer.id === offer.id);
       if (existingIndex > -1) {
@@ -759,6 +833,15 @@ export default function App() {
               setActiveTab('all_brands');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
+            onOpenExpiryManager={() => {
+              setActiveAccountSection('profile');
+              setActiveTab('account_hub');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onOpenCollectiveDeals={() => {
+              setActiveTab('collective');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
           />
         )}
 
@@ -876,6 +959,8 @@ export default function App() {
               currency={currency}
               orders={orders}
               onRefreshOrders={fetchOrders}
+              onRefreshProducts={() => fetchProducts()}
+              authToken={authToken}
               language={language}
             />
           )}
@@ -888,6 +973,10 @@ export default function App() {
             products={products}
             onRefreshOrders={fetchOrders}
             language={language}
+            activeSection={vanActiveSection}
+            onChangeSection={setVanActiveSection}
+            openShiftCloseSignal={vanOpenShiftSignal}
+            onSyncSummary={setVanSummary}
           />
         )}
 
@@ -943,6 +1032,8 @@ export default function App() {
           <StorefrontManagementView
             currency={currency}
             language={language}
+            authToken={authToken}
+            onRefreshProducts={() => fetchProducts()}
             onPreviewStorefront={() => setActiveTab('b2c')}
             onOpenStorePOS={() => setActiveTab('store_pos')}
             onOpenQRPoster={() => setIsQRPosterOpen(true)}
@@ -964,13 +1055,14 @@ export default function App() {
           <ApiDocsView />
         )}
 
-        {activeTab === 'account_hub' && userSession && (
+        {activeTab === 'account_hub' && userSession && !isCashierUser && (
           <RetailerAccountHubView
             activeSection={activeAccountSection}
             onSelectSection={setActiveAccountSection}
             onBackToMarketplace={handleGoBack}
             onBrowseMarketplace={() => setActiveTab('marketplace')}
             userSession={userSession}
+            authToken={authToken}
             onUpdateProfile={handleUpdateProfile}
             onDeleteAccount={handleDeleteAccount}
             currency={currency}
@@ -980,12 +1072,14 @@ export default function App() {
             onAddToCart={handleAddToCart}
             onCompareOffers={(product) => setComparingProduct(product)}
             onOpenSupplierStore={(supplier) => {
+              if (isAccountantUser) return;
               setSupplierReturnTab('account_hub');
               setActiveTabState('marketplace');
               setSelectedSupplierStore(supplier);
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onExploreCategory={(cat) => {
+              if (isAccountantUser) return;
               setSearchQuery('');
               setSelectedCategory(cat);
               setSelectedSubCategory('الكل');
@@ -1003,6 +1097,9 @@ export default function App() {
             onUpdateAddresses={handleUpdateAddresses}
             unreadMessagesCount={unreadMessagesCount}
             onMarkMessagesRead={() => setUnreadMessagesCount(0)}
+            onRefreshProducts={() => fetchProducts()}
+            onOpenStoreManagement={isAccountantUser ? undefined : () => setActiveTab('store_management')}
+            onOpenCollectiveDeals={isAccountantUser ? undefined : () => setActiveTab('collective')}
           />
         )}
 
@@ -1052,7 +1149,7 @@ export default function App() {
       )}
 
       {/* Modals & Drawers */}
-      {comparingProduct && !isCashierUser && (
+      {comparingProduct && !isRestrictedStaff && (
         <OfferComparisonModal
           product={comparingProduct}
           currency={currency}
@@ -1098,7 +1195,7 @@ export default function App() {
         />
       )}
 
-      {isCartOpen && !isCashierUser && (
+      {isCartOpen && !isRestrictedStaff && (
         <CartDrawer
           isOpen={isCartOpen}
           onClose={() => setIsCartOpen(false)}
@@ -1115,7 +1212,7 @@ export default function App() {
         />
       )}
 
-      {isAssistantOpen && !isCashierUser && (
+      {isAssistantOpen && !isRestrictedStaff && (
         <StoreAssistantModal
           isOpen={isAssistantOpen}
           onClose={() => setIsAssistantOpen(false)}
@@ -1124,7 +1221,7 @@ export default function App() {
         />
       )}
 
-      {isQRPosterOpen && !isCashierUser && (
+      {isQRPosterOpen && !isRestrictedStaff && (
         <QRPosterModal
           isOpen={isQRPosterOpen}
           onClose={() => setIsQRPosterOpen(false)}
@@ -1137,7 +1234,7 @@ export default function App() {
         />
       )}
 
-      {isBarcodeModalOpen && !isCashierUser && (
+      {isBarcodeModalOpen && !isRestrictedStaff && (
         <BarcodeSearchModal
           isOpen={isBarcodeModalOpen}
           onClose={() => setIsBarcodeModalOpen(false)}
@@ -1157,7 +1254,7 @@ export default function App() {
         />
       )}
 
-      {/* Sticky Retailer Bottom Navigation Bar (hidden on full-screen category views, isolated B2C storefront preview & restricted cashier mode) */}
+      {/* Sticky Retailer Bottom Navigation Bar (hidden on full-screen category views, isolated B2C storefront preview & restricted staff modes) */}
       {userSession?.role === 'store' &&
         activeTab !== 'all_categories' &&
         activeTab !== 'category_branches' &&
@@ -1181,8 +1278,33 @@ export default function App() {
           />
         )}
 
-      {/* Retailer Sidebar Navigation Drawer (hidden for restricted cashier role) */}
-      {!isCashierUser && (
+      {/* Role-Specific Sidebar Drawers */}
+      {userSession?.role === 'driver' ? (
+        <VanSidebarDrawer
+          isOpen={isSidebarOpen}
+          onClose={() => setIsSidebarOpen(false)}
+          activeSection={vanActiveSection}
+          onSelectSection={(section) => {
+            setVanActiveSection(section);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          onOpenShiftClose={() => setVanOpenShiftSignal((c) => c + 1)}
+          userSession={userSession}
+          onLogout={handleLogout}
+          language={language}
+          onLanguageChange={setLanguage}
+          currency={currency}
+          onCurrencyChange={setCurrency}
+          cashCustodyIQD={vanSummary.cashCustodyIQD}
+          remainingUnits={vanSummary.remainingUnits}
+          pendingOrdersCount={vanSummary.pendingOrdersCount}
+          pendingRestockCount={vanSummary.pendingRestockCount}
+          nearExpiryCount={vanSummary.nearExpiryCount}
+          creditClientsCount={vanSummary.creditClientsCount}
+          vehiclePlate={vanSummary.vehiclePlate}
+          vanWarehouseName={vanSummary.vanWarehouseName}
+        />
+      ) : !isRestrictedStaff && (
         <RetailerSidebarDrawer
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}

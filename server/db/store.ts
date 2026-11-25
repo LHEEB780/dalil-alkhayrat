@@ -1,7 +1,11 @@
+import crypto from 'node:crypto';
 import {
   UnifiedProduct,
   SupplierOffer,
   StoreProfile,
+  StoreStaffAccount,
+  StoreStaffPublic,
+  StoreStaffRole,
   SupplierProfile,
   SellerBusinessType,
   VerificationStatus,
@@ -30,7 +34,12 @@ import {
   District,
   Area,
   DeliveryZone,
-  Brand
+  Brand,
+  SupplierInventoryBatch,
+  VanExpenseRecord,
+  VanExpenseCategory,
+  VanReturnRecord,
+  VanUnloadRecord
 } from './types.ts';
 import {
   validateSupplierOrderRules,
@@ -57,7 +66,11 @@ import {
   initialDistricts,
   initialAreas,
   initialDeliveryZones,
-  initialBrands
+  initialBrands,
+  initialSupplierInventoryBatches,
+  initialVanExpenses,
+  initialVanReturns,
+  initialShiftReports
 } from './seed.ts';
 
 const SERVER_CATEGORY_ALIASES: Record<string, string> = {
@@ -93,10 +106,15 @@ class AppDataStore {
   storeInventory: StoreInventoryItem[] = [...initialStoreInventory];
   collectivePools: CollectiveBuyingPool[] = [...initialCollectivePools];
   posters: StorePosterConfig[] = [...initialPosters];
-  shiftReports: ShiftCloseReport[] = [];
+  shiftReports: ShiftCloseReport[] = [...initialShiftReports];
+  vanExpenses: VanExpenseRecord[] = [...initialVanExpenses];
+  vanReturns: VanReturnRecord[] = [...initialVanReturns];
+  vanUnloadRecords: VanUnloadRecord[] = [];
   storePOSSales: StorePOSSaleRecord[] = [...initialStorePOSSales];
   storePOSReturns: StorePOSReturnRecord[] = [];
   creditUpgradeRequests: CreditUpgradeRequest[] = [];
+  storeStaff: StoreStaffAccount[] = [];
+  supplierInventoryBatches: SupplierInventoryBatch[] = [...initialSupplierInventoryBatches];
   supplierReviews: SupplierReview[] = [
     {
       id: 'rev_raf_1',
@@ -930,6 +948,7 @@ class AppDataStore {
     quantity?: number;
     items?: { barcode: string; quantity: number }[];
     paymentType: 'cash' | 'credit';
+    discountIQD?: number;
     notes?: string;
   }) {
     const driver = this.drivers.find(d => d.id === params.driverId);
@@ -948,9 +967,15 @@ class AppDataStore {
       throw new Error('يرجى تحديد صنف واحد على الأقل لإتمام البيع');
     }
 
-    // Validate all lines before mutating stock
-    const resolvedLines: { vanItem: VanInventoryItem; qty: number; lineTotal: number }[] = [];
-    let grandTotal = 0;
+    // Validate all lines before mutating stock, applying wholesale tier price automatically when eligible
+    const resolvedLines: {
+      vanItem: VanInventoryItem;
+      qty: number;
+      effectiveUnitPrice: number;
+      tierApplied: boolean;
+      lineTotal: number;
+    }[] = [];
+    let grossTotal = 0;
 
     for (const req of lineRequests) {
       const qty = Math.floor(Number(req.quantity));
@@ -961,10 +986,25 @@ class AppDataStore {
       if (!vanItem || vanItem.remainingQuantity < qty) {
         throw new Error(`الكمية المطلوبة غير متوفرة في مخزون الفان للصنف (${vanItem?.productName || req.barcode})`);
       }
-      const lineTotal = vanItem.unitPriceIQD * qty;
-      grandTotal += lineTotal;
-      resolvedLines.push({ vanItem, qty, lineTotal });
+      const tierApplied = Boolean(
+        vanItem.bulkDiscountMinQty &&
+        vanItem.bulkUnitPriceIQD &&
+        qty >= vanItem.bulkDiscountMinQty
+      );
+      const effectiveUnitPrice = tierApplied
+        ? (vanItem.bulkUnitPriceIQD as number)
+        : vanItem.unitPriceIQD;
+      const lineTotal = effectiveUnitPrice * qty;
+      grossTotal += lineTotal;
+      resolvedLines.push({ vanItem, qty, effectiveUnitPrice, tierApplied, lineTotal });
     }
+
+    const rawDiscount = Number(params.discountIQD) || 0;
+    if (rawDiscount < 0 || rawDiscount > Math.round(grossTotal * 0.25)) {
+      throw new Error('الخصم الممنوح يتجاوز الحد الأقصى المسموح به للمندوب (25% من الفاتورة)');
+    }
+    const cleanDiscount = Math.round(rawDiscount);
+    const grandTotal = Math.max(0, grossTotal - cleanDiscount);
 
     // Check credit limit if paymentType === 'credit'
     if (params.paymentType === 'credit') {
@@ -982,17 +1022,20 @@ class AppDataStore {
     const receiptNumber = `VAN-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const txItems: NonNullable<VanTransactionRecord['items']> = [];
 
-    for (const { vanItem, qty, lineTotal } of resolvedLines) {
+    for (const { vanItem, qty, effectiveUnitPrice, tierApplied, lineTotal } of resolvedLines) {
       vanItem.soldQuantity += qty;
       vanItem.remainingQuantity -= qty;
       this.syncVanItemToStoreInventory(store.id, vanItem, qty);
+      const matchedProd = this.products.find(p => p.barcode === vanItem.barcode);
       txItems.push({
         barcode: vanItem.barcode,
         productName: vanItem.productName,
         unit: vanItem.unit,
         quantity: qty,
-        unitPriceIQD: vanItem.unitPriceIQD,
-        totalIQD: lineTotal
+        unitPriceIQD: effectiveUnitPrice,
+        totalIQD: lineTotal,
+        tierApplied,
+        imageUrl: matchedProd?.imageUrl
       });
     }
 
@@ -1042,6 +1085,8 @@ class AppDataStore {
       type: 'direct_sale',
       paymentType: params.paymentType,
       items: txItems,
+      grossAmountIQD: grossTotal,
+      discountIQD: cleanDiscount,
       totalAmountIQD: grandTotal,
       createdAt: new Date().toISOString(),
       notes: params.notes || 'بيع مباشر من الفان + مزامنة تلقائية لمخزون كاشير المتجر'
@@ -1502,33 +1547,362 @@ class AppDataStore {
     driverId: string;
     barcode: string;
     quantity: number;
-    type: 'return' | 'damage';
+    type: 'return' | 'damage' | 'exchange';
     reason: string;
+    storeId?: string;
+    batchNumber?: string;
+    expiryDate?: string;
   }) {
+    const driver = this.drivers.find(d => d.id === params.driverId);
+    if (!driver) throw new Error('السائق غير موجود');
     const vanItem = this.vanInventory.find(v => v.driverId === params.driverId && v.barcode === params.barcode);
     if (!vanItem) throw new Error('الصنف غير موجود في حمولة الفان');
 
-    if (params.type === 'return') {
-      vanItem.returnedQuantity += params.quantity;
-      vanItem.remainingQuantity += params.quantity;
-    } else {
-      vanItem.damagedQuantity += params.quantity;
-      vanItem.remainingQuantity = Math.max(0, vanItem.remainingQuantity - params.quantity);
+    const qty = Math.floor(Number(params.quantity));
+    if (!Number.isFinite(qty) || qty <= 0) {
+      throw new Error('كمية المرتجع أو التالف يجب أن تكون أكبر من صفر');
     }
 
-    return vanItem;
+    if ((params.type === 'damage' || params.type === 'exchange') && vanItem.remainingQuantity < qty) {
+      throw new Error('الكمية المتبقية في الفان لا تكفي لتسجيل التالف أو الاستبدال');
+    }
+
+    if (params.type === 'return') {
+      vanItem.returnedQuantity += qty;
+      vanItem.remainingQuantity += qty;
+    } else if (params.type === 'exchange') {
+      // 1-for-1 customer replacement: deduct clean replacement unit & track damaged unit returned
+      vanItem.damagedQuantity += qty;
+      vanItem.remainingQuantity = Math.max(0, vanItem.remainingQuantity - qty);
+    } else {
+      vanItem.damagedQuantity += qty;
+      vanItem.remainingQuantity = Math.max(0, vanItem.remainingQuantity - qty);
+    }
+
+    const store = params.storeId ? this.stores.find(s => s.id === params.storeId) : undefined;
+    const creditNoteAmountIQD = params.type === 'exchange' ? 0 : vanItem.unitPriceIQD * qty;
+    const rmaNumber = `RMA-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
+
+    if (store && creditNoteAmountIQD > 0) {
+      const creditAcc = this.getCreditAccount(store.id, driver.supplierId);
+      if (creditAcc && creditAcc.currentUsedCreditIQD > 0) {
+        const creditApplied = Math.min(creditAcc.currentUsedCreditIQD, creditNoteAmountIQD);
+        this.addLedgerEntry({
+          creditAccountId: creditAcc.id,
+          supplierId: driver.supplierId,
+          storeId: store.id,
+          referenceType: 'RETURN_CREDIT',
+          referenceId: rmaNumber,
+          entryDate: new Date().toISOString().split('T')[0],
+          debitIQD: 0,
+          creditIQD: creditApplied,
+          runningBalanceIQD: Math.max(0, creditAcc.currentUsedCreditIQD - creditApplied),
+          descriptionAr: `إشعار دائن مرتجع (${vanItem.productName} × ${qty}) — ${rmaNumber}`
+        });
+      }
+    }
+
+    const returnRecord: VanReturnRecord = {
+      id: `vret_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      rmaNumber,
+      driverId: driver.id,
+      supplierId: driver.supplierId,
+      storeId: store?.id,
+      storeName: store?.name,
+      barcode: vanItem.barcode,
+      productName: vanItem.productName,
+      unit: vanItem.unit,
+      quantity: qty,
+      unitPriceIQD: vanItem.unitPriceIQD,
+      creditNoteAmountIQD,
+      type: params.type,
+      batchNumber: params.batchNumber?.trim() || vanItem.batchNumber,
+      expiryDate: params.expiryDate?.trim() || vanItem.expiryDate,
+      reason: params.reason.trim(),
+      createdAt: new Date().toISOString()
+    };
+    this.vanReturns.unshift(returnRecord);
+
+    return { vanItem, returnRecord };
+  }
+
+  registerFieldStoreCustomer(params: {
+    driverId: string;
+    name: string;
+    ownerName: string;
+    phone: string;
+    district: string;
+    address: string;
+    storeType?: 'supermarket' | 'grocery' | 'wholesale_sub';
+    creditLimitIQD?: number;
+    addToRoute?: boolean;
+  }) {
+    const driver = this.drivers.find(d => d.id === params.driverId);
+    if (!driver) throw new Error('السائق غير موجود');
+    if (!params.name?.trim() || !params.ownerName?.trim() || !params.phone?.trim()) {
+      throw new Error('يرجى إدخال اسم المحل، اسم المالك، ورقم الهاتف');
+    }
+
+    const requestedLimit = Math.max(0, Math.min(20000000, Math.round(Number(params.creditLimitIQD) || 0)));
+    const newStoreId = `store_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+    const slug = `shop-${Date.now().toString(36)}`;
+
+    const newStore: StoreProfile = {
+      id: newStoreId,
+      name: params.name.trim(),
+      ownerName: params.ownerName.trim(),
+      phone: params.phone.trim(),
+      city: 'بغداد',
+      district: params.district?.trim() || 'المنصور',
+      address: params.address?.trim() || 'شارع تجاري رئيسي',
+      storeType: params.storeType || 'grocery',
+      walletBalanceIQD: 0,
+      isVerified: true,
+      customDomainSlug: slug,
+      qrScanCount: 0,
+      createdAt: new Date().toISOString()
+    };
+    this.stores.push(newStore);
+
+    const creditAccount: CreditAccount = {
+      id: `cred_${newStoreId}_${driver.supplierId}`,
+      supplierId: driver.supplierId,
+      storeId: newStore.id,
+      storeName: newStore.name,
+      creditLimitIQD: requestedLimit,
+      currentUsedCreditIQD: 0,
+      availableCreditIQD: requestedLimit,
+      isBlocked: false,
+      supplierExceptionAllowed: false,
+      paymentTermDays: 14,
+      aging: {
+        bucket0_30: 0,
+        bucket31_60: 0,
+        bucket61_90: 0,
+        bucket90Plus: 0
+      }
+    };
+    this.creditAccounts.push(creditAccount);
+
+    let routeStop: VanRouteStop | null = null;
+    if (params.addToRoute !== false) {
+      routeStop = this.addVanRouteStop(
+        driver.id,
+        newStore.id,
+        'زبون جديد مسجل ميدانياً عبر مندوب الفان'
+      );
+    }
+
+    return { store: newStore, creditAccount, routeStop };
+  }
+
+  recordVanExpense(params: {
+    driverId: string;
+    category: VanExpenseCategory;
+    description: string;
+    amountIQD: number;
+    receiptRef?: string;
+  }): VanExpenseRecord {
+    const driver = this.drivers.find(d => d.id === params.driverId);
+    if (!driver) throw new Error('السائق غير موجود');
+    const amount = Math.floor(Number(params.amountIQD));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('مبلغ المصروف يجب أن يكون أكبر من صفر');
+    }
+    if (!params.description?.trim()) {
+      throw new Error('يرجى كتابة بيان أو وصف المصروف');
+    }
+    if (amount > driver.currentCashCollectedIQD) {
+      throw new Error('مبلغ المصروف يتجاوز الرصيد النقدي المتوفر في عهدة الفان حالياً');
+    }
+
+    const record: VanExpenseRecord = {
+      id: `vexp_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      driverId: driver.id,
+      supplierId: driver.supplierId,
+      category: params.category,
+      description: params.description.trim(),
+      amountIQD: amount,
+      receiptRef: params.receiptRef?.trim() || undefined,
+      createdAt: new Date().toISOString()
+    };
+
+    this.vanExpenses.unshift(record);
+    driver.todayExpensesIQD = (driver.todayExpensesIQD || 0) + amount;
+    driver.currentCashCollectedIQD = Math.max(0, driver.currentCashCollectedIQD - amount);
+    return record;
+  }
+
+  deleteVanExpense(expenseId: string): boolean {
+    const idx = this.vanExpenses.findIndex(e => e.id === expenseId);
+    if (idx === -1) throw new Error('سجل المصروف غير موجود');
+    const [removed] = this.vanExpenses.splice(idx, 1);
+    const driver = this.drivers.find(d => d.id === removed.driverId);
+    if (driver) {
+      driver.todayExpensesIQD = Math.max(0, (driver.todayExpensesIQD || 0) - removed.amountIQD);
+      driver.currentCashCollectedIQD += removed.amountIQD;
+    }
+    return true;
+  }
+
+  updateVanVehicleCheck(params: {
+    driverId: string;
+    odometerStartKm?: number;
+    odometerEndKm?: number;
+    fuelLevelPercent?: number;
+    chillerTempC?: number;
+    inspectionChecklist?: {
+      tiresOk: boolean;
+      chillerOk: boolean;
+      lightsOk: boolean;
+      hygieneOk: boolean;
+    };
+  }): DriverProfile {
+    const driver = this.drivers.find(d => d.id === params.driverId);
+    if (!driver) throw new Error('السائق غير موجود');
+
+    if (params.odometerStartKm !== undefined && Number.isFinite(Number(params.odometerStartKm))) {
+      driver.odometerStartKm = Math.max(0, Math.round(Number(params.odometerStartKm)));
+    }
+    if (params.odometerEndKm !== undefined && Number.isFinite(Number(params.odometerEndKm))) {
+      driver.odometerEndKm = Math.max(driver.odometerStartKm || 0, Math.round(Number(params.odometerEndKm)));
+    }
+    if (params.fuelLevelPercent !== undefined && Number.isFinite(Number(params.fuelLevelPercent))) {
+      driver.fuelLevelPercent = Math.max(0, Math.min(100, Math.round(Number(params.fuelLevelPercent))));
+    }
+    if (params.chillerTempC !== undefined && Number.isFinite(Number(params.chillerTempC))) {
+      driver.chillerTempC = Math.round(Number(params.chillerTempC) * 10) / 10;
+    }
+    if (params.inspectionChecklist) {
+      driver.inspectionChecklist = {
+        tiresOk: Boolean(params.inspectionChecklist.tiresOk),
+        chillerOk: Boolean(params.inspectionChecklist.chillerOk),
+        lightsOk: Boolean(params.inspectionChecklist.lightsOk),
+        hygieneOk: Boolean(params.inspectionChecklist.hygieneOk),
+        checkedAt: new Date().toISOString()
+      };
+    }
+
+    return driver;
+  }
+
+  recordVanPhysicalAudit(params: {
+    driverId: string;
+    counts: { barcode: string; countedQuantity: number }[];
+  }) {
+    const driver = this.drivers.find(d => d.id === params.driverId);
+    if (!driver) throw new Error('السائق غير موجود');
+    if (!Array.isArray(params.counts) || params.counts.length === 0) {
+      throw new Error('يرجى إدخال كميات الجرد الفعلي للأصناف');
+    }
+
+    const now = new Date().toISOString();
+    const lines: {
+      barcode: string;
+      productName: string;
+      systemRemaining: number;
+      physicalCounted: number;
+      varianceUnits: number;
+      varianceValueIQD: number;
+    }[] = [];
+
+    for (const c of params.counts) {
+      const vanItem = this.vanInventory.find(v => v.driverId === params.driverId && v.barcode === c.barcode);
+      if (!vanItem) continue;
+      const counted = Math.max(0, Math.floor(Number(c.countedQuantity)));
+      vanItem.lastPhysicalCountQty = counted;
+      vanItem.lastAuditAt = now;
+      const varianceUnits = counted - vanItem.remainingQuantity;
+      lines.push({
+        barcode: vanItem.barcode,
+        productName: vanItem.productName,
+        systemRemaining: vanItem.remainingQuantity,
+        physicalCounted: counted,
+        varianceUnits,
+        varianceValueIQD: varianceUnits * vanItem.unitPriceIQD
+      });
+    }
+
+    return {
+      auditedAt: now,
+      totalMatched: lines.filter(l => l.varianceUnits === 0).length,
+      totalDiscrepancies: lines.filter(l => l.varianceUnits !== 0).length,
+      netVarianceValueIQD: lines.reduce((s, l) => s + l.varianceValueIQD, 0),
+      lines
+    };
+  }
+
+  unloadVanToWarehouse(params: {
+    driverId: string;
+    notes?: string;
+  }): VanUnloadRecord {
+    const driver = this.drivers.find(d => d.id === params.driverId);
+    if (!driver) throw new Error('السائق غير موجود');
+
+    const driverItems = this.vanInventory.filter(v => v.driverId === params.driverId);
+    let totalUnitsReturned = 0;
+    let totalValueIQD = 0;
+    let damagedUnits = 0;
+    let affectedItems = 0;
+
+    for (const item of driverItems) {
+      if (item.remainingQuantity > 0 || item.damagedQuantity > 0) {
+        affectedItems += 1;
+        totalUnitsReturned += item.remainingQuantity;
+        totalValueIQD += item.remainingQuantity * item.unitPriceIQD;
+        damagedUnits += item.damagedQuantity;
+
+        if (item.remainingQuantity > 0) {
+          const offer = this.offers.find(
+            o => o.barcode === item.barcode && o.supplierId === driver.supplierId
+          );
+          if (offer) {
+            offer.availableStock += item.remainingQuantity;
+          }
+          item.remainingQuantity = 0;
+        }
+        item.damagedQuantity = 0;
+      }
+    }
+
+    if (totalUnitsReturned === 0 && damagedUnits === 0) {
+      throw new Error('لا توجد بضاعة متبقية أو تالفة في الفان للترحيل إلى المستودع');
+    }
+
+    const record: VanUnloadRecord = {
+      id: `unld_${Date.now()}`,
+      manifestNumber: `UNLOAD-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
+      driverId: driver.id,
+      supplierId: driver.supplierId,
+      itemsCount: affectedItems,
+      totalUnitsReturned,
+      totalValueIQD,
+      damagedUnits,
+      notes: params.notes?.trim() || 'ترحيل الجرد المتبقي والتالف إلى مستودع المورد الرئيسي',
+      createdAt: new Date().toISOString()
+    };
+    this.vanUnloadRecords.unshift(record);
+    return record;
   }
 
   closeDriverShift(params: {
     driverId: string;
     actualCashCountedIQD: number;
+    odometerEndKm?: number;
     notes?: string;
   }): ShiftCloseReport {
     const driver = this.drivers.find(d => d.id === params.driverId);
     if (!driver) throw new Error('السائق غير موجود');
 
+    if (params.odometerEndKm !== undefined && Number.isFinite(Number(params.odometerEndKm))) {
+      driver.odometerEndKm = Math.max(driver.odometerStartKm || 0, Math.round(Number(params.odometerEndKm)));
+    }
+
     const expectedCash = driver.currentCashCollectedIQD;
     const cashVariance = params.actualCashCountedIQD - expectedCash;
+    const driverStops = this.vanRouteStops.filter(s => s.driverId === driver.id);
+    const soldStops = driverStops.filter(s => s.status === 'sold').length;
+    const strikeRatePercent = driverStops.length > 0 ? Math.round((soldStops / driverStops.length) * 100) : 0;
 
     const report: ShiftCloseReport = {
       id: `SHIFT-${Date.now()}`,
@@ -1542,13 +1916,20 @@ class AppDataStore {
       totalOrdersDelivered: this.subOrders.filter(o => o.assignedDriverId === driver.id && o.status === 'delivered').length,
       totalDirectVanSales: this.vanInventory.filter(v => v.driverId === driver.id).reduce((s, i) => s + i.soldQuantity, 0),
       returnsCount: this.vanInventory.filter(v => v.driverId === driver.id).reduce((s, i) => s + i.returnedQuantity + i.damagedQuantity, 0),
+      totalExpensesIQD: driver.todayExpensesIQD || 0,
+      totalCreditSalesIQD: driver.todayCreditSalesIQD || 0,
+      totalDebtCollectedIQD: driver.todayDebtCollectedIQD || 0,
+      odometerStartKm: driver.odometerStartKm,
+      odometerEndKm: driver.odometerEndKm,
+      strikeRatePercent,
       notes: params.notes,
       status: 'pending_supplier_approval'
     };
 
     this.shiftReports.unshift(report);
-    // Reset driver cash for new shift
+    // Reset driver cash & daily counters for new shift
     driver.currentCashCollectedIQD = 0;
+    driver.todayExpensesIQD = 0;
     driver.isActiveShift = false;
 
     return report;
@@ -2003,6 +2384,268 @@ class AppDataStore {
     }
 
     return { review: newReview, summary };
+  }
+
+  private normalizeStaffPhone(phone: string): string {
+    return (phone || '').replace(/[\s\-()]/g, '').trim();
+  }
+
+  private hashStaffPassword(password: string): string {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const derived = crypto.scryptSync(password, salt, 64).toString('hex');
+    return `${salt}:${derived}`;
+  }
+
+  private verifyStaffPassword(password: string, storedHash: string): boolean {
+    const parts = storedHash.split(':');
+    if (parts.length !== 2) return false;
+    const [salt, keyHex] = parts;
+    if (!salt || !keyHex) return false;
+    const expected = Buffer.from(keyHex, 'hex');
+    const actual = crypto.scryptSync(password, salt, 64);
+    if (expected.length !== actual.length) return false;
+    return crypto.timingSafeEqual(expected, actual);
+  }
+
+  private toPublicStaff(staff: StoreStaffAccount): StoreStaffPublic {
+    const { passwordHash: _omitted, ...publicRecord } = staff;
+    return publicRecord;
+  }
+
+  getStoreStaff(storeId: string): StoreStaffPublic[] {
+    return this.storeStaff
+      .filter((s) => s.storeId === storeId)
+      .map((s) => this.toPublicStaff(s));
+  }
+
+  createStoreStaff(params: {
+    storeId: string;
+    storeName?: string;
+    name: string;
+    role: StoreStaffRole;
+    phone: string;
+    branchId: string;
+    branchName: string;
+    password: string;
+  }): StoreStaffPublic {
+    const name = (params.name || '').trim();
+    const phone = (params.phone || '').trim();
+    const normalizedPhone = this.normalizeStaffPhone(phone);
+    const password = String(params.password || '');
+
+    if (name.length < 2) {
+      throw new Error('يرجى إدخال اسم الموظف الكامل (حرفين على الأقل)');
+    }
+    if (params.role !== 'cashier' && params.role !== 'accountant') {
+      throw new Error('يرجى اختيار دور وظيفي صالح (كاشير أو محاسب)');
+    }
+    if (normalizedPhone.length < 6) {
+      throw new Error('يرجى إدخال رقم هاتف أو معرف دخول صالح (6 أرقام على الأقل)');
+    }
+    if (password.length < 4) {
+      throw new Error('كلمة المرور يجب أن تكون 4 أحرف أو أرقام على الأقل');
+    }
+
+    const duplicate = this.storeStaff.some(
+      (s) => this.normalizeStaffPhone(s.phone) === normalizedPhone
+    );
+    if (duplicate) {
+      throw new Error('رقم الهاتف هذا مسجل بالفعل لموظف آخر');
+    }
+
+    const storeMatch = this.stores.find((st) => st.id === params.storeId);
+    const created: StoreStaffAccount = {
+      id: `staff_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      storeId: params.storeId,
+      storeName: (params.storeName || storeMatch?.name || 'سوبرماركت المنصور المركزي').trim(),
+      name,
+      role: params.role,
+      phone,
+      branchId: (params.branchId || 'branch_main').trim(),
+      branchName: (params.branchName || 'الفرع الرئيسي').trim(),
+      isActive: true,
+      passwordHash: this.hashStaffPassword(password),
+      createdAt: new Date().toISOString()
+    };
+
+    this.storeStaff.unshift(created);
+    return this.toPublicStaff(created);
+  }
+
+  updateStoreStaff(
+    storeId: string,
+    staffId: string,
+    patch: {
+      name?: string;
+      role?: StoreStaffRole;
+      phone?: string;
+      branchId?: string;
+      branchName?: string;
+      isActive?: boolean;
+      password?: string;
+    }
+  ): StoreStaffPublic {
+    const staff = this.storeStaff.find((s) => s.id === staffId && s.storeId === storeId);
+    if (!staff) {
+      throw new Error('حساب الموظف غير موجود');
+    }
+
+    if (patch.name !== undefined) {
+      const trimmed = patch.name.trim();
+      if (trimmed.length < 2) {
+        throw new Error('يرجى إدخال اسم الموظف الكامل (حرفين على الأقل)');
+      }
+      staff.name = trimmed;
+    }
+
+    if (patch.role !== undefined) {
+      if (patch.role !== 'cashier' && patch.role !== 'accountant') {
+        throw new Error('دور وظيفي غير صالح');
+      }
+      staff.role = patch.role;
+    }
+
+    if (patch.phone !== undefined) {
+      const trimmedPhone = patch.phone.trim();
+      const norm = this.normalizeStaffPhone(trimmedPhone);
+      if (norm.length < 6) {
+        throw new Error('رقم الهاتف غير صالح (6 أرقام على الأقل)');
+      }
+      const duplicate = this.storeStaff.some(
+        (s) => s.id !== staffId && this.normalizeStaffPhone(s.phone) === norm
+      );
+      if (duplicate) {
+        throw new Error('رقم الهاتف هذا مسجل بالفعل لموظف آخر');
+      }
+      staff.phone = trimmedPhone;
+    }
+
+    if (patch.branchId !== undefined) {
+      staff.branchId = patch.branchId.trim() || staff.branchId;
+    }
+    if (patch.branchName !== undefined) {
+      staff.branchName = patch.branchName.trim() || staff.branchName;
+    }
+    if (patch.isActive !== undefined) {
+      staff.isActive = Boolean(patch.isActive);
+    }
+    if (patch.password !== undefined && patch.password.length > 0) {
+      if (patch.password.length < 4) {
+        throw new Error('كلمة المرور يجب أن تكون 4 أحرف أو أرقام على الأقل');
+      }
+      staff.passwordHash = this.hashStaffPassword(patch.password);
+    }
+
+    return this.toPublicStaff(staff);
+  }
+
+  deleteStoreStaff(storeId: string, staffId: string): void {
+    const idx = this.storeStaff.findIndex((s) => s.id === staffId && s.storeId === storeId);
+    if (idx === -1) {
+      throw new Error('حساب الموظف غير موجود');
+    }
+    this.storeStaff.splice(idx, 1);
+  }
+
+  authenticateStoreStaff(
+    phone: string,
+    password: string
+  ): { status: 'ok' | 'not_found' | 'invalid_credentials' | 'inactive'; staff?: StoreStaffPublic } {
+    const norm = this.normalizeStaffPhone(phone);
+    if (!norm || !password) {
+      return { status: 'invalid_credentials' };
+    }
+    const staff = this.storeStaff.find((s) => this.normalizeStaffPhone(s.phone) === norm);
+    if (!staff) {
+      return { status: 'not_found' };
+    }
+    if (!this.verifyStaffPassword(password, staff.passwordHash)) {
+      return { status: 'invalid_credentials' };
+    }
+    if (!staff.isActive) {
+      return { status: 'inactive' };
+    }
+    staff.lastLoginAt = new Date().toISOString();
+    return { status: 'ok', staff: this.toPublicStaff(staff) };
+  }
+
+  // ================= NEAR-EXPIRY & CLEARANCE OFFERS =================
+  getSupplierWarehouseBatches(supplierId: string): SupplierInventoryBatch[] {
+    return this.supplierInventoryBatches.filter((b) => b.supplierId === supplierId);
+  }
+
+  getCatalogImageForBarcode(barcode: string): string | undefined {
+    const prod = this.products.find((p) => p.barcode === barcode);
+    return prod?.imageUrl || prod?.images?.[0];
+  }
+
+  upsertWholesaleClearanceOffer(params: {
+    barcode: string;
+    supplierId: string;
+    basePriceIQD: number;
+    discountPercent: number;
+    availableStock: number;
+    expiryDate: string;
+  }): SupplierOffer {
+    const supplier = this.suppliers.find((s) => s.id === params.supplierId) || this.suppliers[0];
+    if (!supplier) {
+      throw new Error('المورد غير موجود');
+    }
+    const cleanDiscount = Math.min(85, Math.max(5, Math.round(Number(params.discountPercent))));
+    const basePrice = Math.max(250, Math.round(Number(params.basePriceIQD)));
+    const discountedPriceIQD = Math.max(250, Math.round((basePrice * (1 - cleanDiscount / 100)) / 50) * 50);
+    const discountedPriceUSD = Math.round((discountedPriceIQD / 1530) * 100) / 100;
+
+    let offer = this.offers.find(
+      (o) =>
+        o.barcode === params.barcode &&
+        o.supplierId === supplier.id &&
+        Boolean(o.isClearanceNearExpiry)
+    );
+
+    if (offer) {
+      offer.priceIQD = discountedPriceIQD;
+      offer.priceUSD = discountedPriceUSD;
+      offer.availableStock = Math.max(1, Math.round(Number(params.availableStock) || offer.availableStock));
+      offer.clearanceDiscountPercent = cleanDiscount;
+      offer.expiryDate = params.expiryDate;
+      offer.isClearanceNearExpiry = true;
+    } else {
+      const existingRegular = this.offers.find(
+        (o) => o.barcode === params.barcode && o.supplierId === supplier.id
+      );
+      const newOffer: SupplierOffer = {
+        id: `off_clr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        barcode: params.barcode,
+        supplierId: supplier.id,
+        supplierName: supplier.companyName,
+        supplierCity: supplier.city,
+        priceIQD: discountedPriceIQD,
+        priceUSD: discountedPriceUSD,
+        minOrderQuantity: existingRegular?.minOrderQuantity ?? 2,
+        availableStock: Math.max(1, Math.round(Number(params.availableStock) || 10)),
+        deliveryDays: 1,
+        paymentTerms: existingRegular?.paymentTerms ?? {
+          allowsCredit: true,
+          maxCreditDays: 15,
+          allowsCash: true
+        },
+        isClearanceNearExpiry: true,
+        clearanceDiscountPercent: cleanDiscount,
+        expiryDate: params.expiryDate
+      };
+      this.offers.unshift(newOffer);
+      offer = newOffer;
+    }
+
+    const catalogProduct = this.products.find((p) => p.barcode === params.barcode);
+    if (catalogProduct) {
+      catalogProduct.oldPrice = basePrice;
+      catalogProduct.discountPercent = cleanDiscount;
+      catalogProduct.badgeType = 'promo_day';
+    }
+
+    return offer;
   }
 }
 

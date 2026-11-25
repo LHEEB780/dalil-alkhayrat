@@ -316,7 +316,7 @@ export const VanManagementPanel: React.FC<VanManagementPanelProps> = ({
                 >
                   <span
                     className={`w-2 h-2 rounded-full ${
-                      availability === 'available' ? 'bg-[#00A046] animate-pulse' : 'bg-amber-500'
+                      availability === 'available' ? 'bg-[#00A046]' : 'bg-amber-500'
                     }`}
                   />
                   {availability === 'available'

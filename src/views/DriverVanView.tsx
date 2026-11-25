@@ -1,12 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Truck,
   ShoppingCart,
   Banknote,
   RotateCcw,
   CheckCircle2,
-  Wifi,
-  WifiOff,
   Search,
   Plus,
   Minus,
@@ -26,29 +23,41 @@ import {
   Store,
   Navigation,
   Wallet,
-  Printer,
-  Copy,
   Check,
   Phone,
-  Target,
-  Award,
   Clock,
   PackagePlus,
   Sparkles,
-  Send
+  Send,
+  Users,
+  PackageCheck,
+  BarChart3,
+  SlidersHorizontal,
+  BadgeCheck
 } from 'lucide-react';
 import {
   VanStockItem,
   Currency,
   OrderItem,
   Language,
-  ProductWithOffers
+  ProductWithOffers,
+  VanModuleSection,
+  VanExpenseItem,
+  VanReturnItem,
+  VanShiftReportItem,
+  VanKPIs
 } from '../types/index.ts';
 import { formatCurrency } from '../utils/format.ts';
 import { translations, getLocalizedText } from '../utils/translations.ts';
 import { DriverBottomNav, DriverBottomTab } from '../components/DriverBottomNav.tsx';
 import { VanSmartNavigation } from '../components/VanSmartNavigation.tsx';
 import { VanManagementPanel } from '../components/VanManagementPanel.tsx';
+import { VanCustomersCreditPanel } from '../components/VanCustomersCreditPanel.tsx';
+import { VanInventoryAuditPanel } from '../components/VanInventoryAuditPanel.tsx';
+import { VanFinanceSettlementPanel } from '../components/VanFinanceSettlementPanel.tsx';
+import { VanPerformancePanel } from '../components/VanPerformancePanel.tsx';
+import { VanInvoiceModal, InvoiceSupplierIdentity } from '../components/VanInvoiceModal.tsx';
+import { WHOLESALE_SUPPLIERS } from '../data/nearbySuppliers.ts';
 import {
   SupplierCategorySlider,
   matchesSupplierCategoryAndBranch
@@ -61,6 +70,19 @@ interface DriverVanViewProps {
   products?: ProductWithOffers[];
   onRefreshOrders: () => void;
   language?: Language;
+  activeSection?: VanModuleSection;
+  onChangeSection?: (section: VanModuleSection) => void;
+  openShiftCloseSignal?: number;
+  onSyncSummary?: (summary: {
+    cashCustodyIQD: number;
+    remainingUnits: number;
+    pendingOrdersCount: number;
+    pendingRestockCount: number;
+    nearExpiryCount: number;
+    creditClientsCount: number;
+    vehiclePlate: string;
+    vanWarehouseName: string;
+  }) => void;
 }
 
 interface VanCartLine {
@@ -118,7 +140,11 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
   orders,
   products = [],
   onRefreshOrders,
-  language = 'ar'
+  language = 'ar',
+  activeSection,
+  onChangeSection,
+  openShiftCloseSignal = 0,
+  onSyncSummary
 }) => {
   const isAr = language === 'ar';
   const t = translations[language];
@@ -128,14 +154,29 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
   const [driverInfo, setDriverInfo] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
-  // Bottom nav primary tabs & Cashier sub-tabs
-  const [driverTab, setDriverTab] = useState<DriverBottomTab>('pos');
-  const [posSubTab, setPosSubTab] = useState<'sell' | 'collections' | 'returns'>('sell');
+  // Unified DSD Section state (synced with Top Menu Drawer & Bottom Bar)
+  const [internalSection, setInternalSection] = useState<VanModuleSection>('pos_sell');
+  const currentSection: VanModuleSection = activeSection ?? internalSection;
+  const setSection = (section: VanModuleSection) => {
+    setInternalSection(section);
+    onChangeSection?.(section);
+  };
+  const driverTab: DriverBottomTab =
+    currentSection === 'deliveries'
+      ? 'deliveries'
+      : currentSection === 'restock'
+      ? 'restock'
+      : currentSection === 'navigation'
+      ? 'navigation'
+      : currentSection === 'manage'
+      ? 'manage'
+      : 'pos';
+
   const [searchQuery, setSearchQuery] = useState('');
   const [catalogView, setCatalogView] = useState<'mini' | 'grid' | 'list'>('grid');
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
 
-  // DSD Fleet Data: Route Stops, Credit Accounts, Transactions, Commission, Supplier Store Catalog & Load Requests
+  // DSD Fleet Data: Route Stops, Credit Accounts, Transactions, Commission, Supplier Store Catalog, Expenses, Returns, Z-Reports & KPIs
   const [routeStops, setRouteStops] = useState<any[]>([]);
   const [creditAccounts, setCreditAccounts] = useState<any[]>([]);
   const [vanTransactions, setVanTransactions] = useState<any[]>([]);
@@ -143,6 +184,12 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
   const [loadRequests, setLoadRequests] = useState<any[]>([]);
   const [supplierCatalog, setSupplierCatalog] = useState<any[]>([]);
   const [vanStores, setVanStores] = useState<any[]>([]);
+  const [vanExpenses, setVanExpenses] = useState<VanExpenseItem[]>([]);
+  const [vanReturns, setVanReturns] = useState<VanReturnItem[]>([]);
+  const [shiftReports, setShiftReports] = useState<VanShiftReportItem[]>([]);
+  const [vanUnloadRecords, setVanUnloadRecords] = useState<any[]>([]);
+  const [vanKPIs, setVanKPIs] = useState<VanKPIs | null>(null);
+  const [supplierProfile, setSupplierProfile] = useState<any>(null);
 
   // Van POS Category & Subcategory Filter (scoped to supplier's products)
   const [posCategory, setPosCategory] = useState<string>('الكل');
@@ -157,32 +204,31 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
   const [restockNotes, setRestockNotes] = useState('');
   const [isSubmittingRestock, setIsSubmittingRestock] = useState(false);
 
-  // Debt Collection State
+  // Debt Collection Selected Store
   const [collectStoreId, setCollectStoreId] = useState('store_almansoor');
-  const [collectAmountInput, setCollectAmountInput] = useState('');
-  const [collectNotes, setCollectNotes] = useState('');
-  const [isCollectingDebt, setIsCollectingDebt] = useState(false);
 
   // Printable / Shareable Receipt Modal
   const [activeReceipt, setActiveReceipt] = useState<any>(null);
-  const [copiedReceipt, setCopiedReceipt] = useState(false);
 
-  // Van Cashier Cart (Multi-item POS checkout)
+  // Van Cashier Cart (Multi-item POS checkout with Tier Pricing & Cashier Discount)
   const [vanCart, setVanCart] = useState<VanCartLine[]>([]);
   const [targetStoreId, setTargetStoreId] = useState('store_almansoor');
   const [salePaymentType, setSalePaymentType] = useState<'cash' | 'credit'>('cash');
+  const [cashierDiscountInput, setCashierDiscountInput] = useState('');
   const [isProcessingSale, setIsProcessingSale] = useState(false);
 
-  // Returns / Damaged form
+  // Returns / Damaged / Exchange RMA form
   const [returnBarcode, setReturnBarcode] = useState('');
+  const [returnStoreId, setReturnStoreId] = useState('store_almansoor');
   const [returnQty, setReturnQty] = useState(1);
-  const [returnType, setReturnType] = useState<'return' | 'damage'>('return');
+  const [returnType, setReturnType] = useState<'return' | 'damage' | 'exchange'>('return');
   const [returnReason, setReturnReason] = useState('');
   const [isLoggingReturn, setIsLoggingReturn] = useState(false);
 
   // Daily Shift Close Modal
   const [showShiftCloseModal, setShowShiftCloseModal] = useState(false);
   const [actualCashInput, setActualCashInput] = useState('');
+  const [odometerEndInput, setOdometerEndInput] = useState('');
   const [shiftCloseError, setShiftCloseError] = useState<string | null>(null);
   const [shiftCloseResult, setShiftCloseResult] = useState<any>(null);
 
@@ -202,6 +248,7 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
       if (data.success) {
         setVanStock(data.inventory || []);
         setDriverInfo(data.driver || null);
+        setSupplierProfile(data.supplier || null);
         setRouteStops(data.routeStops || []);
         setCreditAccounts(data.creditAccounts || []);
         setVanTransactions(data.transactions || []);
@@ -209,6 +256,14 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
         setLoadRequests(data.loadRequests || []);
         setSupplierCatalog(data.supplierCatalog || []);
         setVanStores(data.stores || []);
+        setVanExpenses(data.vanExpenses || []);
+        setVanReturns(data.vanReturns || []);
+        setShiftReports(data.shiftReports || []);
+        setVanUnloadRecords(data.vanUnloadRecords || []);
+        setVanKPIs(data.kpis || null);
+        if (data.driver?.odometerEndKm || data.driver?.odometerStartKm) {
+          setOdometerEndInput(String(data.driver.odometerEndKm ?? data.driver.odometerStartKm));
+        }
         if (data.inventory?.length > 0 && !returnBarcode) {
           setReturnBarcode(data.inventory[0].barcode);
         }
@@ -227,6 +282,14 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
   useEffect(() => {
     loadVanData();
   }, []);
+
+  useEffect(() => {
+    if (openShiftCloseSignal > 0) {
+      setShiftCloseError(null);
+      setShiftCloseResult(null);
+      setShowShiftCloseModal(true);
+    }
+  }, [openShiftCloseSignal]);
 
   // Smart Restock Auto-Fill (replaces today's sold units automatically)
   const handleSmartRestockFill = () => {
@@ -379,10 +442,43 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
     );
   };
 
-  const cartTotalIQD = useMemo(
-    () => vanCart.reduce((sum, line) => sum + line.unitPriceIQD * line.qty, 0),
-    [vanCart]
+  // Cart pricing helper with automatic wholesale tier pricing
+  const resolveLinePricing = (line: VanCartLine) => {
+    const stockItem = vanStock.find((v) => v.barcode === line.barcode);
+    const tierApplied = Boolean(
+      stockItem?.bulkDiscountMinQty &&
+      stockItem?.bulkUnitPriceIQD &&
+      line.qty >= stockItem.bulkDiscountMinQty
+    );
+    const effectiveUnitPrice = tierApplied
+      ? (stockItem!.bulkUnitPriceIQD as number)
+      : line.unitPriceIQD;
+    const baseTotal = line.unitPriceIQD * line.qty;
+    const lineTotal = effectiveUnitPrice * line.qty;
+    return {
+      effectiveUnitPrice,
+      tierApplied,
+      lineTotal,
+      tierSavingsIQD: Math.max(0, baseTotal - lineTotal),
+      bulkMinQty: stockItem?.bulkDiscountMinQty,
+      bulkUnitPriceIQD: stockItem?.bulkUnitPriceIQD
+    };
+  };
+
+  const cartGrossIQD = useMemo(
+    () => vanCart.reduce((sum, line) => sum + resolveLinePricing(line).lineTotal, 0),
+    [vanCart, vanStock]
   );
+
+  const cartTierSavingsIQD = useMemo(
+    () => vanCart.reduce((sum, line) => sum + resolveLinePricing(line).tierSavingsIQD, 0),
+    [vanCart, vanStock]
+  );
+
+  const maxAllowedDiscountIQD = Math.round(cartGrossIQD * 0.25);
+  const parsedCashierDiscount = Math.max(0, Math.round(Number(cashierDiscountInput) || 0));
+  const cleanDiscountIQD = Math.min(parsedCashierDiscount, maxAllowedDiscountIQD);
+  const cartTotalIQD = Math.max(0, cartGrossIQD - cleanDiscountIQD);
 
   const cartUnitsCount = useMemo(
     () => vanCart.reduce((sum, line) => sum + line.qty, 0),
@@ -404,7 +500,8 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
           driverId,
           storeId: targetStoreId,
           items: vanCart.map((l) => ({ barcode: l.barcode, quantity: l.qty })),
-          paymentType: salePaymentType
+          paymentType: salePaymentType,
+          discountIQD: cleanDiscountIQD
         })
       });
       const data = await res.json();
@@ -414,6 +511,7 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
 
       const grandTotal = data.data?.saleAmountIQD || cartTotalIQD;
       setVanCart([]);
+      setCashierDiscountInput('');
       setFeedback({
         type: 'success',
         text: isAr
@@ -422,7 +520,6 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
       });
       if (data.data?.transaction) {
         setActiveReceipt(data.data.transaction);
-        setCopiedReceipt(false);
       }
       await loadVanData();
     } catch (err: any) {
@@ -432,53 +529,6 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
       });
     } finally {
       setIsProcessingSale(false);
-    }
-  };
-
-  // Debt Collection Handler
-  const handleCollectDebt = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const amount = Number(collectAmountInput);
-    if (!collectStoreId || !amount || amount <= 0 || isCollectingDebt) return;
-    setIsCollectingDebt(true);
-    setFeedback(null);
-
-    try {
-      const res = await fetch('/api/van/debt-collection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          driverId,
-          storeId: collectStoreId,
-          amountIQD: amount,
-          notes: collectNotes
-        })
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.message || (isAr ? 'فشل تسجيل تحصيل الدين' : 'Debt collection failed'));
-      }
-
-      setCollectAmountInput('');
-      setCollectNotes('');
-      setFeedback({
-        type: 'success',
-        text: isAr
-          ? `تم تحصيل ${formatCurrency(amount, currency, language)} نقداً وتنزيلها من حساب الآجل وإضافتها لعهدة الكاش.`
-          : `Collected ${formatCurrency(amount, currency, language)} cash and updated store ledger.`
-      });
-      if (data.data?.transaction) {
-        setActiveReceipt(data.data.transaction);
-        setCopiedReceipt(false);
-      }
-      await loadVanData();
-    } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        text: err?.message || (isAr ? 'تعذر تسجيل التحصيل' : 'Collection error')
-      });
-    } finally {
-      setIsCollectingDebt(false);
     }
   };
 
@@ -499,42 +549,45 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
     }
   };
 
-  // Copy WhatsApp-ready Receipt Text
-  const handleCopyReceiptText = async (tx: any) => {
-    if (!tx) return;
-    const lines = [
-      `🧾 *وصل ${tx.type === 'debt_collection' ? 'تحصيل آجل' : 'بيع مباشر من الفان'} — دليل الخيرات*`,
-      `رقم الوصل: ${tx.receiptNumber}`,
-      `المتجر: ${tx.storeName}`,
-      `المندوب: ${tx.driverName}`,
-      `طريقة الدفع: ${tx.paymentType === 'cash' ? 'نقدي (كاش)' : 'آجل على الحساب'}`,
-      ...(tx.items?.length
-        ? [
-            '--- الأصناف ---',
-            ...tx.items.map(
-              (it: any) => `• ${it.productName} (${it.quantity} × ${it.unitPriceIQD.toLocaleString()} د.ع) = ${it.totalIQD.toLocaleString()} د.ع`
-            )
-          ]
-        : []),
-      `الإجمالي: ${tx.totalAmountIQD.toLocaleString()} د.ع`,
-      tx.type === 'direct_sale' ? '✅ تمت مزامنة البضاعة تلقائياً إلى مخزون الكاشير.' : '✅ تم ترحيل الدفعة إلى دفتر الأستاذ (FIFO).'
-    ].join('\n');
+  const resolvedSupplierIdentity: InvoiceSupplierIdentity = useMemo(() => {
+    const supplierId = driverInfo?.supplierId || supplierProfile?.id || 'supp_rafidain';
+    const dirMatch =
+      WHOLESALE_SUPPLIERS.find((s) => s.id === supplierId) ||
+      WHOLESALE_SUPPLIERS.find((s) => s.id === 'supp_rafidain') ||
+      WHOLESALE_SUPPLIERS[0];
 
-    try {
-      await navigator.clipboard.writeText(lines);
-      setCopiedReceipt(true);
-      setTimeout(() => setCopiedReceipt(false), 2500);
-    } catch {
-      setCopiedReceipt(false);
-    }
+    return {
+      id: supplierId,
+      companyName: isAr
+        ? supplierProfile?.companyName || dirMatch?.nameAr || 'شركة الرافدين للتجارة العامة والأغذية'
+        : dirMatch?.nameEn || supplierProfile?.companyName || 'Al-Rafidain General Food & Trading Co.',
+      phone: supplierProfile?.phone || dirMatch?.phone || '+964 780 112 2334',
+      city: isAr ? supplierProfile?.city || 'بغداد' : 'Baghdad',
+      address: isAr
+        ? supplierProfile?.address || dirMatch?.addressAr || 'شارع الرشيد - حي الشورجة التجاري'
+        : dirMatch?.addressEn || supplierProfile?.address || 'Rasheed St - Shorja Wholesale Hub',
+      logoUrl: dirMatch?.logoUrl,
+      storeImageUrl: dirMatch?.storeImageUrl,
+      isVerified: supplierProfile?.isVerified ?? dirMatch?.isVerified ?? true
+    };
+  }, [driverInfo?.supplierId, supplierProfile, isAr]);
+
+  const resolveInvoiceProductImage = (barcode: string, productName: string): string => {
+    const fromCatalog = supplierCatalog.find((c) => c.barcode === barcode);
+    if (fromCatalog?.imageUrl) return fromCatalog.imageUrl;
+    const fromStock = vanStock.find((v) => v.barcode === barcode) as any;
+    if (fromStock?.imageUrl) return fromStock.imageUrl;
+    return resolveVanProductImage(barcode, productName, products);
   };
 
-  // Handle Return / Damage
+  // Handle Return / Damage / Exchange RMA
   const handleLogReturn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!returnBarcode || returnQty <= 0 || isLoggingReturn) return;
     setIsLoggingReturn(true);
     setFeedback(null);
+
+    const stockItem = vanStock.find((v) => v.barcode === returnBarcode);
 
     try {
       const res = await fetch('/api/van/returns', {
@@ -542,18 +595,25 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           driverId,
+          storeId: returnStoreId || undefined,
           barcode: returnBarcode,
           quantity: returnQty,
           type: returnType,
+          batchNumber: stockItem?.batchNumber,
+          expiryDate: stockItem?.expiryDate,
           reason:
             returnReason.trim() ||
             (returnType === 'damage'
               ? isAr
                 ? 'تلف أثناء النقل'
                 : 'Transit damage'
+              : returnType === 'exchange'
+              ? isAr
+                ? 'استبدال صنف تالف بصالح 1 مقابل 1'
+                : '1-for-1 product exchange'
               : isAr
-              ? 'مرتجع متجر'
-              : 'Store return')
+              ? 'مرتجع متجر وإشعار دائن'
+              : 'Store return & credit note')
         })
       });
 
@@ -562,11 +622,18 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
         throw new Error(data.message || (isAr ? 'فشل قيد المرتجع' : 'Failed to log return'));
       }
 
+      const rmaNum = data.returnRecord?.rmaNumber ? ` (${data.returnRecord.rmaNumber})` : '';
       setFeedback({
         type: 'success',
         text: isAr
-          ? `تم تسجيل ${returnType === 'damage' ? 'تالف' : 'مرتجع'} (${returnQty} وحدة) وتحديث عهدة الفان بنجاح.`
-          : `Successfully recorded ${returnType === 'damage' ? 'damaged' : 'returned'} goods (${returnQty} units).`
+          ? `تم تسجيل ${
+              returnType === 'damage'
+                ? 'تالف وعزله'
+                : returnType === 'exchange'
+                ? 'استبدال 1 مقابل 1'
+                : 'مرتجع وإشعار دائن'
+            }${rmaNum} بكمية ${returnQty} وحدة وتحديث عهدة الفان.`
+          : `Recorded ${returnType}${rmaNum} (${returnQty} units) and updated van ledger.`
       });
       setReturnQty(1);
       setReturnReason('');
@@ -639,7 +706,8 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           driverId,
-          actualCashCountedIQD: actualCash
+          actualCashCountedIQD: actualCash,
+          odometerEndKm: odometerEndInput ? Number(odometerEndInput) : undefined
         })
       });
 
@@ -671,198 +739,195 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
 
   const pendingRestockCount = loadRequests.filter((r) => r.status === 'pending_approval').length;
 
+  const nearExpiryCount = useMemo(() => {
+    const now = Date.now();
+    return vanStock.filter((item) => {
+      if (!item.expiryDate || item.remainingQuantity <= 0) return false;
+      const days = Math.ceil((new Date(item.expiryDate).getTime() - now) / (1000 * 60 * 60 * 24));
+      return days <= 45;
+    }).length;
+  }, [vanStock]);
+
+  useEffect(() => {
+    onSyncSummary?.({
+      cashCustodyIQD: driverInfo?.currentCashCollectedIQD || 0,
+      remainingUnits: totalRemainingUnits,
+      pendingOrdersCount,
+      pendingRestockCount,
+      nearExpiryCount,
+      creditClientsCount: creditAccounts.length,
+      vehiclePlate: displayVehiclePlate,
+      vanWarehouseName: displayVanWarehouse
+    });
+  }, [
+    driverInfo?.currentCashCollectedIQD,
+    totalRemainingUnits,
+    pendingOrdersCount,
+    pendingRestockCount,
+    nearExpiryCount,
+    creditAccounts.length,
+    displayVehiclePlate,
+    displayVanWarehouse
+  ]);
+
   return (
     <div className="bg-[#F4F4EA] rounded-3xl border border-[#E2E6D7] p-3 sm:p-5 space-y-4 font-brand text-[#142018] pb-28">
-      {/* ================= TOP VAN CASHIER HEADER ================= */}
-      <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-1">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-11 h-11 rounded-2xl bg-[#0B5D32] text-white flex items-center justify-center shadow-2xs shrink-0">
-            <Truck className="w-5 h-5 text-[#FFE600]" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-base sm:text-lg font-black text-[#0B5D32] leading-tight truncate">
-                {displayDriverName}
-              </h1>
-              <span className="text-[11px] font-mono font-bold text-[#4B6352] whitespace-nowrap">
-                {displayVehiclePlate}
-              </span>
-              <button
-                type="button"
-                onClick={() => setDriverTab('manage')}
-                className={`inline-flex items-center gap-1 text-[10.5px] font-black px-2 py-0.5 rounded-full border cursor-pointer transition ${
-                  driverInfo?.availabilityStatus === 'busy'
-                    ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-                    : 'bg-[#ECFDF5] text-[#065F46] border-[#A7F3D0] hover:bg-[#D1FAE5]'
-                }`}
-                title={isAr ? 'اضغط لإدارة حالة الفان والمسار' : 'Manage Van Status & Route'}
-              >
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    driverInfo?.availabilityStatus === 'busy' ? 'bg-amber-500' : 'bg-[#00A046] animate-pulse'
-                  }`}
-                />
-                <span>
-                  {driverInfo?.availabilityStatus === 'busy'
-                    ? isAr ? 'مشغول' : 'Busy'
-                    : isAr ? 'متاح' : 'Available'}
-                </span>
-              </button>
+      {/* ================= CONTEXTUAL PAGE HEADER (PER-PAGE IDENTITY) ================= */}
+      {currentSection !== 'performance' && (() => {
+        const pageMeta: Record<
+          Exclude<VanModuleSection, 'performance'>,
+          { icon: React.ReactNode; title: string; subtitle: string }
+        > = {
+          pos_sell: {
+            icon: <Receipt className="w-6 h-6 text-[#FFE600]" />,
+            title: isAr ? 'كاشير البيع المباشر بالجملة' : 'Wholesale Van POS',
+            subtitle: isAr
+              ? `${totalRemainingUnits} وحدة متوفرة بالفان · ${displayVehiclePlate}`
+              : `${totalRemainingUnits} units in van · ${displayVehiclePlate}`
+          },
+          customers_credit: {
+            icon: <Users className="w-6 h-6 text-[#FFE600]" />,
+            title: isAr ? 'العملاء والائتمان والتحصيل' : 'Customers, Credit & Collections',
+            subtitle: isAr
+              ? `${creditAccounts.length} حساب عميل مسجل في خط التوزيع`
+              : `${creditAccounts.length} active customer accounts`
+          },
+          returns_rma: {
+            icon: <RotateCcw className="w-6 h-6 text-[#FFE600]" />,
+            title: isAr ? 'المرتجعات وإشعارات الدائن والاستبدال' : 'Returns, Credit Notes & RMA',
+            subtitle: isAr
+              ? `${vanReturns.length} إشعار مرتجع واستبدال مسجل`
+              : `${vanReturns.length} logged returns & exchanges`
+          },
+          inventory_audit: {
+            icon: <PackageCheck className="w-6 h-6 text-[#FFE600]" />,
+            title: isAr ? 'جرد الحمولة والدفعات والصلاحية (FEFO)' : 'Load Audit, Lots & FEFO',
+            subtitle: isAr
+              ? `${totalRemainingUnits} وحدة متبقية · ${nearExpiryCount} قريب الانتهاء`
+              : `${totalRemainingUnits} units remaining · ${nearExpiryCount} near-expiry`
+          },
+          finance_settlement: {
+            icon: <Wallet className="w-6 h-6 text-[#FFE600]" />,
+            title: isAr ? 'المصاريف، فحص المركبة وتسوية الوردية' : 'Expenses, Fleet Check & Z-Report',
+            subtitle: isAr
+              ? `عهدة الكاش: ${formatCurrency(driverInfo?.currentCashCollectedIQD || 0, currency, language)}`
+              : `Cash custody: ${formatCurrency(driverInfo?.currentCashCollectedIQD || 0, currency, language)}`
+          },
+          deliveries: {
+            icon: <ClipboardCheck className="w-6 h-6 text-[#FFE600]" />,
+            title: isAr ? 'طلبيات التوريد والتسليم (PIN)' : 'Scheduled Deliveries (PIN)',
+            subtitle: isAr
+              ? `${pendingOrdersCount} قيد التسليم من أصل ${assignedOrders.length}`
+              : `${pendingOrdersCount} pending of ${assignedOrders.length} orders`
+          },
+          restock: {
+            icon: <PackagePlus className="w-6 h-6 text-[#FFE600]" />,
+            title: isAr ? 'تجهيز الفان من متجر المورد' : 'Van Restock & Load Requests',
+            subtitle: isAr
+              ? `${pendingRestockCount} طلب بانتظار اعتماد المستودع`
+              : `${pendingRestockCount} requests awaiting approval`
+          },
+          navigation: {
+            icon: <Navigation className="w-6 h-6 text-[#FFE600]" />,
+            title: isAr ? 'الملاحة الذكية وخط التوزيع' : 'Smart Route Navigation',
+            subtitle: isAr
+              ? `${routeStops.length} محطة في مسار التوزيع اليوم`
+              : `${routeStops.length} route stops scheduled today`
+          },
+          manage: {
+            icon: <SlidersHorizontal className="w-6 h-6 text-[#FFE600]" />,
+            title: isAr ? 'إدارة حالة الفان وخط السير' : 'Van Status & Route Planner',
+            subtitle: isAr
+              ? `${displayDriverName} · ${displayVehiclePlate}`
+              : `${displayDriverName} · ${displayVehiclePlate}`
+          }
+        };
+
+        const meta = pageMeta[currentSection];
+
+        return (
+          <header className="bg-gradient-to-l from-[#DCEAD9] via-[#EDF5EB] to-[#FAFDF9] rounded-2xl border border-[#BBD0BB] px-4 py-3 flex items-center justify-between gap-3 shadow-lg shadow-[#0B5D32]/20">
+            <div className="flex items-center gap-3.5 min-w-0">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#0F7A43] to-[#074423] text-white flex items-center justify-center shadow-lg shadow-[#0B5D32]/35 ring-4 ring-[#0B5D32]/15 shrink-0">
+                {meta.icon}
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-sm sm:text-base font-black text-[#0B5D32] leading-tight truncate">
+                  {meta.title}
+                </h1>
+                <p className="text-[11px] font-semibold text-[#4E6454] truncate mt-0.5">
+                  {meta.subtitle}
+                </p>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 text-[11px] text-[#5F7164] mt-0.5 flex-wrap">
-              <span className="truncate">{displayVanWarehouse}</span>
-              <span aria-hidden="true">·</span>
-              {isOnline ? (
-                <span className="inline-flex items-center gap-1 text-[#0B5D32] font-bold whitespace-nowrap">
-                  <Wifi className="w-3 h-3" />
-                  <span>{isAr ? 'متصل بالمستودع' : 'Online'}</span>
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 text-amber-700 font-bold whitespace-nowrap">
-                  <WifiOff className="w-3 h-3" />
-                  <span>{isAr ? 'وضع أوفلاين' : 'Offline'}</span>
+
+            <div className="flex items-center gap-2.5 shrink-0">
+              {currentSection === 'finance_settlement' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShiftCloseError(null);
+                    setShiftCloseResult(null);
+                    setShowShiftCloseModal(true);
+                  }}
+                  className="min-h-[38px] px-3.5 py-1.5 rounded-full bg-[#FFA300] hover:bg-[#e69200] text-[#142018] font-black text-xs flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap shadow-md shadow-amber-900/15"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>{t.closeShiftBtn}</span>
+                </button>
+              )}
+
+              {currentSection === 'manage' && (
+                <span
+                  className={`inline-flex items-center gap-1 text-[11px] font-black px-2.5 py-1 rounded-full border shadow-sm whitespace-nowrap ${
+                    driverInfo?.availabilityStatus === 'busy'
+                      ? 'bg-amber-50 text-amber-800 border-amber-200'
+                      : 'bg-[#ECFDF5] text-[#065F46] border-[#A7F3D0]'
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      driverInfo?.availabilityStatus === 'busy' ? 'bg-amber-500' : 'bg-[#00A046]'
+                    }`}
+                  />
+                  <span>
+                    {driverInfo?.availabilityStatus === 'busy'
+                      ? isAr ? 'مشغول' : 'Busy'
+                      : isAr ? 'متاح' : 'Available'}
+                  </span>
                 </span>
               )}
+
+              <button
+                type="button"
+                onClick={() => loadVanData()}
+                disabled={loading}
+                className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#DCEBD8] to-[#F3F8F1] border border-[#B7CEB7] hover:border-[#0B5D32] flex items-center justify-center text-[#0B5D32] shadow-md shadow-[#0B5D32]/20 ring-4 ring-[#0B5D32]/10 transition cursor-pointer shrink-0"
+                title={isAr ? 'تحديث البيانات' : 'Refresh Data'}
+              >
+                <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+              </button>
             </div>
-          </div>
-        </div>
+          </header>
+        );
+      })()}
 
-        {/* Workspace Controls */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={() => {
-              setShiftCloseError(null);
-              setShiftCloseResult(null);
-              setShowShiftCloseModal(true);
-            }}
-            className="min-h-[38px] px-3.5 py-2 rounded-full bg-[#FFA300] hover:bg-[#e69200] text-[#142018] font-black text-xs flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap shadow-2xs"
-          >
-            <Lock className="w-3.5 h-3.5" />
-            <span>{t.closeShiftBtn}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => loadVanData()}
-            disabled={loading}
-            className="w-9 h-9 rounded-full bg-white border border-[#DCE5DC] hover:border-[#0B5D32] flex items-center justify-center text-[#3D5244] transition cursor-pointer shrink-0"
-            title={isAr ? 'تحديث بيانات الفان' : 'Refresh Van Data'}
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-      </header>
-
-      {/* ================= COMPACT 3-KPI CUSTODY STRIP ================= */}
-      <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
-        <div className="bg-white rounded-2xl border border-[#DCE5DC] p-3 sm:p-3.5">
-          <div className="text-[10.5px] sm:text-[11px] font-bold text-[#5F7164] truncate">
-            {t.cashInCustody}
-          </div>
-          <div className="text-sm sm:text-lg font-black font-mono tabular-nums text-[#0B5D32] mt-1 truncate">
-            {formatCurrency(driverInfo?.currentCashCollectedIQD || 0, currency, language)}
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-[#DCE5DC] p-3 sm:p-3.5">
-          <div className="text-[10.5px] sm:text-[11px] font-bold text-[#5F7164] truncate">
-            {isAr ? 'المتبقي بالفان' : 'Remaining Stock'}
-          </div>
-          <div className="text-sm sm:text-lg font-black font-mono tabular-nums text-[#142018] mt-1 flex items-baseline gap-1.5">
-            <span>{totalRemainingUnits}</span>
-            <span className="text-[10px] font-sans font-semibold text-[#5F7164] truncate">
-              {isAr ? `وحدة · مباع ${totalSoldUnits}` : `left · ${totalSoldUnits} sold`}
-            </span>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setDriverTab('deliveries')}
-          className="bg-white rounded-2xl border border-[#DCE5DC] hover:border-[#0B5D32]/50 p-3 sm:p-3.5 text-start transition cursor-pointer"
-        >
-          <div className="text-[10.5px] sm:text-[11px] font-bold text-[#5F7164] truncate">
-            {isAr ? 'طلبيات للتسليم' : 'Pending Orders'}
-          </div>
-          <div className="text-sm sm:text-lg font-black font-mono tabular-nums text-[#142018] mt-1 flex items-baseline gap-1.5">
-            <span className={pendingOrdersCount > 0 ? 'text-amber-700' : 'text-[#0B5D32]'}>
-              {pendingOrdersCount}
-            </span>
-            <span className="text-[10px] font-sans font-semibold text-[#5F7164] truncate">
-              {isAr ? `من ${assignedOrders.length}` : `of ${assignedOrders.length}`}
-            </span>
-          </div>
-        </button>
-      </div>
-
-      {/* ================= TARGET & COMMISSION TRACKER STRIP ================= */}
-      {commissionSummary && (
-        <div className="bg-white rounded-2xl border border-[#DCE5DC] p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex-1 min-w-0 space-y-1.5">
-            <div className="flex items-center justify-between gap-2 text-xs">
-              <span className="font-black text-[#142018] flex items-center gap-1.5">
-                <Target className="w-4 h-4 text-[#0B5D32]" />
-                <span>{isAr ? 'هدف المبيعات والتحصيل اليومي' : 'Daily Sales & Collection Target'}</span>
-              </span>
-              <span className="font-mono font-black text-[#0B5D32] tabular-nums">
-                {commissionSummary.targetProgressPercent}%
-              </span>
-            </div>
-            <div className="w-full h-2 rounded-full bg-[#EAEFEA] overflow-hidden">
-              <div
-                className="h-full rounded-full bg-[#0B5D32] transition-all duration-300"
-                style={{ width: `${commissionSummary.targetProgressPercent}%` }}
-              />
-            </div>
-            <div className="flex items-center justify-between text-[11px] text-[#5F7164] font-mono tabular-nums">
-              <span>
-                {isAr ? 'المحقق: ' : 'Achieved: '}
-                <strong className="text-[#142018]">
-                  {formatCurrency(commissionSummary.totalAchievedIQD, currency, language)}
-                </strong>
-              </span>
-              <span>
-                {isAr ? 'الهدف: ' : 'Target: '}
-                {formatCurrency(commissionSummary.dailyTargetIQD, currency, language)}
-              </span>
-            </div>
-          </div>
-
-          <div className="sm:border-s sm:border-[#EAEFEA] sm:ps-4 flex items-center gap-2.5 shrink-0">
-            <div className="w-9 h-9 rounded-xl bg-[#ECFDF5] border border-[#A7F3D0] text-[#0B5D32] flex items-center justify-center shrink-0">
-              <Award className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="text-[10.5px] font-bold text-[#5F7164]">
-                {isAr
-                  ? `عمولتك اليوم (${commissionSummary.commissionRatePercent}%)`
-                  : `Today's Commission (${commissionSummary.commissionRatePercent}%)`}
-              </div>
-              <div className="text-sm font-black font-mono tabular-nums text-[#0B5D32]">
-                {formatCurrency(commissionSummary.estimatedCommissionIQD, currency, language)}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ================= CASHIER SUB-NAVIGATION (shown inside كاشير tab) ================= */}
+      {/* ================= ENTERPRISE VAN DSD WORKSPACE RAIL ================= */}
       {driverTab === 'pos' && (
         <div className="bg-white border border-[#DCE5DC] rounded-2xl p-1.5 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
           <button
             type="button"
-            onClick={() => setPosSubTab('sell')}
-            className={`flex-1 min-h-[38px] px-3 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
-              posSubTab === 'sell'
+            onClick={() => setSection('pos_sell')}
+            className={`min-h-[38px] px-3 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap shrink-0 ${
+              currentSection === 'pos_sell'
                 ? 'bg-[#0B5D32] text-white shadow-2xs'
                 : 'text-[#4B6352] hover:bg-[#F4F4EA]'
             }`}
           >
             <Receipt className="w-4 h-4 shrink-0" />
-            <span>{isAr ? 'كاشير البيع' : 'POS Sales'}</span>
+            <span>{isAr ? 'كاشير البيع' : 'Van POS'}</span>
             {cartUnitsCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full bg-[#FFE600] text-[#142018] text-[10px] font-black tabular-nums leading-none">
+              <span className="px-1.5 py-0.5 rounded-md bg-[#FFE600] text-[#142018] text-[10px] font-black tabular-nums leading-none">
                 {cartUnitsCount}
               </span>
             )}
@@ -870,28 +935,72 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
 
           <button
             type="button"
-            onClick={() => setPosSubTab('collections')}
-            className={`flex-1 min-h-[38px] px-3 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
-              posSubTab === 'collections'
+            onClick={() => setSection('customers_credit')}
+            className={`min-h-[38px] px-3 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap shrink-0 ${
+              currentSection === 'customers_credit'
                 ? 'bg-[#0B5D32] text-white shadow-2xs'
                 : 'text-[#4B6352] hover:bg-[#F4F4EA]'
             }`}
           >
-            <Wallet className="w-4 h-4 shrink-0" />
-            <span>{isAr ? 'تحصيل الآجل' : 'Collections'}</span>
+            <Users className="w-4 h-4 shrink-0" />
+            <span>{isAr ? 'العملاء والتحصيل' : 'Customers & Credit'}</span>
           </button>
 
           <button
             type="button"
-            onClick={() => setPosSubTab('returns')}
-            className={`flex-1 min-h-[38px] px-3 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
-              posSubTab === 'returns'
+            onClick={() => setSection('returns_rma')}
+            className={`min-h-[38px] px-3 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap shrink-0 ${
+              currentSection === 'returns_rma'
                 ? 'bg-[#0B5D32] text-white shadow-2xs'
                 : 'text-[#4B6352] hover:bg-[#F4F4EA]'
             }`}
           >
             <RotateCcw className="w-4 h-4 shrink-0" />
-            <span>{isAr ? 'مرتجع وتالف' : 'Returns'}</span>
+            <span>{isAr ? 'المرتجعات والاستبدال' : 'Returns & RMA'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSection('inventory_audit')}
+            className={`min-h-[38px] px-3 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap shrink-0 ${
+              currentSection === 'inventory_audit'
+                ? 'bg-[#0B5D32] text-white shadow-2xs'
+                : 'text-[#4B6352] hover:bg-[#F4F4EA]'
+            }`}
+          >
+            <PackageCheck className="w-4 h-4 shrink-0" />
+            <span>{isAr ? 'الجرد وFEFO' : 'Audit & FEFO'}</span>
+            {nearExpiryCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-black tabular-nums leading-none">
+                {nearExpiryCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSection('finance_settlement')}
+            className={`min-h-[38px] px-3 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap shrink-0 ${
+              currentSection === 'finance_settlement'
+                ? 'bg-[#0B5D32] text-white shadow-2xs'
+                : 'text-[#4B6352] hover:bg-[#F4F4EA]'
+            }`}
+          >
+            <Wallet className="w-4 h-4 shrink-0" />
+            <span>{isAr ? 'المصاريف والتسوية' : 'Expenses & Z-Report'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSection('performance')}
+            className={`min-h-[38px] px-3 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap shrink-0 ${
+              currentSection === 'performance'
+                ? 'bg-[#0B5D32] text-white shadow-2xs'
+                : 'text-[#4B6352] hover:bg-[#F4F4EA]'
+            }`}
+          >
+            <BarChart3 className="w-4 h-4 shrink-0" />
+            <span>{isAr ? 'لوحة مؤشرات الأداء' : 'KPIs'}</span>
           </button>
         </div>
       )}
@@ -927,7 +1036,7 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
       {/* ===================================================================== */}
       {/* TAB 1: VAN CASHIER TERMINAL (POS CATALOG + LIVE RECEIPT)              */}
       {/* ===================================================================== */}
-      {driverTab === 'pos' && posSubTab === 'sell' && (
+      {currentSection === 'pos_sell' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
           {/* LEFT: Van Inventory Catalog with Thumbnails */}
           <div className="lg:col-span-7 xl:col-span-8 space-y-3">
@@ -1188,6 +1297,13 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
                               ? `محمّل ${item.loadedQuantity} · مباع ${item.soldQuantity}`
                               : `Loaded ${item.loadedQuantity} · Sold ${item.soldQuantity}`}
                           </div>
+                          {item.bulkDiscountMinQty && item.bulkUnitPriceIQD && (
+                            <div className="text-[9.5px] font-bold text-[#0B5D32] bg-[#EFF7F1] px-1.5 py-0.5 rounded-md mt-1 inline-block tabular-nums">
+                              {isAr
+                                ? `جملة +${item.bulkDiscountMinQty}: ${formatCurrency(item.bulkUnitPriceIQD, currency, language)}`
+                                : `+${item.bulkDiscountMinQty}: ${formatCurrency(item.bulkUnitPriceIQD, currency, language)}`}
+                            </div>
+                          )}
                         </div>
 
                         {/* Price & Quick Add */}
@@ -1335,18 +1451,29 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
             id="van-pos-receipt-panel"
             className="lg:col-span-5 xl:col-span-4 bg-white rounded-2xl border border-[#DCE5DC] p-3.5 sm:p-4 space-y-3.5 lg:sticky lg:top-4 shadow-xs"
           >
-            <div className="flex items-center justify-between pb-2.5 border-b border-[#EAEFEA]">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-[#ECFDF5] text-[#0B5D32] flex items-center justify-center">
-                  <ShoppingCart className="w-4 h-4" />
+            {/* Compact Supplier Brand Identity Strip */}
+            <div className="bg-gradient-to-l from-[#E8F2E9] via-[#F4F8F4] to-white border border-[#CEE0CE] rounded-xl px-2.5 py-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-white border border-[#DCE5DC] p-0.5 shadow-2xs overflow-hidden shrink-0 flex items-center justify-center">
+                  {resolvedSupplierIdentity.logoUrl ? (
+                    <img
+                      src={resolvedSupplierIdentity.logoUrl}
+                      alt={resolvedSupplierIdentity.companyName}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover rounded-lg"
+                    />
+                  ) : (
+                    <ShoppingCart className="w-4 h-4 text-[#0B5D32]" />
+                  )}
                 </div>
-                <div>
-                  <h3 className="text-sm font-black text-[#142018]">
-                    {isAr ? 'فاتورة البيع الفوري' : 'Van Instant Receipt'}
-                  </h3>
-                  <p className="text-[10.5px] text-[#5F7164]">
-                    {isAr ? 'اضغط على أي صنف لإضافته للفاتورة' : 'Tap any product to add to receipt'}
-                  </p>
+                <div className="min-w-0">
+                  <div className="text-[11.5px] font-black text-[#0B5D32] truncate flex items-center gap-1">
+                    <span className="truncate">{resolvedSupplierIdentity.companyName}</span>
+                    <BadgeCheck className="w-3.5 h-3.5 text-[#00A046] shrink-0" />
+                  </div>
+                  <div className="text-[10px] font-semibold text-[#5F7164] truncate">
+                    {isAr ? 'فاتورة البيع الفوري للجملة' : 'Wholesale Van Instant Invoice'}
+                  </div>
                 </div>
               </div>
 
@@ -1354,7 +1481,7 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setVanCart([])}
-                  className="text-[11px] font-bold text-red-600 hover:text-red-700 flex items-center gap-1 cursor-pointer"
+                  className="text-[11px] font-bold text-red-600 hover:text-red-700 flex items-center gap-1 cursor-pointer shrink-0"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>{isAr ? 'تفريغ' : 'Clear'}</span>
@@ -1362,9 +1489,9 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
               )}
             </div>
 
-            {/* Target Store Selector */}
-            <div>
-              <label className="text-[11px] font-bold text-[#4B6352] mb-1 flex items-center gap-1">
+            {/* Target Store Selector + Credit Snapshot */}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-[#4B6352] flex items-center gap-1">
                 <Store className="w-3.5 h-3.5 text-[#0B5D32]" />
                 <span>{t.purchasingStore}</span>
               </label>
@@ -1373,13 +1500,47 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
                 onChange={(e) => setTargetStoreId(e.target.value)}
                 className="w-full bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] rounded-xl px-3 py-2 text-xs font-bold text-[#142018] focus:bg-white focus:outline-hidden"
               >
-                <option value="store_almansoor">
-                  {getLocalizedText('سوبرماركت المنصور المركزي', language)}
-                </option>
-                <option value="store_karrada">
-                  {getLocalizedText('أسواق دجلة الخير - الكرادة', language)}
-                </option>
+                {vanStores.length > 0 ? (
+                  vanStores.map((st) => (
+                    <option key={st.id} value={st.id}>
+                      {getLocalizedText(st.name, language)}
+                      {st.district ? ` — ${st.district}` : ''}
+                    </option>
+                  ))
+                ) : (
+                  <>
+                    <option value="store_almansoor">
+                      {getLocalizedText('سوبرماركت المنصور المركزي', language)}
+                    </option>
+                    <option value="store_karrada">
+                      {getLocalizedText('أسواق دجلة الخير - الكرادة', language)}
+                    </option>
+                  </>
+                )}
               </select>
+
+              {(() => {
+                const acc = creditAccounts.find((c) => c.storeId === targetStoreId);
+                if (!acc) return null;
+                return (
+                  <div
+                    className={`px-2.5 py-1.5 rounded-lg border text-[10.5px] font-bold flex items-center justify-between ${
+                      acc.isBlocked
+                        ? 'bg-red-50 border-red-200 text-red-700'
+                        : 'bg-[#F8FAF7] border-[#DCE5DC] text-[#4B6352]'
+                    }`}
+                  >
+                    <span>
+                      {acc.isBlocked
+                        ? isAr ? 'حساب موقوف (تجاوز أو تأخير)' : 'Account Blocked'
+                        : isAr ? 'المتاح بالائتمان:' : 'Available Credit:'}
+                    </span>
+                    <span className="font-mono font-black tabular-nums">
+                      {formatCurrency(acc.availableCreditIQD || 0, currency, language)}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Payment Method Toggle */}
@@ -1424,63 +1585,110 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
                 </p>
               </div>
             ) : (
-              <div className="divide-y divide-[#EAEFEA] max-h-64 overflow-y-auto pe-1">
-                {vanCart.map((line) => (
-                  <div key={line.barcode} className="py-2.5 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <div className="w-10 h-10 rounded-lg bg-white border border-[#EAEFEA] p-1 flex items-center justify-center shrink-0">
-                        <img
-                          src={line.imageUrl}
-                          alt={line.productName}
-                          referrerPolicy="no-referrer"
-                          className="max-h-full max-w-full object-contain mix-blend-multiply"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-[#142018] truncate">
-                          {getLocalizedText(line.productName, language)}
+              <div className="divide-y divide-[#EAEFEA] max-h-60 overflow-y-auto pe-1">
+                {vanCart.map((line) => {
+                  const pricing = resolveLinePricing(line);
+                  return (
+                    <div key={line.barcode} className="py-2.5 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <div className="w-10 h-10 rounded-lg bg-white border border-[#EAEFEA] p-1 flex items-center justify-center shrink-0">
+                          <img
+                            src={line.imageUrl}
+                            alt={line.productName}
+                            referrerPolicy="no-referrer"
+                            className="max-h-full max-w-full object-contain mix-blend-multiply"
+                          />
                         </div>
-                        <div className="text-[10.5px] font-mono text-[#0B5D32] font-bold tabular-nums">
-                          {formatCurrency(line.unitPriceIQD * line.qty, currency, language)}
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-[#142018] truncate">
+                            {getLocalizedText(line.productName, language)}
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10.5px] font-mono text-[#0B5D32] font-bold tabular-nums">
+                              {formatCurrency(pricing.lineTotal, currency, language)}
+                            </span>
+                            {pricing.tierApplied && (
+                              <span className="text-[9.5px] font-black bg-[#EFF7F1] text-[#0B5D32] px-1.5 py-0.2 rounded">
+                                {isAr ? 'سعر الكمية' : 'Tier Price'}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-1 bg-[#F4F4EA] rounded-lg p-0.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateCartQty(line.barcode, -1)}
-                        className="w-6 h-6 rounded-md bg-white hover:bg-gray-100 flex items-center justify-center text-[#142018] cursor-pointer"
-                      >
-                        <Minus className="w-3 h-3" />
-                      </button>
-                      <span className="w-6 text-center text-xs font-mono font-black tabular-nums">
-                        {line.qty}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateCartQty(line.barcode, 1)}
-                        className="w-6 h-6 rounded-md bg-[#0B5D32] text-white hover:bg-[#084725] flex items-center justify-center cursor-pointer"
-                      >
-                        <Plus className="w-3 h-3" />
-                      </button>
+                      <div className="flex items-center gap-1 bg-[#F4F4EA] rounded-lg p-0.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateCartQty(line.barcode, -1)}
+                          className="w-6 h-6 rounded-md bg-white hover:bg-gray-100 flex items-center justify-center text-[#142018] cursor-pointer"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <span className="w-6 text-center text-xs font-mono font-black tabular-nums">
+                          {line.qty}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateCartQty(line.barcode, 1)}
+                          className="w-6 h-6 rounded-md bg-[#0B5D32] text-white hover:bg-[#084725] flex items-center justify-center cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Cashier Discount Input */}
+            {vanCart.length > 0 && (
+              <div className="pt-2 border-t border-[#EAEFEA] space-y-1">
+                <div className="flex items-center justify-between text-[11px] font-bold text-[#4B6352]">
+                  <span>{isAr ? 'خصم تجاري إضافي (بحد أقصى 25%):' : 'Trade Discount (max 25%):'}</span>
+                  <span className="font-mono tabular-nums text-[#5F7164]">
+                    {formatCurrency(maxAllowedDiscountIQD, currency, language)}
+                  </span>
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  max={maxAllowedDiscountIQD}
+                  value={cashierDiscountInput}
+                  onChange={(e) => setCashierDiscountInput(e.target.value)}
+                  placeholder={isAr ? 'أدخل مبلغ الخصم بالدينار (اختياري)...' : 'Optional discount IQD...'}
+                  className="w-full bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] rounded-xl px-3 py-1.5 text-xs font-mono font-bold focus:bg-white focus:outline-hidden"
+                />
               </div>
             )}
 
             {/* Totals & Checkout CTA */}
-            <div className="pt-3 border-t border-[#EAEFEA] space-y-2.5">
+            <div className="pt-3 border-t border-[#EAEFEA] space-y-2">
               <div className="flex items-center justify-between text-xs text-[#5F7164]">
                 <span>{isAr ? 'عدد الوحدات:' : 'Total Units:'}</span>
                 <span className="font-mono font-bold text-[#142018] tabular-nums">
                   {cartUnitsCount}
                 </span>
               </div>
+              {cartTierSavingsIQD > 0 && (
+                <div className="flex items-center justify-between text-xs text-[#0B5D32] font-bold">
+                  <span>{isAr ? 'وفر تسعير الجملة للكميات:' : 'Bulk Tier Savings:'}</span>
+                  <span className="font-mono tabular-nums">
+                    -{formatCurrency(cartTierSavingsIQD, currency, language)}
+                  </span>
+                </div>
+              )}
+              {cleanDiscountIQD > 0 && (
+                <div className="flex items-center justify-between text-xs text-amber-800 font-bold">
+                  <span>{isAr ? 'خصم الفاتورة:' : 'Cashier Discount:'}</span>
+                  <span className="font-mono tabular-nums">
+                    -{formatCurrency(cleanDiscountIQD, currency, language)}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-xs font-black text-[#142018]">
-                  {isAr ? 'إجمالي الفاتورة:' : 'Invoice Total:'}
+                  {isAr ? 'إجمالي الفاتورة الصافي:' : 'Net Invoice Total:'}
                 </span>
                 <span className="text-lg font-black font-mono tabular-nums text-[#0B5D32]">
                   {formatCurrency(cartTotalIQD, currency, language)}
@@ -1512,7 +1720,7 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
       {/* ===================================================================== */}
       {/* TAB: VAN RESTOCK FROM SUPPLIER STORE (تجهيز فان من متجر المورد)       */}
       {/* ===================================================================== */}
-      {driverTab === 'restock' && (() => {
+      {currentSection === 'restock' && (() => {
         const filteredCatalog = supplierCatalog.filter((item) => {
           if (!matchesSupplierCategoryAndBranch(item, restockCategory, restockBranchId)) {
             return false;
@@ -2006,15 +2214,14 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
       {/* ===================================================================== */}
       {/* TAB: SMART NAVIGATION (الملاحة الذكية عبر خرائط جوجل وتجنب الزحام)    */}
       {/* ===================================================================== */}
-      {driverTab === 'navigation' && (
+      {currentSection === 'navigation' && (
         <VanSmartNavigation
           routeStops={routeStops}
           assignedOrders={assignedOrders}
           language={language}
           onStartSaleForStore={(storeId) => {
             setTargetStoreId(storeId);
-            setDriverTab('pos');
-            setPosSubTab('sell');
+            setSection('pos_sell');
           }}
           onMarkStopVisited={(stopId) => handleUpdateRouteStop(stopId, 'visited')}
         />
@@ -2023,7 +2230,7 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
       {/* ===================================================================== */}
       {/* TAB: VAN MANAGEMENT (إدارة الفان: التوفر + المسار + التوصيلات المجدولة) */}
       {/* ===================================================================== */}
-      {driverTab === 'manage' && (
+      {currentSection === 'manage' && (
         <VanManagementPanel
           driverId={driverId}
           driverInfo={driverInfo}
@@ -2036,398 +2243,116 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
           onUpdateRouteStop={handleUpdateRouteStop}
           onStartSaleForStore={(storeId) => {
             setTargetStoreId(storeId);
-            setDriverTab('pos');
-            setPosSubTab('sell');
+            setSection('pos_sell');
           }}
           onStartCollectionForStore={(storeId) => {
             setCollectStoreId(storeId);
-            setDriverTab('pos');
-            setPosSubTab('collections');
+            setSection('customers_credit');
           }}
-          onOpenNavigation={() => setDriverTab('navigation')}
-          onOpenDeliveries={() => setDriverTab('deliveries')}
+          onOpenNavigation={() => setSection('navigation')}
+          onOpenDeliveries={() => setSection('deliveries')}
           onFeedback={setFeedback}
         />
       )}
 
-      {/* Hidden legacy route block guard */}
-      {false && (
-        <div className="bg-white rounded-2xl border border-[#DCE5DC] p-4 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h3 className="font-black text-sm text-[#142018] flex items-center gap-2">
-                <Navigation className="w-4 h-4 text-[#0B5D32]" />
-                <span>{isAr ? 'خط السير اليومي للزيارات الميدانية' : 'Daily Field Route Stops'}</span>
-              </h3>
-              <p className="text-[11px] text-[#5F7164] mt-0.5">
-                {isAr
-                  ? 'المحلات المجدولة حسب القاطع — ابدأ البيع أو تحصيل الذمم بضغطة واحدة.'
-                  : 'Scheduled supermarket stops — jump directly to POS sale or debt collection.'}
-              </p>
-            </div>
-            <div className="text-xs font-mono font-bold text-[#0B5D32] tabular-nums">
-              {routeStops.filter((s) => s.status === 'sold' || s.status === 'visited').length} / {routeStops.length}{' '}
-              {isAr ? 'زيارة مكتملة' : 'completed'}
-            </div>
-          </div>
 
-          {routeStops.length === 0 ? (
-            <div className="py-10 text-center text-xs text-[#5F7164]">
-              {isAr ? 'لا توجد محلات مجدولة في خط السير اليوم' : 'No route stops scheduled today'}
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              {routeStops.map((stop) => {
-                const storeCredit = creditAccounts.find((c) => c.storeId === stop.storeId);
-                return (
-                  <div
-                    key={stop.id}
-                    className={`rounded-2xl border p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 transition ${
-                      stop.status === 'sold'
-                        ? 'border-[#A7F3D0] bg-[#ECFDF5]/40'
-                        : stop.status === 'visited'
-                        ? 'border-[#DCE5DC] bg-[#F8FAF7]'
-                        : 'border-[#DCE5DC] bg-white'
-                    }`}
-                  >
-                    <div className="flex items-start gap-3 min-w-0">
-                      <div
-                        className={`w-8 h-8 rounded-xl font-mono font-black text-xs flex items-center justify-center shrink-0 ${
-                          stop.status === 'sold'
-                            ? 'bg-[#0B5D32] text-white'
-                            : stop.status === 'visited'
-                            ? 'bg-[#4B6352] text-white'
-                            : 'bg-[#F4F4EA] text-[#142018] border border-[#DCE5DC]'
-                        }`}
-                      >
-                        {stop.sequence}
-                      </div>
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-black text-sm text-[#142018]">
-                            {getLocalizedText(stop.storeName, language)}
-                          </span>
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                              stop.status === 'sold'
-                                ? 'bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]'
-                                : stop.status === 'visited'
-                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                : 'bg-amber-50 text-amber-800 border border-amber-200'
-                            }`}
-                          >
-                            {stop.status === 'sold'
-                              ? isAr
-                                ? 'تم البيع'
-                                : 'Sold'
-                              : stop.status === 'visited'
-                              ? isAr
-                                ? 'تمت الزيارة'
-                                : 'Visited'
-                              : isAr
-                              ? 'بانتظار الزيارة'
-                              : 'Pending'}
-                          </span>
-                        </div>
-
-                        <div className="text-[11px] text-[#5F7164] flex items-center gap-2 flex-wrap">
-                          <span className="inline-flex items-center gap-1">
-                            <MapPin className="w-3.5 h-3.5 text-[#0B5D32]" />
-                            {stop.district} — {stop.address}
-                          </span>
-                          <span aria-hidden="true">·</span>
-                          <span className="inline-flex items-center gap-1 font-mono" dir="ltr">
-                            <Phone className="w-3 h-3 text-[#4B6352]" />
-                            {stop.phone}
-                          </span>
-                        </div>
-
-                        {stop.notes && (
-                          <div className="text-[11px] text-[#4B6352] font-semibold">
-                            {stop.notes}
-                          </div>
-                        )}
-
-                        <div className="flex items-center gap-3 flex-wrap text-[11px] pt-0.5">
-                          {storeCredit && storeCredit.currentUsedCreditIQD > 0 && (
-                            <span className="font-mono font-bold text-amber-800 tabular-nums">
-                              {isAr ? 'ذمة آجلة: ' : 'Credit Due: '}
-                              {formatCurrency(storeCredit.currentUsedCreditIQD, currency, language)}
-                            </span>
-                          )}
-                          {stop.lastSaleAmountIQD > 0 && (
-                            <span className="font-mono font-bold text-[#0B5D32] tabular-nums">
-                              {isAr ? 'مبيعات اليوم: ' : "Today's Sale: "}
-                              {formatCurrency(stop.lastSaleAmountIQD, currency, language)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 flex-wrap shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTargetStoreId(stop.storeId);
-                          setDriverTab('pos');
-                          setPosSubTab('sell');
-                        }}
-                        className="px-3 py-2 rounded-xl bg-[#0B5D32] hover:bg-[#084725] text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer transition"
-                      >
-                        <ShoppingCart className="w-3.5 h-3.5" />
-                        <span>{isAr ? 'بدء بيع' : 'Start Sale'}</span>
-                      </button>
-
-                      {storeCredit && storeCredit.currentUsedCreditIQD > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCollectStoreId(stop.storeId);
-                            setDriverTab('pos');
-                            setPosSubTab('collections');
-                          }}
-                          className="px-3 py-2 rounded-xl bg-[#FFE600] hover:bg-yellow-400 text-[#142018] font-black text-xs flex items-center gap-1.5 cursor-pointer transition"
-                        >
-                          <Wallet className="w-3.5 h-3.5" />
-                          <span>{isAr ? 'تحصيل آجل' : 'Collect'}</span>
-                        </button>
-                      )}
-
-                      {stop.status === 'pending' && (
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateRouteStop(stop.id, 'visited')}
-                          className="px-3 py-2 rounded-xl bg-[#F4F4EA] hover:bg-[#EAEFEA] text-[#4B6352] font-bold text-xs cursor-pointer transition"
-                        >
-                          {isAr ? 'تحديد كمزار' : 'Mark Visited'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+      {/* ===================================================================== */}
+      {/* ENTERPRISE MODULE: CUSTOMERS, CREDIT AGING, ONBOARDING & COLLECTIONS   */}
+      {/* ===================================================================== */}
+      {currentSection === 'customers_credit' && (
+        <VanCustomersCreditPanel
+          driverId={driverId}
+          stores={vanStores}
+          creditAccounts={creditAccounts}
+          vanTransactions={vanTransactions}
+          currency={currency}
+          language={language}
+          collectStoreId={collectStoreId}
+          onSelectCollectStore={setCollectStoreId}
+          onStartSaleForStore={(storeId) => {
+            setTargetStoreId(storeId);
+            setSection('pos_sell');
+          }}
+          onRefreshVanData={loadVanData}
+          onOpenReceipt={(tx) => {
+            setActiveReceipt(tx);
+          }}
+          onFeedback={setFeedback}
+        />
       )}
 
       {/* ===================================================================== */}
-      {/* TAB: CREDIT DEBT COLLECTIONS & TODAY'S LOG (تحصيل الآجل والعمليات)     */}
+      {/* ENTERPRISE MODULE: LOAD AUDIT, FEFO LOTS & WAREHOUSE UNLOAD           */}
       {/* ===================================================================== */}
-      {driverTab === 'pos' && posSubTab === 'collections' && (() => {
-        const selectedCreditAcc = creditAccounts.find((c) => c.storeId === collectStoreId);
-        return (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-            {/* Left: Debt Collection Form */}
-            <div className="lg:col-span-6 bg-white rounded-2xl border border-[#DCE5DC] p-4 space-y-4">
-              <div className="flex items-center gap-2">
-                <Wallet className="w-4 h-4 text-[#0B5D32]" />
-                <h3 className="font-black text-sm text-[#142018]">
-                  {isAr ? 'تحصيل دفعة نقدية من حساب الآجل' : 'Collect Cash Against Credit Ledger'}
-                </h3>
-              </div>
+      {currentSection === 'inventory_audit' && (
+        <VanInventoryAuditPanel
+          driverId={driverId}
+          vanStock={vanStock}
+          vanUnloadRecords={vanUnloadRecords}
+          currency={currency}
+          language={language}
+          onRefreshVanData={loadVanData}
+          onFeedback={setFeedback}
+        />
+      )}
 
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-[#4B6352] block">
-                  {isAr ? 'اختر المتجر المراد التحصيل منه:' : 'Select Store:'}
-                </label>
-                <div className="grid grid-cols-1 gap-2">
-                  {creditAccounts.map((acc) => {
-                    const isSelected = acc.storeId === collectStoreId;
-                    return (
-                      <button
-                        key={acc.id}
-                        type="button"
-                        onClick={() => setCollectStoreId(acc.storeId)}
-                        className={`p-3 rounded-xl border text-start flex items-center justify-between gap-2 transition cursor-pointer ${
-                          isSelected
-                            ? 'border-[#0B5D32] bg-[#ECFDF5]/60 ring-1 ring-[#0B5D32]/25'
-                            : 'border-[#DCE5DC] bg-[#F8FAF7] hover:bg-white'
-                        }`}
-                      >
-                        <div className="min-w-0">
-                          <div className="font-black text-xs text-[#142018] truncate">
-                            {acc.storeName}
-                          </div>
-                          <div className="text-[10.5px] text-[#5F7164] mt-0.5">
-                            {acc.isBlocked
-                              ? isAr
-                                ? 'الحساب موقوف (تجاوز أو تأخير)'
-                                : 'Account blocked'
-                              : isAr
-                              ? `سقف الائتمان: ${formatCurrency(acc.creditLimitIQD, currency, language)}`
-                              : `Limit: ${formatCurrency(acc.creditLimitIQD, currency, language)}`}
-                          </div>
-                        </div>
-                        <div className="text-end shrink-0">
-                          <div className="text-[10px] font-bold text-[#5F7164]">
-                            {isAr ? 'الدين المستحق' : 'Balance Due'}
-                          </div>
-                          <div className="text-sm font-black font-mono tabular-nums text-amber-800">
-                            {formatCurrency(acc.currentUsedCreditIQD, currency, language)}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+      {/* ===================================================================== */}
+      {/* ENTERPRISE MODULE: FIELD EXPENSES, VEHICLE TELEMETRY & Z-REPORTS      */}
+      {/* ===================================================================== */}
+      {currentSection === 'finance_settlement' && (
+        <VanFinanceSettlementPanel
+          driverId={driverId}
+          driverInfo={driverInfo}
+          vanExpenses={vanExpenses}
+          shiftReports={shiftReports}
+          currency={currency}
+          language={language}
+          onRefreshVanData={loadVanData}
+          onOpenShiftCloseModal={() => {
+            setShiftCloseError(null);
+            setShiftCloseResult(null);
+            setShowShiftCloseModal(true);
+          }}
+          onFeedback={setFeedback}
+        />
+      )}
 
-              {selectedCreditAcc && (
-                <form onSubmit={handleCollectDebt} className="space-y-3 pt-2 border-t border-[#EAEFEA] text-xs">
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="font-bold text-[#4B6352]">
-                        {isAr ? 'المبلغ المستلم نقداً (د.ع):' : 'Cash Collected (IQD):'}
-                      </label>
-                      <div className="flex items-center gap-1">
-                        {[0.25, 0.5, 1].map((ratio) => (
-                          <button
-                            key={ratio}
-                            type="button"
-                            onClick={() =>
-                              setCollectAmountInput(
-                                String(Math.round((selectedCreditAcc.currentUsedCreditIQD * ratio) / 1000) * 1000)
-                              )
-                            }
-                            className="px-2 py-0.5 rounded-md bg-[#F4F4EA] hover:bg-[#0B5D32] hover:text-white text-[10px] font-bold text-[#4B6352] transition cursor-pointer"
-                          >
-                            {ratio === 1 ? (isAr ? 'كامل الدين' : 'Full') : `${ratio * 100}%`}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <input
-                      type="number"
-                      required
-                      min={1000}
-                      max={selectedCreditAcc.currentUsedCreditIQD}
-                      value={collectAmountInput}
-                      onChange={(e) => setCollectAmountInput(e.target.value)}
-                      placeholder={isAr ? 'مثال: 500000' : 'e.g. 500000'}
-                      className="w-full bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] focus:bg-white rounded-xl p-2.5 font-mono font-black text-base text-[#0B5D32] focus:outline-hidden"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="font-bold text-[#4B6352] block mb-1">
-                      {isAr ? 'ملاحظة الوصل (اختياري):' : 'Receipt Notes (optional):'}
-                    </label>
-                    <input
-                      type="text"
-                      value={collectNotes}
-                      onChange={(e) => setCollectNotes(e.target.value)}
-                      placeholder={isAr ? 'مثال: دفعة نقدية من حساب الأسبوع الماضي' : 'e.g. Partial cash settlement'}
-                      className="w-full bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] focus:bg-white rounded-xl p-2.5 text-xs focus:outline-hidden"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={isCollectingDebt || selectedCreditAcc.currentUsedCreditIQD <= 0}
-                    className="w-full py-3 rounded-xl bg-[#0B5D32] hover:bg-[#084725] disabled:bg-gray-300 text-white font-black text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-2xs"
-                  >
-                    <Banknote className="w-4 h-4" />
-                    <span>
-                      {isCollectingDebt
-                        ? isAr
-                          ? 'جاري ترحيل الوصل...'
-                          : 'Posting receipt...'
-                        : isAr
-                        ? 'تأكيد التحصيل وإصدار وصل قبض'
-                        : 'Confirm Collection & Issue Receipt'}
-                    </span>
-                  </button>
-                </form>
-              )}
-            </div>
-
-            {/* Right: Today's Van Transactions & Printable Receipts */}
-            <div className="lg:col-span-6 bg-white rounded-2xl border border-[#DCE5DC] p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-black text-sm text-[#142018] flex items-center gap-1.5">
-                  <Clock className="w-4 h-4 text-[#0B5D32]" />
-                  <span>{isAr ? 'سجل فواتير ووصولات الفان اليوم' : "Today's Van Receipts"}</span>
-                </h3>
-                <span className="text-[11px] font-mono font-bold text-[#5F7164] tabular-nums">
-                  {vanTransactions.length} {isAr ? 'عملية' : 'entries'}
-                </span>
-              </div>
-
-              {vanTransactions.length === 0 ? (
-                <div className="py-10 text-center text-xs text-[#5F7164]">
-                  {isAr ? 'لا توجد عمليات مسجلة اليوم' : 'No transactions logged today'}
-                </div>
-              ) : (
-                <div className="divide-y divide-[#EAEFEA] max-h-[420px] overflow-y-auto">
-                  {vanTransactions.map((tx) => (
-                    <div key={tx.id} className="py-3 first:pt-1 last:pb-1 flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-mono font-black text-xs text-[#0B5D32]">
-                            {tx.receiptNumber}
-                          </span>
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                              tx.type === 'debt_collection'
-                                ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                                : 'bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]'
-                            }`}
-                          >
-                            {tx.type === 'debt_collection'
-                              ? isAr
-                                ? 'تحصيل آجل'
-                                : 'Debt Collection'
-                              : isAr
-                              ? 'بيع فوري'
-                              : 'Direct Sale'}
-                          </span>
-                        </div>
-                        <div className="text-xs font-bold text-[#142018] mt-0.5 truncate">
-                          {tx.storeName}
-                        </div>
-                        <div className="text-[10.5px] text-[#5F7164] truncate">
-                          {tx.paymentType === 'cash'
-                            ? isAr
-                              ? 'نقدي (كاش)'
-                              : 'Cash'
-                            : isAr
-                            ? 'آجل'
-                            : 'Credit'}{' '}
-                          · {new Date(tx.createdAt).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="font-mono font-black text-xs text-[#142018] tabular-nums">
-                          {formatCurrency(tx.totalAmountIQD, currency, language)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveReceipt(tx);
-                            setCopiedReceipt(false);
-                          }}
-                          className="p-2 rounded-xl bg-[#F4F4EA] hover:bg-[#0B5D32] hover:text-white text-[#4B6352] transition cursor-pointer"
-                          title={isAr ? 'عرض وطباعة الوصل' : 'View & Print Receipt'}
-                        >
-                          <Printer className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })()}
+      {/* ===================================================================== */}
+      {/* ENTERPRISE MODULE: KPI SCORECARD & COMMISSIONS                        */}
+      {/* ===================================================================== */}
+      {currentSection === 'performance' && (
+        <VanPerformancePanel
+          commissionSummary={commissionSummary}
+          kpis={vanKPIs}
+          vanStock={vanStock}
+          currency={currency}
+          language={language}
+          driverName={displayDriverName}
+          vehiclePlate={displayVehiclePlate}
+          vanWarehouseName={displayVanWarehouse}
+          availabilityStatus={driverInfo?.availabilityStatus === 'busy' ? 'busy' : 'available'}
+          isOnline={isOnline}
+          currentCashCollectedIQD={driverInfo?.currentCashCollectedIQD || 0}
+          totalRemainingUnits={totalRemainingUnits}
+          totalSoldUnits={totalSoldUnits}
+          pendingOrdersCount={pendingOrdersCount}
+          assignedOrdersCount={assignedOrders.length}
+          loading={loading}
+          onRefresh={() => loadVanData()}
+          onOpenShiftClose={() => {
+            setShiftCloseError(null);
+            setShiftCloseResult(null);
+            setShowShiftCloseModal(true);
+          }}
+          onOpenManage={() => setSection('manage')}
+          onOpenDeliveries={() => setSection('deliveries')}
+        />
+      )}
 
       {/* ===================================================================== */}
       {/* TAB 2: ASSIGNED DELIVERY ORDERS (PIN VERIFICATION)                    */}
       {/* ===================================================================== */}
-      {driverTab === 'deliveries' && (
+      {currentSection === 'deliveries' && (
         <div className="bg-white rounded-2xl border border-[#DCE5DC] p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="font-black text-sm text-[#142018]">
@@ -2496,136 +2421,246 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
       )}
 
       {/* ===================================================================== */}
-      {/* TAB 3: RETURNS & DAMAGED GOODS                                        */}
+      {/* ENTERPRISE MODULE: RETURNS, CREDIT NOTES & EXCHANGES (RMA)            */}
       {/* ===================================================================== */}
-      {driverTab === 'pos' && posSubTab === 'returns' && (
-        <div className="bg-white rounded-2xl border border-[#DCE5DC] p-4 space-y-4">
-          <div className="flex items-center gap-2">
-            <RotateCcw className="w-4 h-4 text-amber-700" />
-            <h3 className="font-black text-sm text-[#142018]">{t.returnDamageTitle}</h3>
-          </div>
-
-          {/* Visual Thumbnail Picker for Van Items */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {vanStock.map((item) => {
-              const isSelected = returnBarcode === item.barcode;
-              const imgSrc = resolveVanProductImage(item.barcode, item.productName, products);
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setReturnBarcode(item.barcode)}
-                  className={`p-2 rounded-xl border text-start flex items-center gap-2 transition cursor-pointer ${
-                    isSelected
-                      ? 'border-[#0B5D32] bg-[#ECFDF5]/60 ring-1 ring-[#0B5D32]/25'
-                      : 'border-[#DCE5DC] bg-[#F8FAF7] hover:bg-white'
-                  }`}
-                >
-                  <div className="w-10 h-10 rounded-lg bg-white border border-[#EAEFEA] p-1 flex items-center justify-center shrink-0">
-                    <img
-                      src={imgSrc}
-                      alt={item.productName}
-                      referrerPolicy="no-referrer"
-                      className="max-h-full max-w-full object-contain mix-blend-multiply"
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-[11px] font-bold text-[#142018] line-clamp-2 leading-tight">
-                      {getLocalizedText(item.productName, language)}
-                    </div>
-                    <div className="text-[10px] text-[#5F7164] tabular-nums mt-0.5">
-                      {isAr ? `بالفان: ${item.remainingQuantity}` : `In van: ${item.remainingQuantity}`}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          <form onSubmit={handleLogReturn} className="grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs">
-            <div className="sm:col-span-4">
-              <label className="text-[#4B6352] font-bold block mb-1">
-                {isAr ? 'نوع القيد:' : 'Record Type:'}
-              </label>
-              <div className="grid grid-cols-2 gap-1.5 bg-[#F4F4EA] p-1 rounded-xl font-bold">
-                <button
-                  type="button"
-                  onClick={() => setReturnType('return')}
-                  className={`py-2 rounded-lg transition cursor-pointer ${
-                    returnType === 'return'
-                      ? 'bg-[#0B5D32] text-white shadow-2xs'
-                      : 'text-[#4B6352]'
-                  }`}
-                >
-                  {isAr ? 'مرتجع سليم' : 'Return'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setReturnType('damage')}
-                  className={`py-2 rounded-lg transition cursor-pointer ${
-                    returnType === 'damage'
-                      ? 'bg-red-600 text-white shadow-2xs'
-                      : 'text-[#4B6352]'
-                  }`}
-                >
-                  {isAr ? 'تالف / منتهي' : 'Damaged'}
-                </button>
+      {currentSection === 'returns_rma' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-[#DCE5DC] p-4 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <RotateCcw className="w-4 h-4 text-amber-700" />
+                <h3 className="font-black text-sm text-[#142018]">{t.returnDamageTitle}</h3>
               </div>
+              {selectedReturnItem?.batchNumber && (
+                <span className="text-[11px] font-mono font-bold text-[#4B6352] bg-[#F8FAF7] border border-[#DCE5DC] px-2.5 py-1 rounded-lg">
+                  {selectedReturnItem.batchNumber} · {isAr ? 'انتهاء:' : 'Exp:'} {selectedReturnItem.expiryDate}
+                </span>
+              )}
             </div>
 
-            <div className="sm:col-span-3">
-              <label className="text-[#4B6352] font-bold block mb-1">{t.quantity}</label>
-              <div className="flex items-center justify-between bg-[#F8FAF7] border border-[#DCE5DC] rounded-xl p-1 h-[38px]">
-                <button
-                  type="button"
-                  onClick={() => setReturnQty((q) => Math.max(1, q - 1))}
-                  className="w-7 h-7 rounded-lg bg-white hover:bg-gray-100 flex items-center justify-center cursor-pointer"
-                >
-                  <Minus className="w-3.5 h-3.5" />
-                </button>
-                <span className="font-mono font-black text-sm tabular-nums">{returnQty}</span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setReturnQty((q) =>
-                      Math.min(Math.max(1, selectedReturnItem?.remainingQuantity || 50), q + 1)
-                    )
-                  }
-                  className="w-7 h-7 rounded-lg bg-[#0B5D32] text-white flex items-center justify-center cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="sm:col-span-3">
-              <label className="text-[#4B6352] font-bold block mb-1">
-                {isAr ? 'ملاحظة / السبب:' : 'Reason:'}
+            {/* Customer Store Picker for Credit Note */}
+            <div>
+              <label className="text-[11px] font-bold text-[#4B6352] mb-1 flex items-center gap-1">
+                <Store className="w-3.5 h-3.5 text-[#0B5D32]" />
+                <span>{isAr ? 'المتجر المُصدر له إشعار المرتجع / الاستبدال:' : 'Customer Store for RMA / Credit Note:'}</span>
               </label>
-              <input
-                type="text"
-                value={returnReason}
-                onChange={(e) => setReturnReason(e.target.value)}
-                placeholder={isAr ? 'مثال: كرتون ممزق' : 'e.g. Torn carton'}
-                className="w-full h-[38px] bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] focus:bg-white rounded-xl px-3 text-xs focus:outline-hidden"
-              />
-            </div>
-
-            <div className="sm:col-span-2 flex flex-col justify-end">
-              <button
-                type="submit"
-                disabled={isLoggingReturn || !returnBarcode}
-                className="w-full h-[38px] px-3 bg-[#142018] hover:bg-black disabled:bg-gray-300 text-white font-bold rounded-xl transition cursor-pointer whitespace-nowrap"
+              <select
+                value={returnStoreId}
+                onChange={(e) => setReturnStoreId(e.target.value)}
+                className="w-full bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] rounded-xl px-3 py-2 text-xs font-bold text-[#142018] focus:bg-white focus:outline-hidden"
               >
-                {t.recordReturnBtn}
-              </button>
+                {vanStores.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    {getLocalizedText(st.name, language)}
+                    {st.district ? ` — ${st.district}` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
-          </form>
+
+            {/* Visual Thumbnail Picker for Van Items */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {vanStock.map((item) => {
+                const isSelected = returnBarcode === item.barcode;
+                const imgSrc = resolveVanProductImage(item.barcode, item.productName, products);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setReturnBarcode(item.barcode)}
+                    className={`p-2 rounded-xl border text-start flex items-center gap-2 transition cursor-pointer ${
+                      isSelected
+                        ? 'border-[#0B5D32] bg-[#ECFDF5]/60 ring-1 ring-[#0B5D32]/25'
+                        : 'border-[#DCE5DC] bg-[#F8FAF7] hover:bg-white'
+                    }`}
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-white border border-[#EAEFEA] p-1 flex items-center justify-center shrink-0">
+                      <img
+                        src={imgSrc}
+                        alt={item.productName}
+                        referrerPolicy="no-referrer"
+                        className="max-h-full max-w-full object-contain mix-blend-multiply"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-bold text-[#142018] line-clamp-2 leading-tight">
+                        {getLocalizedText(item.productName, language)}
+                      </div>
+                      <div className="text-[10px] text-[#5F7164] tabular-nums mt-0.5">
+                        {isAr ? `بالفان: ${item.remainingQuantity}` : `In van: ${item.remainingQuantity}`}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <form onSubmit={handleLogReturn} className="grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs">
+              <div className="sm:col-span-5">
+                <label className="text-[#4B6352] font-bold block mb-1">
+                  {isAr ? 'نوع الإجراء:' : 'RMA Type:'}
+                </label>
+                <div className="grid grid-cols-3 gap-1 bg-[#F4F4EA] p-1 rounded-xl font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setReturnType('return')}
+                    className={`py-2 px-1 rounded-lg transition cursor-pointer text-[11px] ${
+                      returnType === 'return'
+                        ? 'bg-[#0B5D32] text-white shadow-2xs'
+                        : 'text-[#4B6352]'
+                    }`}
+                  >
+                    {isAr ? 'مرتجع سليم' : 'Return'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReturnType('exchange')}
+                    className={`py-2 px-1 rounded-lg transition cursor-pointer text-[11px] ${
+                      returnType === 'exchange'
+                        ? 'bg-blue-700 text-white shadow-2xs'
+                        : 'text-[#4B6352]'
+                    }`}
+                  >
+                    {isAr ? 'استبدال 1:1' : 'Exchange'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReturnType('damage')}
+                    className={`py-2 px-1 rounded-lg transition cursor-pointer text-[11px] ${
+                      returnType === 'damage'
+                        ? 'bg-red-600 text-white shadow-2xs'
+                        : 'text-[#4B6352]'
+                    }`}
+                  >
+                    {isAr ? 'تالف / منتهي' : 'Damaged'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="text-[#4B6352] font-bold block mb-1">{t.quantity}</label>
+                <div className="flex items-center justify-between bg-[#F8FAF7] border border-[#DCE5DC] rounded-xl p-1 h-[38px]">
+                  <button
+                    type="button"
+                    onClick={() => setReturnQty((q) => Math.max(1, q - 1))}
+                    className="w-7 h-7 rounded-lg bg-white hover:bg-gray-100 flex items-center justify-center cursor-pointer"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="font-mono font-black text-sm tabular-nums">{returnQty}</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setReturnQty((q) =>
+                        Math.min(Math.max(1, selectedReturnItem?.remainingQuantity || 50), q + 1)
+                      )
+                    }
+                    className="w-7 h-7 rounded-lg bg-[#0B5D32] text-white flex items-center justify-center cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="sm:col-span-3">
+                <label className="text-[#4B6352] font-bold block mb-1">
+                  {isAr ? 'السبب / الملاحظة:' : 'Reason:'}
+                </label>
+                <input
+                  type="text"
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value)}
+                  placeholder={isAr ? 'مثال: كرتون ممزق' : 'e.g. Torn carton'}
+                  className="w-full h-[38px] bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] focus:bg-white rounded-xl px-3 text-xs focus:outline-hidden"
+                />
+              </div>
+
+              <div className="sm:col-span-2 flex flex-col justify-end">
+                <button
+                  type="submit"
+                  disabled={isLoggingReturn || !returnBarcode}
+                  className="w-full h-[38px] px-3 bg-[#142018] hover:bg-black disabled:bg-gray-300 text-white font-bold rounded-xl transition cursor-pointer whitespace-nowrap"
+                >
+                  {t.recordReturnBtn}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* RMA & Credit Notes Register */}
+          <div className="bg-white rounded-2xl border border-[#DCE5DC] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="font-black text-sm text-[#142018]">
+                {isAr ? 'سجل المرتجعات وإشعارات الدائن (RMA Ledger)' : 'RMA & Credit Notes Register'}
+              </h4>
+              <span className="text-xs font-mono font-bold text-[#5F7164] tabular-nums">
+                {vanReturns.length} {isAr ? 'إشعار' : 'records'}
+              </span>
+            </div>
+
+            {vanReturns.length === 0 ? (
+              <div className="py-8 text-center text-xs text-[#5F7164]">
+                {isAr ? 'لا توجد إشعارات مرتجع مسجلة اليوم' : 'No RMA records logged yet'}
+              </div>
+            ) : (
+              <div className="divide-y divide-[#EAEFEA] max-h-[340px] overflow-y-auto">
+                {vanReturns.map((ret) => (
+                  <div key={ret.id} className="py-2.5 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-black text-xs text-[#0B5D32]">
+                          {ret.rmaNumber}
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                            ret.type === 'damage'
+                              ? 'bg-red-50 text-red-700 border border-red-200'
+                              : ret.type === 'exchange'
+                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                              : 'bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]'
+                          }`}
+                        >
+                          {ret.type === 'damage'
+                            ? isAr ? 'تالف معزول' : 'Damaged'
+                            : ret.type === 'exchange'
+                            ? isAr ? 'استبدال 1:1' : 'Exchange'
+                            : isAr ? 'إشعار دائن' : 'Credit Note'}
+                        </span>
+                        {ret.storeName && (
+                          <span className="text-[11px] font-bold text-[#142018] truncate">
+                            {ret.storeName}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs font-bold text-[#142018] mt-0.5 truncate">
+                        {ret.productName} × {ret.quantity}
+                      </div>
+                      <div className="text-[10.5px] text-[#5F7164] truncate">
+                        {ret.reason}
+                        {ret.batchNumber ? ` · ${ret.batchNumber}` : ''}
+                      </div>
+                    </div>
+
+                    <div className="text-end shrink-0">
+                      <div className="font-mono font-black text-xs text-[#0B5D32] tabular-nums">
+                        {ret.creditNoteAmountIQD > 0
+                          ? formatCurrency(ret.creditNoteAmountIQD, currency, language)
+                          : isAr ? 'استبدال' : 'Swap'}
+                      </div>
+                      <div className="text-[10px] text-[#5F7164]">
+                        {new Date(ret.createdAt).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* ================= MOBILE FLOATING RECEIPT JUMP BAR ================= */}
-      {driverTab === 'pos' && posSubTab === 'sell' && vanCart.length > 0 && (
+      {currentSection === 'pos_sell' && vanCart.length > 0 && (
         <div className="lg:hidden fixed bottom-20 inset-x-4 max-w-md mx-auto z-40 bg-[#142018] text-white rounded-2xl px-3.5 py-2.5 shadow-xl border border-white/10 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[11px] text-emerald-300 font-bold tabular-nums">
@@ -2757,11 +2792,21 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
               </div>
             ) : (
               <form onSubmit={handleCloseShift} className="mt-4 space-y-3 text-xs">
-                <div className="bg-[#F8FAF7] p-3 rounded-xl border border-[#DCE5DC] text-[#4B6352]">
-                  <span>{t.expectedCashFromSales}</span>
-                  <strong className="text-base font-mono text-[#0B5D32] block mt-1 tabular-nums">
-                    {formatCurrency(driverInfo?.currentCashCollectedIQD || 0, currency, language)}
-                  </strong>
+                <div className="bg-[#F8FAF7] p-3 rounded-xl border border-[#DCE5DC] text-[#4B6352] space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span>{t.expectedCashFromSales}</span>
+                    <strong className="text-base font-mono text-[#0B5D32] tabular-nums">
+                      {formatCurrency(driverInfo?.currentCashCollectedIQD || 0, currency, language)}
+                    </strong>
+                  </div>
+                  {(driverInfo?.todayExpensesIQD || 0) > 0 && (
+                    <div className="flex items-center justify-between text-[11px] text-amber-800 font-bold">
+                      <span>{isAr ? 'إجمالي المصاريف المخصومة اليوم:' : 'Deducted Field Expenses:'}</span>
+                      <span className="font-mono tabular-nums">
+                        {formatCurrency(driverInfo.todayExpensesIQD, currency, language)}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -2772,6 +2817,19 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
                     value={actualCashInput}
                     onChange={(e) => setActualCashInput(e.target.value)}
                     placeholder={isAr ? 'أدخل المبلغ الفعلي بالدينار...' : 'Enter actual counted cash...'}
+                    className="w-full bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] rounded-xl p-2.5 font-mono text-sm font-bold focus:outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[#4B6352] font-bold block mb-1">
+                    {isAr ? 'قراءة عداد المسافة عند التسليم (كم) - اختياري:' : 'End Odometer Reading (km) - optional:'}
+                  </label>
+                  <input
+                    type="number"
+                    value={odometerEndInput}
+                    onChange={(e) => setOdometerEndInput(e.target.value)}
+                    placeholder="118480"
                     className="w-full bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] rounded-xl p-2.5 font-mono text-sm font-bold focus:outline-hidden"
                   />
                 </div>
@@ -2803,140 +2861,31 @@ export const DriverVanView: React.FC<DriverVanViewProps> = ({
         </div>
       )}
 
-      {/* ================= MODAL: Printable / Shareable Van Receipt ================= */}
+      {/* ================= MODAL: Executive Branded Van Invoice ================= */}
       {activeReceipt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className={`bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-[#DCE5DC] space-y-4 ${isAr ? 'text-right' : 'text-left'}`}>
-            <div className="flex items-start justify-between gap-2 border-b border-[#EAEFEA] pb-3">
-              <div>
-                <div className="text-[11px] font-bold text-[#0B5D32]">
-                  {activeReceipt.type === 'debt_collection'
-                    ? isAr
-                      ? 'سند قبض وتحصيل آجل ميداني'
-                      : 'Field Debt Collection Receipt'
-                    : isAr
-                    ? 'فاتورة بيع فوري من سيارة التوزيع'
-                    : 'Van Direct Sale Invoice'}
-                </div>
-                <h3 className="font-mono font-black text-base text-[#142018] mt-0.5">
-                  {activeReceipt.receiptNumber}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveReceipt(null)}
-                className="w-8 h-8 rounded-full bg-[#F4F4EA] hover:bg-gray-200 flex items-center justify-center text-[#4B6352] cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="bg-[#F8FAF7] rounded-xl border border-[#DCE5DC] p-3 text-xs space-y-1.5">
-              <div className="flex justify-between">
-                <span className="text-[#5F7164]">{isAr ? 'المتجر المستلم:' : 'Store:'}</span>
-                <strong className="text-[#142018]">{activeReceipt.storeName}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#5F7164]">{isAr ? 'مندوب الفان:' : 'Driver:'}</span>
-                <strong className="text-[#142018]">{activeReceipt.driverName}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#5F7164]">{isAr ? 'طريقة الدفع:' : 'Payment:'}</span>
-                <strong className="text-[#0B5D32]">
-                  {activeReceipt.paymentType === 'cash'
-                    ? isAr
-                      ? 'نقدي (كاش)'
-                      : 'Cash'
-                    : isAr
-                    ? 'آجل على الحساب'
-                    : 'Credit Ledger'}
-                </strong>
-              </div>
-            </div>
-
-            {activeReceipt.items && activeReceipt.items.length > 0 && (
-              <div className="border border-[#EAEFEA] rounded-xl overflow-hidden text-xs">
-                <div className="bg-[#F4F4EA] px-3 py-2 font-bold text-[#4B6352] flex justify-between">
-                  <span>{isAr ? 'الصنف والكمية' : 'Item & Qty'}</span>
-                  <span>{isAr ? 'المبلغ' : 'Total'}</span>
-                </div>
-                <div className="divide-y divide-[#EAEFEA] max-h-44 overflow-y-auto">
-                  {activeReceipt.items.map((it: any, idx: number) => (
-                    <div key={idx} className="px-3 py-2 flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="font-bold text-[#142018] truncate">{it.productName}</div>
-                        <div className="text-[10.5px] text-[#5F7164] font-mono tabular-nums">
-                          {it.quantity} × {formatCurrency(it.unitPriceIQD, currency, language)}
-                        </div>
-                      </div>
-                      <span className="font-mono font-black text-[#142018] tabular-nums shrink-0">
-                        {formatCurrency(it.totalIQD, currency, language)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="flex items-center justify-between pt-1">
-              <span className="text-xs font-bold text-[#4B6352]">
-                {isAr ? 'الإجمالي النهائي:' : 'Grand Total:'}
-              </span>
-              <span className="text-lg font-black font-mono tabular-nums text-[#0B5D32]">
-                {formatCurrency(activeReceipt.totalAmountIQD, currency, language)}
-              </span>
-            </div>
-
-            <div className="p-2.5 rounded-xl bg-[#ECFDF5] border border-[#A7F3D0] text-[#065F46] text-[11px] font-bold flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>
-                {activeReceipt.type === 'direct_sale'
-                  ? isAr
-                    ? 'تمت مزامنة البضاعة تلقائياً إلى مخزون كاشير المتجر.'
-                    : 'Items automatically synced to the store POS inventory.'
-                  : isAr
-                  ? 'تم ترحيل الدفعة إلى دفتر الأستاذ للمورد وتحديث عهدة الفان.'
-                  : 'Payment posted to supplier ledger & added to van custody.'}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => handleCopyReceiptText(activeReceipt)}
-                className="py-2.5 px-3 rounded-xl bg-[#F4F4EA] hover:bg-[#EAEFEA] text-[#142018] font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
-              >
-                {copiedReceipt ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-[#0B5D32]" />
-                    <span className="text-[#0B5D32]">{isAr ? 'تم النسخ للواتساب' : 'Copied!'}</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>{isAr ? 'نسخ نص واتساب' : 'Copy WhatsApp'}</span>
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="py-2.5 px-3 rounded-xl bg-[#0B5D32] hover:bg-[#084725] text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>{isAr ? 'طباعة الوصل' : 'Print Receipt'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        <VanInvoiceModal
+          receipt={activeReceipt}
+          supplierInfo={resolvedSupplierIdentity}
+          customerStore={
+            vanStores.find((st) => st.id === activeReceipt.storeId) ||
+            routeStops.find((rs) => rs.storeId === activeReceipt.storeId) ||
+            null
+          }
+          vehiclePlate={displayVehiclePlate}
+          vanWarehouseName={displayVanWarehouse}
+          resolveProductImage={resolveInvoiceProductImage}
+          currency={currency}
+          language={language}
+          onClose={() => setActiveReceipt(null)}
+        />
       )}
 
       {/* ================= STICKY DRIVER BOTTOM NAVIGATION BAR ================= */}
       <DriverBottomNav
         activeTab={driverTab}
         onSelectTab={(tab) => {
-          setDriverTab(tab);
-          if (tab === 'pos') setPosSubTab('sell');
+          if (tab === 'pos') setSection('pos_sell');
+          else setSection(tab);
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         cartCount={cartUnitsCount}

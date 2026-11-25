@@ -9,8 +9,12 @@ import {
   CreditCard,
   Download,
   FileText,
+  MessageCircle,
+  Phone,
+  Printer,
   Receipt,
   Search,
+  Send,
   ShoppingBag,
   Wallet,
   X
@@ -20,10 +24,13 @@ import {
   Currency,
   Language,
   LedgerEntryItem,
-  OrderItem
+  OrderItem,
+  ProductWithOffers
 } from '../types/index.ts';
 import { formatCurrency } from '../utils/format.ts';
 import { getLocalizedText } from '../utils/translations.ts';
+import { WHOLESALE_SUPPLIERS } from '../data/nearbySuppliers.ts';
+import { normalizeWhatsAppPhone, openWhatsAppUrl } from '../components/VanInvoiceModal.tsx';
 
 export type InvoiceStatusFilter = 'all' | 'paid' | 'pending';
 export type InvoiceTimeRangePreset = 'all' | 'today' | 'week' | 'month' | 'custom';
@@ -32,6 +39,7 @@ type InvoicesViewMode = 'invoices' | 'payments';
 interface RetailerInvoicesViewProps {
   creditAccounts: CreditAccountItem[];
   orders: OrderItem[];
+  products?: ProductWithOffers[];
   currency: Currency;
   language: Language;
   storeName: string;
@@ -159,6 +167,7 @@ function resolveDateRangeBounds(
 export const RetailerInvoicesView: React.FC<RetailerInvoicesViewProps> = ({
   creditAccounts,
   orders,
+  products = [],
   currency,
   language,
   storeName,
@@ -178,6 +187,71 @@ export const RetailerInvoicesView: React.FC<RetailerInvoicesViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
   const [expandedPaymentId, setExpandedPaymentId] = useState<string | null>(null);
+  const [whatsappTargetByInvoice, setWhatsappTargetByInvoice] = useState<Record<string, string>>({});
+  const [whatsappErrorId, setWhatsappErrorId] = useState<string | null>(null);
+
+  const resolveSupplierBrand = (supplierId: string) => {
+    return (
+      WHOLESALE_SUPPLIERS.find((s) => s.id === supplierId) ||
+      WHOLESALE_SUPPLIERS.find((s) => s.id === 'supp_rafidain') ||
+      null
+    );
+  };
+
+  const resolveLineProductImage = (barcode: string, productName: string): string => {
+    const matched = products.find((p) => p.barcode === barcode);
+    if (matched?.imageUrl) return matched.imageUrl;
+    const lower = (productName || '').toLowerCase();
+    if (lower.includes('أرز') || lower.includes('ارز') || lower.includes('rice')) {
+      return '/assets/images/white_basmati_rice.jpg';
+    }
+    if (lower.includes('زيت') || lower.includes('سمن') || lower.includes('oil')) {
+      return '/assets/images/white_sunflower_oil.jpg';
+    }
+    if (lower.includes('حليب') || lower.includes('لبن') || lower.includes('milk')) {
+      return '/assets/images/white_milk_powder.jpg';
+    }
+    if (lower.includes('معجون') || lower.includes('طماطم') || lower.includes('tomato')) {
+      return '/assets/images/white_tomato_paste.jpg';
+    }
+    if (lower.includes('شاي') || lower.includes('tea')) {
+      return '/assets/images/white_ceylon_tea.jpg';
+    }
+    if (lower.includes('سكر') || lower.includes('sugar')) {
+      return '/assets/images/white_sugar_pack.jpg';
+    }
+    return '/assets/images/white_canned_goods.jpg';
+  };
+
+  const handleSendInvoiceWhatsApp = (inv: UnifiedInvoiceRecord, defaultPhone?: string) => {
+    const rawPhone = whatsappTargetByInvoice[inv.id] ?? defaultPhone ?? '';
+    const normalized = normalizeWhatsAppPhone(rawPhone);
+    if (!normalized || normalized.length < 10) {
+      setWhatsappErrorId(inv.id);
+      return;
+    }
+    setWhatsappErrorId(null);
+    const lines = [
+      `🏢 *${getLocalizedText(inv.supplierName, language)}*`,
+      `🧾 فاتورة رقم: *${inv.invoiceRef}*`,
+      `📅 التاريخ: ${inv.issueDate}`,
+      `🏬 المتجر: ${storeName}`,
+      ...(inv.items?.length
+        ? [
+            `--- الأصناف (${inv.items.length}) ---`,
+            ...inv.items.map(
+              (it, idx) =>
+                `${idx + 1}. ${it.productName} (${it.quantity} × ${it.unit}) = ${it.totalPriceIQD.toLocaleString()} د.ع`
+            )
+          ]
+        : []),
+      `💰 الإجمالي: *${inv.totalAmountIQD.toLocaleString()} د.ع*`,
+      inv.status === 'paid'
+        ? '✅ الحالة: مسددة بالكامل'
+        : `⏳ المتبقي للسداد: ${inv.remainingAmountIQD.toLocaleString()} د.ع`
+    ].join('\n');
+    openWhatsAppUrl(`https://wa.me/${normalized}?text=${encodeURIComponent(lines)}`);
+  };
 
   const [allLedgerEntries, setAllLedgerEntries] = useState<LedgerEntryItem[]>([]);
   const [loadingLedger, setLoadingLedger] = useState(false);
@@ -1122,11 +1196,21 @@ export const RetailerInvoicesView: React.FC<RetailerInvoicesViewProps> = ({
                     ? Math.min(100, Math.round((inv.paidAmountIQD / inv.totalAmountIQD) * 100))
                     : 0;
 
+                const supplierBrand = resolveSupplierBrand(inv.supplierId);
+
                 return (
                   <div key={inv.id} className="py-3.5 first:pt-1 last:pb-1 space-y-3">
                     <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                       <div className="min-w-0 space-y-1">
                         <div className="flex flex-wrap items-center gap-2">
+                          {supplierBrand?.logoUrl && (
+                            <img
+                              src={supplierBrand.logoUrl}
+                              alt={getLocalizedText(inv.supplierName, language)}
+                              referrerPolicy="no-referrer"
+                              className="w-6 h-6 rounded-lg object-cover border border-[#DCE5DC] shadow-2xs shrink-0"
+                            />
+                          )}
                           <span className="font-mono font-black text-xs sm:text-sm text-[#142018] tabular-nums">
                             {inv.invoiceRef}
                           </span>
@@ -1366,23 +1450,38 @@ export const RetailerInvoicesView: React.FC<RetailerInvoicesViewProps> = ({
                           )}
                         </div>
 
-                        {/* Linked Order Line Items if present */}
+                        {/* Linked Order Line Items WITH THUMBNAILS */}
                         {inv.items && inv.items.length > 0 && (
                           <div className="space-y-1.5">
                             <h4 className="text-xs font-black text-[#142018] flex items-center gap-1.5">
                               <ShoppingBag className="w-3.5 h-3.5 text-[#0B5D32]" />
                               <span>{isAr ? 'أصناف الفاتورة:' : 'Invoice Line Items:'}</span>
                             </h4>
-                            <div className="bg-white rounded-xl border border-[#DCE5DC] divide-y divide-[#DCE5DC] text-[11px] tabular-nums">
+                            <div className="bg-white rounded-xl border border-[#DCE5DC] divide-y divide-[#EAEFEA] text-[11px] tabular-nums">
                               {inv.items.map((it, idx) => (
                                 <div
                                   key={idx}
-                                  className="px-3 py-2 flex items-center justify-between gap-2"
+                                  className="px-3 py-2 flex items-center justify-between gap-2.5"
                                 >
-                                  <span className="text-[#142018] font-bold truncate">
-                                    {it.productName} · {it.quantity} × {it.unit}
-                                  </span>
-                                  <span className="font-mono font-bold text-[#3D5244] shrink-0">
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                    <div className="w-9 h-9 rounded-lg bg-white border border-[#DCE5DC] p-0.5 flex items-center justify-center shrink-0">
+                                      <img
+                                        src={resolveLineProductImage(it.barcode, it.productName)}
+                                        alt={it.productName}
+                                        referrerPolicy="no-referrer"
+                                        className="max-h-full max-w-full object-contain"
+                                      />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="text-[#142018] font-bold truncate">
+                                        {it.productName}
+                                      </div>
+                                      <div className="text-[10px] text-[#5F7164]">
+                                        {it.quantity} × {it.unit}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <span className="font-mono font-bold text-[#0B5D32] shrink-0">
                                     {formatCurrency(it.totalPriceIQD, currency, language)}
                                   </span>
                                 </div>
@@ -1391,16 +1490,63 @@ export const RetailerInvoicesView: React.FC<RetailerInvoicesViewProps> = ({
                           </div>
                         )}
 
-                        {inv.creditAccountId && onOpenSupplierStatement && inv.payments.length > 0 && (
-                          <div className="flex justify-end">
+                        {/* Direct WhatsApp Share & Print Bar */}
+                        <div className="bg-white rounded-xl border border-[#DCE5DC] p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <div className="relative flex-1 min-w-[160px]">
+                              <Phone className="w-3.5 h-3.5 text-[#5F7164] absolute start-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                              <input
+                                type="tel"
+                                dir="ltr"
+                                value={whatsappTargetByInvoice[inv.id] ?? supplierBrand?.phone ?? ''}
+                                onChange={(e) => {
+                                  setWhatsappTargetByInvoice((prev) => ({
+                                    ...prev,
+                                    [inv.id]: e.target.value
+                                  }));
+                                  if (whatsappErrorId === inv.id) setWhatsappErrorId(null);
+                                }}
+                                placeholder="0770 123 4567"
+                                className="w-full min-h-[34px] bg-[#F8FAF7] border border-[#DCE5DC] focus:border-[#0B5D32] rounded-lg ps-8 pe-2.5 text-xs font-mono font-bold focus:outline-hidden"
+                              />
+                            </div>
                             <button
                               type="button"
-                              onClick={() => onOpenSupplierStatement(inv.creditAccountId!)}
-                              className="text-xs font-black text-[#0B5D32] hover:underline cursor-pointer"
+                              onClick={() => handleSendInvoiceWhatsApp(inv, supplierBrand?.phone)}
+                              className="min-h-[34px] px-3 py-1.5 rounded-lg bg-[#25D366] hover:bg-[#1FB858] text-white text-[11px] font-black flex items-center gap-1.5 cursor-pointer shrink-0 whitespace-nowrap"
                             >
-                              {isAr ? 'فتح كشف حساب المورد التفصيلي ←' : 'Open full supplier statement →'}
+                              <MessageCircle className="w-3.5 h-3.5" />
+                              <Send className="w-3 h-3" />
+                              <span>{isAr ? 'مشاركة واتساب' : 'WhatsApp'}</span>
                             </button>
                           </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => window.print()}
+                              className="min-h-[34px] px-3 py-1.5 rounded-lg bg-[#F4F4EA] hover:bg-[#E7ECE5] border border-[#DCE5DC] text-[#142018] text-[11px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              <span>{isAr ? 'طباعة' : 'Print'}</span>
+                            </button>
+                            {inv.creditAccountId && onOpenSupplierStatement && inv.payments.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenSupplierStatement(inv.creditAccountId!)}
+                                className="text-xs font-black text-[#0B5D32] hover:underline cursor-pointer whitespace-nowrap"
+                              >
+                                {isAr ? 'كشف الحساب ←' : 'Statement →'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {whatsappErrorId === inv.id && (
+                          <p className="text-[11px] font-bold text-red-600">
+                            {isAr
+                              ? 'يرجى إدخال رقم واتساب صحيح قبل الإرسال'
+                              : 'Please enter a valid WhatsApp phone number'}
+                          </p>
                         )}
                       </div>
                     )}

@@ -1,8 +1,100 @@
-import { Router, Request, Response } from 'express';
+import crypto from 'node:crypto';
+import { Router, Request, Response, NextFunction } from 'express';
 import { db } from '../db/store.ts';
 import { askStoreAssistant } from '../services/aiAssistantService.ts';
+import {
+  evaluateExpiryStatus,
+  resolveExpiryCutoffDate,
+  isValidIsoDate,
+  ExpiryThresholdMode
+} from '../../shared/expiryAlerts.ts';
 
 export const apiRouter = Router();
+
+const STAFF_SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+
+interface SessionTokenPayload {
+  sub: string;
+  role: 'store' | 'cashier' | 'accountant';
+  storeId: string;
+  exp: number;
+}
+
+function signSessionToken(payload: SessionTokenPayload): string {
+  const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const sig = crypto
+    .createHmac('sha256', STAFF_SESSION_SECRET)
+    .update(encoded)
+    .digest('base64url');
+  return `${encoded}.${sig}`;
+}
+
+function verifySessionToken(token: string): SessionTokenPayload | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 2) return null;
+    const [encoded, sig] = parts;
+    if (!encoded || !sig) return null;
+    const expectedSig = crypto
+      .createHmac('sha256', STAFF_SESSION_SECRET)
+      .update(encoded)
+      .digest('base64url');
+    const sigBuf = Buffer.from(sig, 'utf8');
+    const expectedBuf = Buffer.from(expectedSig, 'utf8');
+    if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+      return null;
+    }
+    const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as SessionTokenPayload;
+    if (!parsed || typeof parsed.exp !== 'number' || parsed.exp <= Date.now()) {
+      return null;
+    }
+    if (!parsed.storeId || !parsed.role || !parsed.sub) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function requireStoreOwner(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  if (!token) {
+    return res.status(401).json({ success: false, message: 'مطلوب مصادقة مدير المتجر للوصول لإدارة الموظفين' });
+  }
+  const payload = verifySessionToken(token);
+  if (!payload) {
+    return res.status(401).json({ success: false, message: 'انتهت صلاحية الجلسة، يرجى إعادة تسجيل الدخول' });
+  }
+  if (payload.role !== 'store' || payload.storeId !== req.params.storeId) {
+    return res.status(403).json({ success: false, message: 'صلاحية إدارة حسابات الموظفين محصورة بمدير المتجر فقط' });
+  }
+  next();
+}
+
+function rejectCashierToken(req: Request, res: Response): boolean {
+  const authHeader = req.headers.authorization || '';
+  if (!authHeader) return false;
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  if (!token) {
+    res.status(401).json({ success: false, message: 'رمز المصادقة غير صالح' });
+    return true;
+  }
+  const payload = verifySessionToken(token);
+  if (!payload) {
+    res.status(401).json({ success: false, message: 'انتهت صلاحية الجلسة، يرجى إعادة تسجيل الدخول' });
+    return true;
+  }
+  if (payload.role === 'cashier') {
+    res.status(403).json({
+      success: false,
+      message: 'صلاحية تحويل المنتجات قريبة الانتهاء إلى العروض متاحة للمحاسب أو مدير المتجر فقط'
+    });
+    return true;
+  }
+  return false;
+}
 
 // ================= 0. GEOGRAPHIC HIERARCHY & DELIVERY ZONES =================
 apiRouter.get('/geo/governorates', (_req: Request, res: Response) => {
@@ -435,9 +527,46 @@ apiRouter.get('/van/inventory/:driverId', (req: Request, res: Response) => {
       };
     });
 
+    const vanExpenses = db.vanExpenses.filter(e => e.driverId === driverId);
+    const vanReturns = db.vanReturns.filter(r => r.driverId === driverId);
+    const shiftReports = db.shiftReports.filter(s => s.driverId === driverId);
+    const vanUnloadRecords = db.vanUnloadRecords.filter(u => u.driverId === driverId);
+
+    const totalStops = routeStops.length;
+    const visitedOrSoldStops = routeStops.filter(
+      s => s.status === 'visited' || s.status === 'sold'
+    ).length;
+    const soldStops = routeStops.filter(s => s.status === 'sold').length;
+    const visitCompliancePercent = totalStops > 0 ? Math.round((visitedOrSoldStops / totalStops) * 100) : 0;
+    const strikeRatePercent = totalStops > 0 ? Math.round((soldStops / totalStops) * 100) : 0;
+    const directSalesTxs = transactions.filter(t => t.type === 'direct_sale');
+    const averageDropSizeIQD =
+      directSalesTxs.length > 0
+        ? Math.round(directSalesTxs.reduce((s, t) => s + t.totalAmountIQD, 0) / directSalesTxs.length)
+        : 0;
+    const totalLoadedValueIQD = items.reduce((s, i) => s + i.loadedQuantity * i.unitPriceIQD, 0);
+    const remainingStockValueIQD = items.reduce((s, i) => s + i.remainingQuantity * i.unitPriceIQD, 0);
+    const totalExpensesIQD = vanExpenses.reduce((s, e) => s + e.amountIQD, 0);
+
+    const kpis = {
+      totalStops,
+      visitedOrSoldStops,
+      soldStops,
+      visitCompliancePercent,
+      strikeRatePercent,
+      averageDropSizeIQD,
+      totalLoadedValueIQD,
+      remainingStockValueIQD,
+      totalExpensesIQD,
+      netCashDueIQD: driver.currentCashCollectedIQD
+    };
+
+    const supplier = db.suppliers.find(s => s.id === driver.supplierId) || null;
+
     res.json({
       success: true,
       driver,
+      supplier,
       inventory: items,
       routeStops,
       transactions,
@@ -446,6 +575,11 @@ apiRouter.get('/van/inventory/:driverId', (req: Request, res: Response) => {
       commissionSummary,
       loadRequests,
       supplierCatalog,
+      vanExpenses,
+      vanReturns,
+      shiftReports,
+      vanUnloadRecords,
+      kpis,
       totalLoadedUnits: items.reduce((s, i) => s + i.loadedQuantity, 0),
       totalRemainingUnits: items.reduce((s, i) => s + i.remainingQuantity, 0)
     });
@@ -610,7 +744,7 @@ apiRouter.patch('/van/adjust-stock', (req: Request, res: Response) => {
 
 apiRouter.post('/van/direct-sale', (req: Request, res: Response) => {
   try {
-    const { driverId, storeId, barcode, quantity, items, paymentType, notes } = req.body;
+    const { driverId, storeId, barcode, quantity, items, paymentType, discountIQD, notes } = req.body;
     const result = db.recordVanDirectSale({
       driverId,
       storeId,
@@ -618,6 +752,7 @@ apiRouter.post('/van/direct-sale', (req: Request, res: Response) => {
       quantity: quantity !== undefined ? Number(quantity) : undefined,
       items,
       paymentType: paymentType || 'cash',
+      discountIQD: discountIQD !== undefined ? Number(discountIQD) : 0,
       notes
     });
     res.json({
@@ -728,15 +863,23 @@ apiRouter.patch('/van/driver/:driverId/availability', (req: Request, res: Respon
 
 const handleVanReturn = (req: Request, res: Response) => {
   try {
-    const { driverId, barcode, quantity, type, reason } = req.body;
-    const item = db.recordVanReturnOrDamage({
+    const { driverId, barcode, quantity, type, reason, storeId, batchNumber, expiryDate } = req.body;
+    const result = db.recordVanReturnOrDamage({
       driverId,
       barcode,
       quantity: Number(quantity),
       type: type || 'return',
-      reason: reason || 'طلب استرجاع من المتجر'
+      reason: reason || 'طلب استرجاع من المتجر',
+      storeId,
+      batchNumber,
+      expiryDate
     });
-    res.json({ success: true, message: 'تم قيد المرتجع أو التالف بنجاح', data: item });
+    res.json({
+      success: true,
+      message: 'تم قيد المرتجع وإصدار إشعار الدائن وتحديث مخزون الفان بنجاح',
+      data: result.vanItem,
+      returnRecord: result.returnRecord
+    });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -744,6 +887,111 @@ const handleVanReturn = (req: Request, res: Response) => {
 
 apiRouter.post('/van/return', handleVanReturn);
 apiRouter.post('/van/returns', handleVanReturn);
+
+apiRouter.post('/van/customers', (req: Request, res: Response) => {
+  try {
+    const { driverId, name, ownerName, phone, district, address, storeType, creditLimitIQD, addToRoute } = req.body || {};
+    const created = db.registerFieldStoreCustomer({
+      driverId,
+      name,
+      ownerName,
+      phone,
+      district,
+      address,
+      storeType,
+      creditLimitIQD: creditLimitIQD !== undefined ? Number(creditLimitIQD) : 0,
+      addToRoute
+    });
+    res.status(201).json({
+      success: true,
+      message: `تم تسجيل المتجر "${created.store.name}" في دليل عملاء الفان وخط السير`,
+      data: created
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.post('/van/expenses', (req: Request, res: Response) => {
+  try {
+    const { driverId, category, description, amountIQD, receiptRef } = req.body || {};
+    const validCategories = ['fuel', 'toll_parking', 'loading_labor', 'maintenance', 'other'];
+    const cleanCategory = validCategories.includes(category) ? category : 'other';
+    const record = db.recordVanExpense({
+      driverId,
+      category: cleanCategory,
+      description,
+      amountIQD: Number(amountIQD),
+      receiptRef
+    });
+    res.status(201).json({
+      success: true,
+      message: 'تم تسجيل المصروف الميداني وخصمه من صافي العهدة النقدية',
+      data: record
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.delete('/van/expenses/:expenseId', (req: Request, res: Response) => {
+  try {
+    db.deleteVanExpense(req.params.expenseId);
+    res.json({ success: true, message: 'تم حذف سجل المصروف وإعادة الرصيد إلى العهدة' });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.patch('/van/driver/:driverId/vehicle-check', (req: Request, res: Response) => {
+  try {
+    const { driverId } = req.params;
+    const { odometerStartKm, odometerEndKm, fuelLevelPercent, chillerTempC, inspectionChecklist } = req.body || {};
+    const updated = db.updateVanVehicleCheck({
+      driverId,
+      odometerStartKm,
+      odometerEndKm,
+      fuelLevelPercent,
+      chillerTempC,
+      inspectionChecklist
+    });
+    res.json({
+      success: true,
+      message: 'تم حفظ فحص المركبة وقراءة العداد والتبريد بنجاح',
+      data: updated
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.post('/van/physical-audit', (req: Request, res: Response) => {
+  try {
+    const { driverId, counts } = req.body || {};
+    const audit = db.recordVanPhysicalAudit({ driverId, counts });
+    res.json({
+      success: true,
+      message: 'تم اعتماد الجرد الفعلي ومقارنة الأرصدة بنجاح',
+      data: audit
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.post('/van/unload-warehouse', (req: Request, res: Response) => {
+  try {
+    const { driverId, notes } = req.body || {};
+    const manifest = db.unloadVanToWarehouse({ driverId, notes });
+    res.status(201).json({
+      success: true,
+      message: `تم ترحيل البضاعة المتبقية إلى المستودع الرئيسي بإشعار (${manifest.manifestNumber})`,
+      data: manifest
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
 
 apiRouter.post('/van/delivery/:orderId/confirm', (req: Request, res: Response) => {
   try {
@@ -777,10 +1025,11 @@ apiRouter.post('/van/delivery/:orderId/confirm', (req: Request, res: Response) =
 
 apiRouter.post('/van/shift-close', (req: Request, res: Response) => {
   try {
-    const { driverId, actualCashCountedIQD, notes } = req.body;
+    const { driverId, actualCashCountedIQD, odometerEndKm, notes } = req.body;
     const report = db.closeDriverShift({
       driverId,
       actualCashCountedIQD: Number(actualCashCountedIQD),
+      odometerEndKm: odometerEndKm !== undefined ? Number(odometerEndKm) : undefined,
       notes
     });
     res.json({
@@ -1071,6 +1320,8 @@ interface StorefrontState {
     rating: number;
     reviewsCount: number;
     imageUrl: string;
+    expiryDate?: string;
+    promoBadge?: string;
     isFeatured?: boolean;
     active?: boolean;
   }>;
@@ -1630,7 +1881,7 @@ apiRouter.post('/store/:storeId/storefront/promotions', (req: Request, res: Resp
   product.discountPercent = discount;
   product.oldPrice = calculatedOldPrice;
   if (promoBadge) {
-    product.brand = `${product.brand} • ${promoBadge}`;
+    product.promoBadge = String(promoBadge).trim();
   }
 
   res.json({
@@ -1638,6 +1889,408 @@ apiRouter.post('/store/:storeId/storefront/promotions', (req: Request, res: Resp
     message: `تم تطبيق عرض خصم ${discount}% على المنتج بنجاح`,
     data: product
   });
+});
+
+function findRetailProductByBarcode(barcode: string) {
+  const bare = barcode.replace(/-RET$/, '');
+  return almansoorStorefrontState.products.find(
+    (p) => p.barcode === barcode || p.barcode === `${bare}-RET` || p.barcode.replace(/-RET$/, '') === bare
+  );
+}
+
+function estimateSingleUnitRetailPrice(invPriceIQD: number, unitLabel: string): number {
+  const match = unitLabel.match(/(\d+)\s*[×x*]/i);
+  const divisor = match ? Math.max(1, Number(match[1])) : invPriceIQD >= 25000 ? 12 : 1;
+  const raw = Math.round(invPriceIQD / divisor / 250) * 250;
+  return Math.max(500, raw);
+}
+
+// 7.6B Near-Expiry Inventory Alerts & Offer Conversion (Store: Retail + Wholesale)
+apiRouter.get('/store/:storeId/near-expiry', (req: Request, res: Response) => {
+  try {
+    const { storeId } = req.params;
+    const store = db.stores.find((s) => s.id === storeId);
+    if (!store) {
+      return res.status(404).json({ success: false, message: 'المتجر غير موجود' });
+    }
+
+    const modeParam = req.query.mode === 'custom' ? 'custom' : 'month';
+    const targetDateParam = typeof req.query.targetDate === 'string' ? req.query.targetDate.trim() : undefined;
+
+    if (modeParam === 'custom' && !isValidIsoDate(targetDateParam)) {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى تحديد تاريخ صالح بصيغة YYYY-MM-DD عند اختيار التاريخ المخصص'
+      });
+    }
+
+    const { mode, referenceDate, cutoffDate } = resolveExpiryCutoffDate({
+      mode: modeParam as ExpiryThresholdMode,
+      targetDate: targetDateParam
+    });
+
+    const items = db.storeInventory.filter((s) => s.storeId === storeId && s.stockQuantity > 0);
+    const alerts: any[] = [];
+
+    for (const item of items) {
+      const evaluation = evaluateExpiryStatus(item.expiryDate, { mode, targetDate: cutoffDate, referenceDate });
+      if (!evaluation || !evaluation.isWithinThreshold) continue;
+
+      const retailMatch = findRetailProductByBarcode(item.barcode);
+      const wholesaleMatch = db.offers.find(
+        (o) => o.barcode === item.barcode && Boolean(o.isClearanceNearExpiry)
+      );
+
+      const hasRetailPromo = Boolean(
+        retailMatch &&
+          retailMatch.active !== false &&
+          ((retailMatch.discountPercent && retailMatch.discountPercent > 0) || retailMatch.promoBadge)
+      );
+
+      alerts.push({
+        id: `exp_${item.id}`,
+        source: 'store_inventory',
+        storeId,
+        barcode: item.barcode,
+        productName: item.productName,
+        category: item.category,
+        unit: item.unit,
+        imageUrl:
+          db.getCatalogImageForBarcode(item.barcode) ||
+          retailMatch?.imageUrl ||
+          ensureRetailSingleUnitImage(undefined, item.category),
+        stockQuantity: item.stockQuantity,
+        costPriceIQD: item.costPriceIQD,
+        sellingPriceIQD: item.retailSellingPriceIQD,
+        capitalAtRiskIQD: item.stockQuantity * item.costPriceIQD,
+        expiryDate: evaluation.expiryDate,
+        daysRemaining: evaluation.daysRemaining,
+        isExpired: evaluation.isExpired,
+        urgency: evaluation.urgency,
+        retailOffer: hasRetailPromo && retailMatch
+          ? {
+              active: true,
+              barcode: retailMatch.barcode,
+              priceIQD: retailMatch.retailSellingPriceIQD,
+              oldPrice: retailMatch.oldPrice,
+              discountPercent: retailMatch.discountPercent || 0,
+              promoBadge: retailMatch.promoBadge
+            }
+          : null,
+        wholesaleOffer: wholesaleMatch
+          ? {
+              active: true,
+              offerId: wholesaleMatch.id,
+              priceIQD: wholesaleMatch.priceIQD,
+              clearanceDiscountPercent: wholesaleMatch.clearanceDiscountPercent || 0,
+              expiryDate: wholesaleMatch.expiryDate,
+              supplierName: wholesaleMatch.supplierName
+            }
+          : null
+      });
+    }
+
+    alerts.sort((a, b) => a.daysRemaining - b.daysRemaining);
+
+    const totalCapitalAtRiskIQD = alerts.reduce((sum, a) => sum + a.capitalAtRiskIQD, 0);
+    const urgentCount = alerts.filter((a) => a.urgency === 'expired' || a.urgency === 'critical').length;
+    const convertedRetailCount = alerts.filter((a) => Boolean(a.retailOffer)).length;
+    const convertedWholesaleCount = alerts.filter((a) => Boolean(a.wholesaleOffer)).length;
+
+    res.json({
+      success: true,
+      storeId,
+      mode,
+      referenceDate,
+      cutoffDate,
+      summary: {
+        nearExpiryCount: alerts.length,
+        urgentCount,
+        totalCapitalAtRiskIQD,
+        convertedRetailCount,
+        convertedWholesaleCount
+      },
+      data: alerts
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.post('/store/:storeId/near-expiry/convert', (req: Request, res: Response) => {
+  try {
+    if (rejectCashierToken(req, res)) return;
+
+    const { storeId } = req.params;
+    const store = db.stores.find((s) => s.id === storeId);
+    if (!store) {
+      return res.status(404).json({ success: false, message: 'المتجر غير موجود' });
+    }
+
+    const { barcode, discountPercent, channel, promoBadge } = req.body || {};
+    if (typeof barcode !== 'string' || !barcode.trim()) {
+      return res.status(400).json({ success: false, message: 'باركود المنتج مطلوب' });
+    }
+
+    const numericDiscount = Number(discountPercent);
+    if (!Number.isFinite(numericDiscount) || numericDiscount < 5 || numericDiscount > 85) {
+      return res.status(400).json({
+        success: false,
+        message: 'نسبة الخصم يجب أن تكون بين 5% و 85%'
+      });
+    }
+
+    if (channel !== 'retail' && channel !== 'wholesale' && channel !== 'both') {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى تحديد قناة العرض (تجزئة، جملة، أو كلاهما)'
+      });
+    }
+
+    const cleanBarcode = barcode.trim();
+    const invItem = db.storeInventory.find(
+      (s) => s.storeId === storeId && s.barcode === cleanBarcode
+    );
+    if (!invItem) {
+      return res.status(404).json({ success: false, message: 'المنتج غير موجود في مخزون المتجر' });
+    }
+
+    const cleanDiscount = Math.round(numericDiscount);
+    const cleanBadge =
+      typeof promoBadge === 'string' && promoBadge.trim()
+        ? promoBadge.trim().slice(0, 48)
+        : `تصفية الصلاحية • خصم ${cleanDiscount}%`;
+
+    let retailOffer: any = null;
+    let wholesaleOffer: any = null;
+
+    if (channel === 'retail' || channel === 'both') {
+      let retailProd = findRetailProductByBarcode(invItem.barcode);
+      if (retailProd) {
+        const basePrice = retailProd.oldPrice && retailProd.oldPrice > retailProd.retailSellingPriceIQD
+          ? retailProd.oldPrice
+          : retailProd.retailSellingPriceIQD;
+        const discounted = Math.max(250, Math.round((basePrice * (1 - cleanDiscount / 100)) / 250) * 250);
+        retailProd.oldPrice = basePrice;
+        retailProd.retailSellingPriceIQD = discounted;
+        retailProd.discountPercent = cleanDiscount;
+        retailProd.expiryDate = invItem.expiryDate;
+        retailProd.promoBadge = cleanBadge;
+        retailProd.active = true;
+      } else {
+        const baseSinglePrice = estimateSingleUnitRetailPrice(invItem.retailSellingPriceIQD, invItem.unit);
+        const discounted = Math.max(250, Math.round((baseSinglePrice * (1 - cleanDiscount / 100)) / 250) * 250);
+        retailProd = {
+          barcode: `${invItem.barcode}-RET`,
+          productName: `${invItem.productName} (مفرد)`,
+          nameEn: invItem.productName,
+          brand: store.name,
+          category: invItem.category,
+          subCategory: invItem.category,
+          unit: 'عبوة مفردة',
+          retailSellingPriceIQD: discounted,
+          oldPrice: baseSinglePrice,
+          discountPercent: cleanDiscount,
+          stockQuantity: Math.max(10, invItem.stockQuantity * 4),
+          rating: 4.8,
+          reviewsCount: 18,
+          imageUrl: ensureRetailSingleUnitImage(undefined, invItem.category),
+          expiryDate: invItem.expiryDate,
+          promoBadge: cleanBadge,
+          isFeatured: true,
+          active: true
+        };
+        almansoorStorefrontState.products.unshift(retailProd);
+      }
+      retailOffer = {
+        active: true,
+        barcode: retailProd.barcode,
+        priceIQD: retailProd.retailSellingPriceIQD,
+        oldPrice: retailProd.oldPrice,
+        discountPercent: retailProd.discountPercent,
+        promoBadge: retailProd.promoBadge
+      };
+    }
+
+    if (channel === 'wholesale' || channel === 'both') {
+      const createdOffer = db.upsertWholesaleClearanceOffer({
+        barcode: invItem.barcode,
+        supplierId: 'supp_rafidain',
+        basePriceIQD: invItem.costPriceIQD || invItem.retailSellingPriceIQD,
+        discountPercent: cleanDiscount,
+        availableStock: invItem.stockQuantity,
+        expiryDate: invItem.expiryDate || ''
+      });
+      wholesaleOffer = {
+        active: true,
+        offerId: createdOffer.id,
+        priceIQD: createdOffer.priceIQD,
+        clearanceDiscountPercent: createdOffer.clearanceDiscountPercent,
+        expiryDate: createdOffer.expiryDate,
+        supplierName: createdOffer.supplierName
+      };
+    }
+
+    invItem.isNearExpiry = true;
+
+    res.json({
+      success: true,
+      message:
+        channel === 'both'
+          ? `تم تحويل "${invItem.productName}" إلى عروض التجزئة والجملة بخصم ${cleanDiscount}%`
+          : channel === 'retail'
+          ? `تم تحويل "${invItem.productName}" إلى عروض متجر التجزئة بخصم ${cleanDiscount}%`
+          : `تم تحويل "${invItem.productName}" إلى عروض متجر الجملة بخصم ${cleanDiscount}%`,
+      data: {
+        barcode: invItem.barcode,
+        channel,
+        discountPercent: cleanDiscount,
+        retailOffer,
+        wholesaleOffer
+      }
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// 7.6C Wholesale Supplier Near-Expiry Batches & Clearance Conversion
+apiRouter.get('/supplier/:supplierId/near-expiry', (req: Request, res: Response) => {
+  try {
+    const { supplierId } = req.params;
+    const supplier = db.suppliers.find((s) => s.id === supplierId);
+    if (!supplier) {
+      return res.status(404).json({ success: false, message: 'المورد غير موجود' });
+    }
+
+    const modeParam = req.query.mode === 'custom' ? 'custom' : 'month';
+    const targetDateParam = typeof req.query.targetDate === 'string' ? req.query.targetDate.trim() : undefined;
+    if (modeParam === 'custom' && !isValidIsoDate(targetDateParam)) {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى تحديد تاريخ صالح بصيغة YYYY-MM-DD عند اختيار التاريخ المخصص'
+      });
+    }
+
+    const { mode, referenceDate, cutoffDate } = resolveExpiryCutoffDate({
+      mode: modeParam as ExpiryThresholdMode,
+      targetDate: targetDateParam
+    });
+
+    const batches = db.getSupplierWarehouseBatches(supplierId);
+    const alerts: any[] = [];
+
+    for (const batch of batches) {
+      const evaluation = evaluateExpiryStatus(batch.expiryDate, { mode, targetDate: cutoffDate, referenceDate });
+      if (!evaluation || !evaluation.isWithinThreshold) continue;
+
+      const wholesaleMatch = db.offers.find(
+        (o) =>
+          o.barcode === batch.barcode &&
+          o.supplierId === supplierId &&
+          Boolean(o.isClearanceNearExpiry)
+      );
+
+      alerts.push({
+        id: batch.id,
+        source: 'supplier_stock',
+        supplierId,
+        supplierName: supplier.companyName,
+        barcode: batch.barcode,
+        productName: batch.productName,
+        category: batch.category,
+        unit: batch.unit,
+        imageUrl:
+          db.getCatalogImageForBarcode(batch.barcode) ||
+          '/assets/images/carton_basmati_rice.jpg',
+        stockQuantity: batch.stockQuantity,
+        costPriceIQD: batch.costPriceIQD,
+        sellingPriceIQD: batch.wholesalePriceIQD,
+        capitalAtRiskIQD: batch.stockQuantity * batch.costPriceIQD,
+        expiryDate: evaluation.expiryDate,
+        daysRemaining: evaluation.daysRemaining,
+        isExpired: evaluation.isExpired,
+        urgency: evaluation.urgency,
+        retailOffer: null,
+        wholesaleOffer: wholesaleMatch
+          ? {
+              active: true,
+              offerId: wholesaleMatch.id,
+              priceIQD: wholesaleMatch.priceIQD,
+              clearanceDiscountPercent: wholesaleMatch.clearanceDiscountPercent || 0,
+              expiryDate: wholesaleMatch.expiryDate,
+              supplierName: wholesaleMatch.supplierName
+            }
+          : null
+      });
+    }
+
+    alerts.sort((a, b) => a.daysRemaining - b.daysRemaining);
+
+    res.json({
+      success: true,
+      supplierId,
+      mode,
+      referenceDate,
+      cutoffDate,
+      summary: {
+        nearExpiryCount: alerts.length,
+        urgentCount: alerts.filter((a) => a.urgency === 'expired' || a.urgency === 'critical').length,
+        totalCapitalAtRiskIQD: alerts.reduce((sum, a) => sum + a.capitalAtRiskIQD, 0),
+        convertedRetailCount: 0,
+        convertedWholesaleCount: alerts.filter((a) => Boolean(a.wholesaleOffer)).length
+      },
+      data: alerts
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.post('/supplier/:supplierId/near-expiry/convert', (req: Request, res: Response) => {
+  try {
+    if (rejectCashierToken(req, res)) return;
+
+    const { supplierId } = req.params;
+    const supplier = db.suppliers.find((s) => s.id === supplierId);
+    if (!supplier) {
+      return res.status(404).json({ success: false, message: 'المورد غير موجود' });
+    }
+
+    const { barcode, batchId, discountPercent } = req.body || {};
+    const numericDiscount = Number(discountPercent);
+    if (!Number.isFinite(numericDiscount) || numericDiscount < 5 || numericDiscount > 85) {
+      return res.status(400).json({ success: false, message: 'نسبة الخصم يجب أن تكون بين 5% و 85%' });
+    }
+
+    const batch = db.supplierInventoryBatches.find(
+      (b) =>
+        b.supplierId === supplierId &&
+        ((typeof batchId === 'string' && b.id === batchId) ||
+          (typeof barcode === 'string' && b.barcode === barcode.trim()))
+    );
+
+    if (!batch) {
+      return res.status(404).json({ success: false, message: 'دفعة المخزون غير موجودة لهذا المورد' });
+    }
+
+    const offer = db.upsertWholesaleClearanceOffer({
+      barcode: batch.barcode,
+      supplierId,
+      basePriceIQD: batch.wholesalePriceIQD,
+      discountPercent: Math.round(numericDiscount),
+      availableStock: batch.stockQuantity,
+      expiryDate: batch.expiryDate
+    });
+
+    res.json({
+      success: true,
+      message: `تم تحويل دفعة "${batch.productName}" إلى عروض تصريف الجملة بخصم ${offer.clearanceDiscountPercent}%`,
+      data: offer
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
 });
 
 // 7.7 Store Owner Management: Save/Update Hero Slider Banners (تعديل بنرات السلايد المتحرك)
@@ -1885,6 +2538,128 @@ apiRouter.post('/assistant/ask', async (req: Request, res: Response) => {
     res.json({ success: true, data: result });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ================= 8B. STORE STAFF ACCOUNTS (CASHIER & ACCOUNTANT) =================
+apiRouter.post('/auth/store-session', (req: Request, res: Response) => {
+  try {
+    const storeId = typeof req.body?.storeId === 'string' ? req.body.storeId.trim() : '';
+    if (!storeId) {
+      return res.status(400).json({ success: false, message: 'معرف المتجر مطلوب' });
+    }
+    const token = signSessionToken({
+      sub: `owner_${storeId}`,
+      role: 'store',
+      storeId,
+      exp: Date.now() + 12 * 60 * 60 * 1000
+    });
+    res.json({ success: true, token });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.post('/staff/login', (req: Request, res: Response) => {
+  try {
+    const phone = typeof req.body?.phone === 'string' ? req.body.phone : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    if (!phone.trim() || !password) {
+      return res.status(400).json({ success: false, message: 'يرجى إدخال رقم الهاتف وكلمة المرور' });
+    }
+
+    const result = db.authenticateStoreStaff(phone, password);
+    if (result.status === 'not_found') {
+      return res.status(404).json({ success: false, message: 'لا يوجد حساب موظف مسجل بهذا الرقم' });
+    }
+    if (result.status === 'invalid_credentials') {
+      return res.status(401).json({ success: false, message: 'رقم الهاتف أو كلمة المرور غير صحيحة' });
+    }
+    if (result.status === 'inactive' || !result.staff) {
+      return res.status(403).json({ success: false, message: 'هذا الحساب موقوف حالياً من قبل مدير المتجر' });
+    }
+
+    const token = signSessionToken({
+      sub: result.staff.id,
+      role: result.staff.role,
+      storeId: result.staff.storeId,
+      exp: Date.now() + 12 * 60 * 60 * 1000
+    });
+
+    res.json({
+      success: true,
+      token,
+      staff: result.staff
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.get('/stores/:storeId/staff', requireStoreOwner, (req: Request, res: Response) => {
+  try {
+    const list = db.getStoreStaff(req.params.storeId);
+    res.json({ success: true, count: list.length, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.post('/stores/:storeId/staff', requireStoreOwner, (req: Request, res: Response) => {
+  try {
+    const { storeName, name, role, phone, branchId, branchName, password } = req.body || {};
+    const created = db.createStoreStaff({
+      storeId: req.params.storeId,
+      storeName: typeof storeName === 'string' ? storeName : undefined,
+      name: typeof name === 'string' ? name : '',
+      role,
+      phone: typeof phone === 'string' ? phone : '',
+      branchId: typeof branchId === 'string' ? branchId : 'branch_main',
+      branchName: typeof branchName === 'string' ? branchName : 'الفرع الرئيسي',
+      password: typeof password === 'string' ? password : ''
+    });
+    res.status(201).json({
+      success: true,
+      message: 'تم إنشاء حساب الموظف بنجاح',
+      data: created
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.patch('/stores/:storeId/staff/:staffId', requireStoreOwner, (req: Request, res: Response) => {
+  try {
+    const { name, role, phone, branchId, branchName, isActive, password } = req.body || {};
+    const updated = db.updateStoreStaff(req.params.storeId, req.params.staffId, {
+      name: typeof name === 'string' ? name : undefined,
+      role,
+      phone: typeof phone === 'string' ? phone : undefined,
+      branchId: typeof branchId === 'string' ? branchId : undefined,
+      branchName: typeof branchName === 'string' ? branchName : undefined,
+      isActive: typeof isActive === 'boolean' ? isActive : undefined,
+      password: typeof password === 'string' ? password : undefined
+    });
+    res.json({
+      success: true,
+      message: 'تم تحديث حساب الموظف بنجاح',
+      data: updated
+    });
+  } catch (error: any) {
+    const status = error.message?.includes('غير موجود') ? 404 : 400;
+    res.status(status).json({ success: false, message: error.message });
+  }
+});
+
+apiRouter.delete('/stores/:storeId/staff/:staffId', requireStoreOwner, (req: Request, res: Response) => {
+  try {
+    db.deleteStoreStaff(req.params.storeId, req.params.staffId);
+    res.json({
+      success: true,
+      message: 'تم حذف حساب الموظف'
+    });
+  } catch (error: any) {
+    res.status(404).json({ success: false, message: error.message });
   }
 });
 

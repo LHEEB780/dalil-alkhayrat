@@ -65,6 +65,8 @@ interface StoreMarketplaceViewProps {
   onSearchChange?: (query: string) => void;
   onResetGlobalFilters?: () => void;
   onOpenAllBrands?: (brandId?: string) => void;
+  onOpenExpiryManager?: () => void;
+  onOpenCollectiveDeals?: () => void;
 }
 
 interface HorizontalProductShelfProps {
@@ -136,7 +138,9 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
   searchQuery = '',
   onSearchChange,
   onResetGlobalFilters,
-  onOpenAllBrands
+  onOpenAllBrands,
+  onOpenExpiryManager,
+  onOpenCollectiveDeals
 }) => {
   const isAr = language === 'ar';
 
@@ -248,8 +252,18 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
 
   const saverDealProducts = useMemo(() => {
     const discounted = products
-      .filter((p) => (p.discountPercent || 0) >= 10 || p.badgeType === 'promo_day')
-      .sort((a, b) => (b.discountPercent || 0) - (a.discountPercent || 0));
+      .filter(
+        (p) =>
+          p.offers.some((o) => o.isClearanceNearExpiry) ||
+          (p.discountPercent || 0) >= 10 ||
+          p.badgeType === 'promo_day'
+      )
+      .sort((a, b) => {
+        const aClearance = a.offers.some((o) => o.isClearanceNearExpiry) ? 1 : 0;
+        const bClearance = b.offers.some((o) => o.isClearanceNearExpiry) ? 1 : 0;
+        if (aClearance !== bClearance) return bClearance - aClearance;
+        return (b.discountPercent || 0) - (a.discountPercent || 0);
+      });
     return (discounted.length >= 4 ? discounted : products).slice(0, 8);
   }, [products]);
 
@@ -568,10 +582,15 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
               )}
             </div>
 
-            <div className="mb-1">
+            <div className="mb-1 flex items-center gap-1 flex-wrap">
               <span className="inline-block bg-[#0F3D24] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-sm">
                 {isAr ? 'أفضل سعر جملة' : 'Best price'}
               </span>
+              {product.offers.some((o) => o.isClearanceNearExpiry) && (
+                <span className="inline-block bg-amber-100 text-amber-900 border border-amber-200 text-[9px] font-extrabold px-1.5 py-0.5 rounded-sm">
+                  {isAr ? 'تصفية صلاحية' : 'Expiry Deal'}
+                </span>
+              )}
             </div>
 
             <h3
@@ -915,14 +934,25 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
                   ? 'تحديث يومي لأسعار الكرتون المباشرة بأفضل هامش ربح للتجار'
                   : 'Daily carton markdowns with maximum retail profit margin'}
               </p>
-              <div className="pt-1">
+              <div className="pt-1 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => navigateToCategory('زيوت وسمن')}
+                  onClick={() =>
+                    onOpenCollectiveDeals ? onOpenCollectiveDeals() : navigateToCategory('زيوت وسمن')
+                  }
                   className="px-3.5 py-1.5 rounded-xl bg-white hover:bg-[#FFFBEB] text-[#111827] text-xs font-black shadow-2xs transition cursor-pointer whitespace-nowrap"
                 >
-                  {isAr ? 'عرض الكل' : 'See all'}
+                  {isAr ? 'عرض تصفيات الصلاحية والجملة' : 'See Clearance Deals'}
                 </button>
+                {onOpenExpiryManager && (
+                  <button
+                    type="button"
+                    onClick={onOpenExpiryManager}
+                    className="px-3 py-1.5 rounded-xl bg-[#0F3D24] hover:bg-[#0B5D32] text-white text-xs font-black shadow-2xs transition cursor-pointer whitespace-nowrap"
+                  >
+                    {isAr ? 'تحويل قريب الانتهاء للعروض' : 'Manage Expiring Stock'}
+                  </button>
+                )}
               </div>
             </div>
 

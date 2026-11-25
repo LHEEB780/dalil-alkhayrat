@@ -41,6 +41,12 @@ import {
   WholesaleSupplier,
   resolveWholesaleSupplierByOffer
 } from '../data/nearbySuppliers.ts';
+import {
+  addDaysToIsoDate,
+  evaluateExpiryStatus,
+  getTodayIsoDate,
+  isValidIsoDate
+} from '../../shared/expiryAlerts.ts';
 
 import heroCampaignImg from '../assets/images/deals_hero_campaign_1794819183884.jpg';
 import videoShowcaseImg from '../assets/images/deals_video_showcase_1794819184683.jpg';
@@ -538,14 +544,29 @@ export const CollectiveDealsView: React.FC<CollectiveDealsViewProps> = ({
     return defs.filter((b) => b.items.length > 0);
   }, [products]);
 
-  // Clearance near-expiry offers (filtered by category if active)
+  const [clearanceDateMode, setClearanceDateMode] = useState<'all' | 'month' | 'custom'>('all');
+  const [clearanceCustomDate, setClearanceCustomDate] = useState<string>(() =>
+    addDaysToIsoDate(getTodayIsoDate(), 60)
+  );
+
+  // Clearance near-expiry offers (filtered by category and expiry cutoff if active)
   const clearanceOffers = useMemo(() => {
     return filteredProducts.flatMap((p) =>
       p.offers
-        .filter((o) => o.isClearanceNearExpiry)
+        .filter((o) => {
+          if (!o.isClearanceNearExpiry) return false;
+          if (clearanceDateMode === 'all') return true;
+          if (!o.expiryDate) return false;
+          if (clearanceDateMode === 'custom' && !isValidIsoDate(clearanceCustomDate)) return true;
+          const ev = evaluateExpiryStatus(o.expiryDate, {
+            mode: clearanceDateMode === 'custom' ? 'custom' : 'month',
+            targetDate: clearanceDateMode === 'custom' ? clearanceCustomDate : undefined
+          });
+          return Boolean(ev?.isWithinThreshold);
+        })
         .map((o) => ({ product: p, offer: o }))
     );
-  }, [filteredProducts]);
+  }, [filteredProducts, clearanceDateMode, clearanceCustomDate]);
 
   // Filtered collective pools
   const filteredPools = useMemo(() => {
@@ -1789,20 +1810,55 @@ export const CollectiveDealsView: React.FC<CollectiveDealsViewProps> = ({
       {/* 6. NEAR-EXPIRY CLEARANCE MARKET */}
       {showSection('clearance') && (
         <section className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Tag className="w-5 h-5 text-amber-600" />
-              <h2 className="text-base sm:text-lg font-black text-[#111827]">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <Tag className="w-5 h-5 text-amber-600" />
+                <h2 className="text-base sm:text-lg font-black text-[#111827]">
+                  {isAr
+                    ? 'سوق تصريف المخزون (عروض قرب انتهاء الصلاحية)'
+                    : 'Clearance Market (Near-Expiry Stock)'}
+                </h2>
+              </div>
+              <span className="text-xs text-[#6B7280] block">
                 {isAr
-                  ? 'سوق تصريف المخزون (عروض قرب انتهاء الصلاحية)'
-                  : 'Clearance Market (Near-Expiry Stock)'}
-              </h2>
+                  ? 'خصومات فورية حتى 40% لتدوير رأس المال السريع'
+                  : 'Up to 40% instant discounts for fast shelf turnover'}
+              </span>
             </div>
-            <span className="text-xs text-[#6B7280]">
-              {isAr
-                ? 'خصومات فورية حتى 40% لتدوير رأس المال السريع'
-                : 'Up to 40% instant discounts for fast shelf turnover'}
-            </span>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <div className="inline-flex items-center bg-[#F3F4F6] border border-[#E5E7EB] p-1 rounded-xl">
+                {[
+                  { id: 'all' as const, label: isAr ? 'الكل' : 'All' },
+                  { id: 'month' as const, label: isAr ? 'قبل شهر (30 يوم)' : 'Within 1 Month' },
+                  { id: 'custom' as const, label: isAr ? 'تاريخ مخصص' : 'Custom Date' }
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setClearanceDateMode(opt.id)}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer whitespace-nowrap ${
+                      clearanceDateMode === opt.id
+                        ? 'bg-[#00A046] text-white shadow-2xs'
+                        : 'text-[#4B5563] hover:text-[#111827]'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {clearanceDateMode === 'custom' && (
+                <input
+                  type="date"
+                  value={clearanceCustomDate}
+                  onChange={(e) => setClearanceCustomDate(e.target.value)}
+                  dir="ltr"
+                  className="px-2.5 py-1.5 rounded-xl bg-white border border-[#E5E7EB] text-xs font-mono font-bold text-[#111827] focus:border-[#00A046] outline-none"
+                />
+              )}
+            </div>
           </div>
 
           {clearanceOffers.length === 0 ? (
