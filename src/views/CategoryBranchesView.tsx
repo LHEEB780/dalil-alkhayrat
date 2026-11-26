@@ -26,9 +26,27 @@ import {
   resolveCategoryKey,
   matchesProductCategoryKeywords
 } from '../data/categories.ts';
-import { StoreDistrict, resolveWholesaleSupplierByOffer } from '../data/nearbySuppliers.ts';
-import { getLocalizedText } from '../utils/translations.ts';
+import {
+  StoreDistrict,
+  WHOLESALE_SUPPLIERS,
+  resolveWholesaleSupplierByOffer
+} from '../data/nearbySuppliers.ts';
+import { getLocalizedText, translations } from '../utils/translations.ts';
 import { getInitialOfferQuantity } from '../../shared/orderRules.ts';
+import {
+  ProductFilterState,
+  EMPTY_PRODUCT_FILTERS,
+  applyProductFilters,
+  getFilterFacets,
+  countActiveFilters,
+  scoreAndFilterProductsBySearch,
+  FilterableSupplier
+} from '../../shared/productFilters.ts';
+import {
+  ProductFilterDrawer,
+  ProductFilterControlsBar,
+  ProductActiveFilterChips
+} from '../components/ProductFilterDrawer.tsx';
 
 interface CategoryBranchesViewProps {
   selectedCategory: string;
@@ -45,6 +63,7 @@ interface CategoryBranchesViewProps {
   onAddToCart: (product: ProductWithOffers, offer: SupplierOfferItem, quantity: number) => void;
   onBack: () => void;
   onOpenAllCategories: () => void;
+  suppliers?: FilterableSupplier[];
 }
 
 export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
@@ -60,12 +79,16 @@ export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
   onCompareOffers,
   onAddToCart,
   onBack,
-  onOpenAllCategories
+  onOpenAllCategories,
+  suppliers = []
 }) => {
   const isAr = language === 'ar';
+  const t = translations[language];
   const [showSearchInput, setShowSearchInput] = useState(false);
   const [localSearch, setLocalSearch] = useState('');
   const [addedBarcode, setAddedBarcode] = useState<string | null>(null);
+  const [filters, setFilters] = useState<ProductFilterState>(EMPTY_PRODUCT_FILTERS);
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
 
   const activeCatBtnRef = useRef<HTMLButtonElement | null>(null);
   const activeBranchBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -157,6 +180,11 @@ export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
     [selectedCategory]
   );
 
+  // Auto-reset filters when main category or search text changes
+  useEffect(() => {
+    setFilters(EMPTY_PRODUCT_FILTERS);
+  }, [resolvedSelectedCategory, localSearch]);
+
   // Unique main departments for Slider 1 (all 22 departments)
   const mainCategories = useMemo(() => GROCERY_DEPARTMENTS, []);
 
@@ -236,7 +264,17 @@ export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
     return products.filter((p) => resolveCategoryKey(p.category) === resolvedSelectedCategory);
   }, [products, resolvedSelectedCategory]);
 
-  const displayedProducts = useMemo(() => {
+  const effectiveSuppliers = useMemo<FilterableSupplier[]>(() => {
+    if (suppliers && suppliers.length > 0) return suppliers;
+    return WHOLESALE_SUPPLIERS.map((s) => ({
+      id: s.id,
+      companyName: s.nameAr,
+      verificationStatus: s.verificationStatus || 'verified',
+      isVerified: true
+    }));
+  }, [suppliers]);
+
+  const { branchScopedProducts, searchScoreMap } = useMemo(() => {
     let list = [...categoryProducts];
 
     if (activeBranch && activeBranch.id !== 'all') {
@@ -255,18 +293,49 @@ export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
     }
 
     if (localSearch.trim()) {
-      const q = localSearch.trim().toLowerCase();
-      list = list.filter(
+      const q = localSearch.trim();
+      const searchRes = scoreAndFilterProductsBySearch(list, q);
+      const matchedSet = new Set(searchRes.items.map((p) => p.barcode));
+      const keywordMatched = list.filter(
         (p) =>
-          p.nameAr.toLowerCase().includes(q) ||
-          (p.nameEn && p.nameEn.toLowerCase().includes(q)) ||
-          p.brand.toLowerCase().includes(q) ||
+          !matchedSet.has(p.barcode) &&
           matchesProductCategoryKeywords(p.category, p.subCategory, q)
       );
+      const combinedScores = new Map(searchRes.scoreMap);
+      for (const km of keywordMatched) {
+        combinedScores.set(km.barcode, 5);
+      }
+      return {
+        branchScopedProducts: [...searchRes.items, ...keywordMatched],
+        searchScoreMap: combinedScores
+      };
     }
 
-    return list;
+    return {
+      branchScopedProducts: list,
+      searchScoreMap: new Map<string, number>()
+    };
   }, [categoryProducts, activeBranch, localSearch]);
+
+  const facets = useMemo(
+    () =>
+      getFilterFacets(branchScopedProducts, [], filters, {
+        suppliers: effectiveSuppliers,
+        searchScores: searchScoreMap
+      }),
+    [branchScopedProducts, filters, effectiveSuppliers, searchScoreMap]
+  );
+
+  const displayedProducts = useMemo(
+    () =>
+      applyProductFilters(branchScopedProducts, [], filters, {
+        suppliers: effectiveSuppliers,
+        searchScores: searchScoreMap
+      }),
+    [branchScopedProducts, filters, effectiveSuppliers, searchScoreMap]
+  );
+
+  const activeFilterCount = countActiveFilters(filters);
 
   const alsoBoughtProducts = useMemo(() => {
     const currentSet = new Set(displayedProducts.map((p) => p.barcode));
@@ -500,7 +569,31 @@ export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
       </div>
 
       {/* 4. Clean Borderless Products Grid (No card background box — only image, name, rating, and Add button) */}
-      <div className="flex-1 bg-white p-3 sm:p-5 space-y-8">
+      <div className="flex-1 bg-white p-3 sm:p-5 space-y-5">
+        {/* Compact Filter & Sort Toolbar + Active Chips */}
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-xs font-bold text-[#6B7280] tabular-nums">
+              {isAr
+                ? `${displayedProducts.length} منتج`
+                : `${displayedProducts.length} products`}
+            </span>
+            <ProductFilterControlsBar
+              filters={filters}
+              onChangeSort={(sortBy) => setFilters((prev) => ({ ...prev, sortBy }))}
+              onOpenDrawer={() => setIsFilterDrawerOpen(true)}
+              language={language}
+              compact
+            />
+          </div>
+          <ProductActiveFilterChips
+            filters={filters}
+            facets={facets}
+            onChangeFilters={setFilters}
+            language={language}
+          />
+        </div>
+
         {displayedProducts.length > 0 ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-3.5 gap-y-6 sm:gap-x-6 sm:gap-y-7">
             {displayedProducts.map((product) => {
@@ -579,19 +672,47 @@ export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
           <div className="py-12 text-center bg-white rounded-2xl border border-[#E5E7EB]">
             <Store className="w-10 h-10 text-gray-300 mx-auto mb-2" />
             <p className="text-sm font-bold text-[#1F2328]">
-              {isAr ? 'لا توجد منتجات مطابقة في هذا الفرع' : 'No matching products'}
+              {activeFilterCount > 0
+                ? t.filterNoResultsTitle
+                : isAr
+                ? 'لا توجد منتجات مطابقة في هذا الفرع'
+                : 'No matching products'}
             </p>
-            <button
-              type="button"
-              onClick={() => {
-                setLocalSearch('');
-                setActiveBranchId(branches[0]?.id || 'all');
-                onSelectBranchSubCategory('الكل');
-              }}
-              className="mt-3 px-4 py-2 rounded-xl bg-[#00A046] text-white text-xs font-bold cursor-pointer"
-            >
-              {isAr ? 'عرض جميع فروع القسم' : 'Show All Branches'}
-            </button>
+            {activeFilterCount > 0 && (
+              <p className="text-xs text-[#6B7280] mt-1">{t.filterNoResultsSubtitle}</p>
+            )}
+            <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
+              {activeFilterCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFilters({
+                      ...EMPTY_PRODUCT_FILTERS,
+                      sortBy: filters.sortBy
+                    })
+                  }
+                  className="px-4 py-2 rounded-xl bg-[#00A046] hover:bg-[#008A3C] text-white text-xs font-bold cursor-pointer"
+                >
+                  {t.filterClearFilters}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setFilters(EMPTY_PRODUCT_FILTERS);
+                  setLocalSearch('');
+                  setActiveBranchId(branches[0]?.id || 'all');
+                  onSelectBranchSubCategory('الكل');
+                }}
+                className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${
+                  activeFilterCount > 0
+                    ? 'bg-white border border-[#E5E7EB] text-[#1F2328] hover:border-[#00A046]'
+                    : 'bg-[#00A046] text-white'
+                }`}
+              >
+                {isAr ? 'عرض جميع فروع القسم' : 'Show All Branches'}
+              </button>
+            </div>
           </div>
         )}
 
@@ -694,6 +815,16 @@ export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Category Filter Drawer */}
+      <ProductFilterDrawer
+        isOpen={isFilterDrawerOpen}
+        onClose={() => setIsFilterDrawerOpen(false)}
+        filters={filters}
+        facets={facets}
+        onChangeFilters={setFilters}
+        language={language}
+      />
     </div>
   );
 };

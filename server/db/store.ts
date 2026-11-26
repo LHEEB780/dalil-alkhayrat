@@ -72,6 +72,14 @@ import {
   initialVanReturns,
   initialShiftReports
 } from './seed.ts';
+import {
+  applyProductFilters,
+  scoreAndFilterProductsBySearch,
+  ProductFilterState,
+  ProductSortBy,
+  ProductStorageType,
+  ALL_STORAGE_TYPES
+} from '../../shared/productFilters.ts';
 
 const SERVER_CATEGORY_ALIASES: Record<string, string> = {
   'قهوة ومشروبات ساخنة': 'شاي وقهوة',
@@ -304,7 +312,22 @@ class AppDataStore {
   }
 
   // ================= PRODUCTS & OFFERS =================
-  getProductsWithOffers(params?: { category?: string; query?: string; barcode?: string; deliveryZoneId?: string }) {
+  getProductsWithOffers(params?: {
+    category?: string;
+    query?: string;
+    barcode?: string;
+    deliveryZoneId?: string;
+    brandId?: string | string[];
+    countryOfOrigin?: string | string[];
+    storageType?: string | string[];
+    supplierId?: string | string[];
+    inStock?: boolean;
+    minPrice?: number;
+    maxPrice?: number;
+    onSale?: boolean;
+    verifiedOnly?: boolean;
+    sortBy?: ProductSortBy;
+  }) {
     let result = this.products;
 
     if (params?.barcode) {
@@ -314,96 +337,12 @@ class AppDataStore {
       const resolvedCat = SERVER_CATEGORY_ALIASES[params.category] || params.category;
       result = result.filter(p => p.category === params.category || p.category === resolvedCat);
     }
-    if (params?.query) {
-      const normalizeText = (value: string) =>
-        value.toLowerCase().replace(/[\u064B-\u065F\u0670\u0640]/g, '').trim();
-      const tokenizeWords = (value: string) =>
-        normalizeText(value).split(/[\s\-_/&،,()+.]+/).filter(Boolean);
-      const stripArabicAl = (word: string) =>
-        word.length > 2 && word.startsWith('ال') ? word.slice(2) : word;
 
-      const normalizedQuery = normalizeText(params.query);
-      const queryTokens = tokenizeWords(normalizedQuery);
-
-      const scoreText = (fieldText: string | undefined): 0 | 1 | 2 | 3 => {
-        if (!fieldText || queryTokens.length === 0) return 0;
-        const normalizedField = normalizeText(fieldText);
-        if (!normalizedField) return 0;
-        if (
-          normalizedField === normalizedQuery ||
-          stripArabicAl(normalizedField) === stripArabicAl(normalizedQuery)
-        ) {
-          return 3;
-        }
-        const words = tokenizeWords(normalizedField);
-        if (words.length === 0) return 0;
-
-        let minTokenScore: 0 | 1 | 2 = 2;
-        for (const qt of queryTokens) {
-          const qtBare = stripArabicAl(qt);
-          let bestWordScore: 0 | 1 | 2 = 0;
-          for (const w of words) {
-            const wBare = stripArabicAl(w);
-            if (w === qt || wBare === qt || w === qtBare || wBare === qtBare) {
-              bestWordScore = 2;
-              break;
-            }
-            if (w.startsWith(qt) || (w !== wBare && wBare.startsWith(qt))) {
-              bestWordScore = 1;
-            }
-          }
-          if (bestWordScore === 0) return 0;
-          if (bestWordScore < minTokenScore) minTokenScore = bestWordScore;
-        }
-        return minTokenScore;
-      };
-
-      const BILINGUAL_SUBCATEGORY_KEYWORDS: Record<string, string[]> = {
-        'أرز': ['rice', 'basmati', 'anbar', 'long grain', 'mahmood rice'],
-        'سكر ومحليات': ['sugar', 'white sugar', 'cane sugar', 'sweeteners', 'brown sugar', 'stevia'],
-        'طحين ونشويات': ['flour', 'wheat flour', 'starch', 'cornstarch'],
-        'بقوليات': ['lentils', 'chickpeas', 'beans', 'pulses', 'legumes'],
-        'مكرونة وشعرية ونودلز': ['pasta', 'spaghetti', 'vermicelli', 'noodles', 'macaroni', 'barilla', 'indomie'],
-        'زيت دوار الشمس': ['sunflower oil', 'cooking oil', 'afia', 'vegetable oil', 'oil'],
-        'معجون وصلصة الطماطم': ['tomato paste', 'tomato sauce', 'crushed tomatoes'],
-        'حليب بودرة ومبخر ومكثف': ['milk powder', 'nido', 'evaporated milk', 'condensed milk', 'milk', 'dairy'],
-        'أجبان': ['cheese', 'mozzarella', 'cheddar', 'feta', 'kiri', 'puck', 'dairy'],
-        'بطاطا مجمدة': ['french fries', 'frozen potatoes', 'fries', 'wedges', 'frozen'],
-        'مياه معدنية': ['mineral water', 'water', 'bottled water', 'al-waha', 'aquafina', 'beverages', 'drinks'],
-        'شاي أسود': ['black tea', 'ceylon tea', 'tea', 'mahmood tea', 'ahmad tea'],
-        'قهوة عربية وتركية': ['arabic coffee', 'turkish coffee', 'coffee', 'cardamom', 'al-ameed'],
-        'حبوب كاملة': ['ground coffee', 'coffee beans', 'whole beans', 'espresso', 'lavazza', 'coffee'],
-        'القهوة المقطرة': ['drip coffee', 'filter coffee', 'pour over', 'coffee'],
-        'أرابيكا': ['arabica', 'arabica beans', 'coffee'],
-        'سريعة التحضير': ['instant coffee', 'nescafe', '3 in 1', 'coffee'],
-        'كبسولات سريعة': ['coffee capsules', 'coffee pods', 'nespresso', 'dolce gusto', 'espresso', 'coffee'],
-        'منظفات الغسيل': ['laundry', 'detergent', 'washing powder', 'tide', 'ariel', 'cleaning'],
-        'منظفات الأطباق': ['dishwashing', 'dish soap', 'fairy', 'pril', 'cleaning']
-      };
-
-      const scored = result
-        .map(p => {
-          const subKws = p.subCategory ? (BILINGUAL_SUBCATEGORY_KEYWORDS[p.subCategory] || []) : [];
-          let bestScore = Math.max(
-            scoreText(p.nameAr),
-            scoreText(p.nameEn),
-            scoreText(p.brand),
-            scoreText(p.category),
-            scoreText(p.subCategory),
-            ...subKws.map(kw => scoreText(kw))
-          );
-          const barcodeNorm = p.barcode.toLowerCase();
-          if (barcodeNorm === normalizedQuery) bestScore = Math.max(bestScore, 3);
-          else if (normalizedQuery && barcodeNorm.startsWith(normalizedQuery)) bestScore = Math.max(bestScore, 1);
-          return { product: p, score: bestScore };
-        })
-        .filter(item => item.score > 0);
-
-      const minRequiredScore = scored.some(item => item.score >= 2) ? 2 : 1;
-      result = scored
-        .filter(item => item.score >= minRequiredScore)
-        .sort((a, b) => b.score - a.score)
-        .map(item => item.product);
+    let searchScoreMap: Map<string, number> | undefined;
+    if (params?.query && params.query.trim()) {
+      const searchOutcome = scoreAndFilterProductsBySearch(result, params.query);
+      result = searchOutcome.items;
+      searchScoreMap = searchOutcome.scoreMap;
     }
 
     const eligibleSupplierIds = params?.deliveryZoneId
@@ -454,10 +393,54 @@ class AppDataStore {
       };
     });
 
-    if (eligibleSupplierIds) {
-      return mapped.filter(p => p.offers.length > 0);
+    const baseMapped = eligibleSupplierIds
+      ? mapped.filter(p => p.offers.length > 0)
+      : mapped;
+
+    const toArr = (v?: string | string[]): string[] =>
+      !v ? [] : Array.isArray(v) ? v.filter(Boolean) : v.split(',').map(s => s.trim()).filter(Boolean);
+
+    const brands = toArr(params?.brandId);
+    const countries = toArr(params?.countryOfOrigin);
+    const storageTypes = toArr(params?.storageType).filter((s): s is ProductStorageType =>
+      ALL_STORAGE_TYPES.includes(s as ProductStorageType)
+    );
+    const supplierIds = toArr(params?.supplierId);
+
+    const hasExplicitFiltersOrSort =
+      brands.length > 0 ||
+      countries.length > 0 ||
+      storageTypes.length > 0 ||
+      supplierIds.length > 0 ||
+      Boolean(params?.inStock) ||
+      typeof params?.minPrice === 'number' ||
+      typeof params?.maxPrice === 'number' ||
+      Boolean(params?.onSale) ||
+      Boolean(params?.verifiedOnly) ||
+      Boolean(params?.sortBy) ||
+      Boolean(params?.query && params.query.trim());
+
+    if (!hasExplicitFiltersOrSort) {
+      return baseMapped;
     }
-    return mapped;
+
+    const filterState: ProductFilterState = {
+      brands,
+      countries,
+      storageTypes,
+      supplierIds,
+      inStockOnly: Boolean(params?.inStock),
+      minPriceIQD: params?.minPrice,
+      maxPriceIQD: params?.maxPrice,
+      onSaleOnly: Boolean(params?.onSale),
+      verifiedOnly: Boolean(params?.verifiedOnly),
+      sortBy: params?.sortBy || 'relevance'
+    };
+
+    return applyProductFilters(baseMapped, [], filterState, {
+      suppliers: this.suppliers,
+      searchScores: searchScoreMap
+    });
   }
 
   // ================= CREDIT & LEDGER =================

@@ -390,7 +390,14 @@ export default function App() {
 
   // Data state
   const [products, setProducts] = useState<ProductWithOffers[]>([]);
-  const [allSuppliers, setAllSuppliers] = useState<{ id: string; serviceZoneIds?: string[]; orderRules?: SupplierOrderRules }[]>([]);
+  const [allSuppliers, setAllSuppliers] = useState<{
+    id: string;
+    companyName?: string;
+    verificationStatus?: string;
+    isVerified?: boolean;
+    serviceZoneIds?: string[];
+    orderRules?: SupplierOrderRules;
+  }[]>([]);
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('الكل');
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('الكل');
@@ -843,6 +850,7 @@ export default function App() {
               setActiveTab('collective');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
+            suppliers={allSuppliers}
           />
         )}
 
@@ -939,6 +947,7 @@ export default function App() {
               setActiveTabState('all_categories');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
+            suppliers={allSuppliers}
           />
         )}
 

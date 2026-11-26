@@ -1,4 +1,6 @@
 import { Language } from '../types/index.ts';
+import { FAMOUS_BRANDS } from '../data/brands.ts';
+import type { ProductStorageType } from '../../shared/productFilters.ts';
 
 export interface TranslationDictionary {
   // Brand & General
@@ -195,6 +197,40 @@ export interface TranslationDictionary {
   orderRuleMissingCartons: (missing: number, min: number) => string;
   orderRuleMissingSkus: (missing: number, min: number) => string;
   orderRulesCartBlockedNotice: string;
+
+  // Product Filters & Sorting
+  filterTitle: string;
+  filterBtnLabel: string;
+  filterClearAll: string;
+  filterClearFilters: string;
+  filterShowProducts: (count: number) => string;
+  filterBrand: string;
+  filterCountry: string;
+  filterStorageType: string;
+  filterSupplier: string;
+  filterAvailability: string;
+  filterInStockOnly: string;
+  filterPriceRange: string;
+  filterPriceFrom: string;
+  filterPriceTo: string;
+  filterOnSaleOnly: string;
+  filterVerifiedOnly: string;
+  filterSearchBrandPlaceholder: string;
+  filterSearchCountryPlaceholder: string;
+  filterNoOptions: string;
+  filterNoResultsTitle: string;
+  filterNoResultsSubtitle: string;
+  sortLabel: string;
+  sortRelevance: string;
+  sortPriceAsc: string;
+  sortPriceDesc: string;
+  sortRatingDesc: string;
+  sortDiscountDesc: string;
+  storageAmbient: string;
+  storageChilled: string;
+  storageFrozen: string;
+  storageDry: string;
+  storageControlled: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -396,7 +432,41 @@ export const translations: Record<Language, TranslationDictionary> = {
       `ينقصك ${missing} كراتين للوصول إلى الحد الأدنى للكراتين (${min})`,
     orderRuleMissingSkus: (missing, min) =>
       `ينقصك ${missing} أصناف مختلفة للوصول إلى الحد الأدنى للأصناف (${min})`,
-    orderRulesCartBlockedNotice: 'لا يمكن إتمام الطلب حتى تتحقق قواعد الحد الأدنى لجميع الموردين في السلة.'
+    orderRulesCartBlockedNotice: 'لا يمكن إتمام الطلب حتى تتحقق قواعد الحد الأدنى لجميع الموردين في السلة.',
+
+    // Product Filters & Sorting
+    filterTitle: 'تصفية المنتجات',
+    filterBtnLabel: 'فلاتر',
+    filterClearAll: 'مسح الكل',
+    filterClearFilters: 'مسح الفلاتر',
+    filterShowProducts: (count) => `عرض ${count} منتج`,
+    filterBrand: 'العلامة التجارية',
+    filterCountry: 'بلد المنشأ',
+    filterStorageType: 'نوع التخزين',
+    filterSupplier: 'المورد',
+    filterAvailability: 'التوفر والعروض',
+    filterInStockOnly: 'متوفر الآن فقط',
+    filterPriceRange: 'السعر بالدينار (د.ع)',
+    filterPriceFrom: 'من',
+    filterPriceTo: 'إلى',
+    filterOnSaleOnly: 'عليه عرض / خصم',
+    filterVerifiedOnly: 'موردون موثقون فقط',
+    filterSearchBrandPlaceholder: 'ابحث عن علامة تجارية...',
+    filterSearchCountryPlaceholder: 'ابحث عن بلد المنشأ...',
+    filterNoOptions: 'لا توجد خيارات متاحة',
+    filterNoResultsTitle: 'لا توجد منتجات تطابق الفلاتر المختارة',
+    filterNoResultsSubtitle: 'جرّب تعديل معايير التصفية أو مسح الفلاتر لعرض جميع المنتجات المتاحة.',
+    sortLabel: 'ترتيب حسب',
+    sortRelevance: 'الأنسب',
+    sortPriceAsc: 'الأرخص أولاً',
+    sortPriceDesc: 'الأغلى أولاً',
+    sortRatingDesc: 'الأعلى تقييماً',
+    sortDiscountDesc: 'الأعلى خصماً',
+    storageAmbient: 'حرارة عادية',
+    storageChilled: 'مبرد',
+    storageFrozen: 'مجمد',
+    storageDry: 'جاف',
+    storageControlled: 'تخزين متحكم به'
   },
   en: {
     // Brand & General
@@ -596,7 +666,41 @@ export const translations: Record<Language, TranslationDictionary> = {
       `You are missing ${missing} cartons to reach the minimum cartons requirement (${min})`,
     orderRuleMissingSkus: (missing, min) =>
       `You are missing ${missing} distinct SKUs to reach the minimum SKU count (${min})`,
-    orderRulesCartBlockedNotice: 'Cannot complete checkout until all supplier minimum order rules are satisfied.'
+    orderRulesCartBlockedNotice: 'Cannot complete checkout until all supplier minimum order rules are satisfied.',
+
+    // Product Filters & Sorting
+    filterTitle: 'Filter Products',
+    filterBtnLabel: 'Filters',
+    filterClearAll: 'Clear all',
+    filterClearFilters: 'Clear Filters',
+    filterShowProducts: (count) => `Show ${count} ${count === 1 ? 'product' : 'products'}`,
+    filterBrand: 'Brand',
+    filterCountry: 'Country of Origin',
+    filterStorageType: 'Storage Type',
+    filterSupplier: 'Supplier',
+    filterAvailability: 'Availability & Deals',
+    filterInStockOnly: 'In stock now only',
+    filterPriceRange: 'Price Range (IQD)',
+    filterPriceFrom: 'From',
+    filterPriceTo: 'To',
+    filterOnSaleOnly: 'On sale / discount',
+    filterVerifiedOnly: 'Verified suppliers only',
+    filterSearchBrandPlaceholder: 'Search brands...',
+    filterSearchCountryPlaceholder: 'Search countries...',
+    filterNoOptions: 'No options available',
+    filterNoResultsTitle: 'No products match your selected filters',
+    filterNoResultsSubtitle: 'Try adjusting your filters or clear all filters to browse available products.',
+    sortLabel: 'Sort by',
+    sortRelevance: 'Best match',
+    sortPriceAsc: 'Price: Low to High',
+    sortPriceDesc: 'Price: High to Low',
+    sortRatingDesc: 'Highest Rated',
+    sortDiscountDesc: 'Highest Discount',
+    storageAmbient: 'Ambient',
+    storageChilled: 'Chilled',
+    storageFrozen: 'Frozen',
+    storageDry: 'Dry',
+    storageControlled: 'Controlled'
   }
 };
 
@@ -752,4 +856,107 @@ export function getVerificationStatusLabel(
   const key = verificationStatus || (isVerified ? 'verified' : 'pending');
   return verificationStatusLabels[key]?.[lang] || verificationStatusLabels.pending[lang];
 }
+
+export const COUNTRY_TRANSLATIONS: Record<string, { ar: string; en: string }> = {
+  'الهند': { ar: 'الهند', en: 'India' },
+  'العراق': { ar: 'العراق', en: 'Iraq' },
+  'هولندا': { ar: 'هولندا', en: 'Netherlands' },
+  'تركيا': { ar: 'تركيا', en: 'Turkey' },
+  'سريلانكا': { ar: 'سريلانكا', en: 'Sri Lanka' },
+  'تايلاند': { ar: 'تايلاند', en: 'Thailand' },
+  'إيطاليا': { ar: 'إيطاليا', en: 'Italy' },
+  'سويسرا': { ar: 'سويسرا', en: 'Switzerland' },
+  'فرنسا': { ar: 'فرنسا', en: 'France' },
+  'ألمانيا': { ar: 'ألمانيا', en: 'Germany' },
+  'باكستان': { ar: 'باكستان', en: 'Pakistan' },
+  'فيتنام': { ar: 'فيتنام', en: 'Vietnam' },
+  'البرازيل': { ar: 'البرازيل', en: 'Brazil' },
+  'الإمارات': { ar: 'الإمارات', en: 'UAE' },
+  'ماليزيا': { ar: 'ماليزيا', en: 'Malaysia' },
+  'الكويت': { ar: 'الكويت', en: 'Kuwait' },
+  'الأردن': { ar: 'الأردن', en: 'Jordan' },
+  'كندا': { ar: 'كندا', en: 'Canada' },
+  'أستراليا': { ar: 'أستراليا', en: 'Australia' },
+  'لبنان': { ar: 'لبنان', en: 'Lebanon' },
+  'المغرب': { ar: 'المغرب', en: 'Morocco' },
+  'إندونيسيا': { ar: 'إندونيسيا', en: 'Indonesia' },
+  'السعودية': { ar: 'السعودية', en: 'Saudi Arabia' },
+  'مصر': { ar: 'مصر', en: 'Egypt' },
+  'أوكرانيا': { ar: 'أوكرانيا', en: 'Ukraine' },
+  'إسبانيا': { ar: 'إسبانيا', en: 'Spain' },
+  'نيوزيلندا': { ar: 'نيوزيلندا', en: 'New Zealand' },
+  'الصين': { ar: 'الصين', en: 'China' },
+  'الدنمارك': { ar: 'الدنمارك', en: 'Denmark' },
+  'إيران': { ar: 'إيران', en: 'Iran' },
+  'الفلبين': { ar: 'الفلبين', en: 'Philippines' },
+  'اليونان': { ar: 'اليونان', en: 'Greece' },
+  'جنوب أفريقيا': { ar: 'جنوب أفريقيا', en: 'South Africa' },
+  'سوريا': { ar: 'سوريا', en: 'Syria' },
+  'الولايات المتحدة': { ar: 'الولايات المتحدة', en: 'United States' },
+  'اليابان': { ar: 'اليابان', en: 'Japan' },
+  'بلجيكا': { ar: 'بلجيكا', en: 'Belgium' },
+  'السويد': { ar: 'السويد', en: 'Sweden' },
+  'تشيلي': { ar: 'تشيلي', en: 'Chile' },
+  'المملكة المتحدة': { ar: 'المملكة المتحدة', en: 'United Kingdom' },
+  'النرويج': { ar: 'النرويج', en: 'Norway' },
+  'عمان': { ar: 'عمان', en: 'Oman' },
+  'النمسا': { ar: 'النمسا', en: 'Austria' },
+  'البحرين': { ar: 'البحرين', en: 'Bahrain' },
+  'كولومبيا': { ar: 'كولومبيا', en: 'Colombia' },
+  'إثيوبيا': { ar: 'إثيوبيا', en: 'Ethiopia' },
+  'بولندا': { ar: 'بولندا', en: 'Poland' },
+  'أيرلندا': { ar: 'أيرلندا', en: 'Ireland' },
+  'كوريا الجنوبية': { ar: 'كوريا الجنوبية', en: 'South Korea' }
+};
+
+export function getCountryLabel(countryRaw: string | undefined, lang: Language): string {
+  if (!countryRaw) return '';
+  const trimmed = countryRaw.trim();
+  const entry = COUNTRY_TRANSLATIONS[trimmed];
+  if (entry) return entry[lang];
+  return trimmed;
+}
+
+export function getStorageTypeLabel(storageType: ProductStorageType, lang: Language): string {
+  const t = translations[lang];
+  switch (storageType) {
+    case 'ambient':
+      return t.storageAmbient;
+    case 'chilled':
+      return t.storageChilled;
+    case 'frozen':
+      return t.storageFrozen;
+    case 'dry':
+      return t.storageDry;
+    case 'controlled':
+      return t.storageControlled;
+    default:
+      return storageType;
+  }
+}
+
+export function getBrandDisplayName(
+  brandId: string | undefined,
+  brandRaw: string | undefined,
+  lang: Language
+): string {
+  const raw = (brandRaw || '').trim();
+  const byId = brandId ? FAMOUS_BRANDS.find((b) => b.id === brandId) : undefined;
+  const matched =
+    byId ||
+    FAMOUS_BRANDS.find(
+      (b) =>
+        b.nameAr === raw ||
+        b.nameEn.toLowerCase() === raw.toLowerCase() ||
+        (raw && b.matchKeywords.some((kw) => raw.toLowerCase().includes(kw.toLowerCase())))
+    );
+  if (matched) {
+    return lang === 'ar' ? matched.nameAr : matched.nameEn;
+  }
+  if (lang === 'en' && raw) {
+    return itemTranslations[raw] || raw;
+  }
+  return raw || brandId || '';
+}
+
 

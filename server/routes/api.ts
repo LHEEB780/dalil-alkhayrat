@@ -119,12 +119,50 @@ apiRouter.get('/geo/zones', (req: Request, res: Response) => {
 // ================= 1. UNIFIED CATALOG & OFFERS =================
 apiRouter.get('/products', (req: Request, res: Response) => {
   try {
-    const { category, query, barcode, deliveryZoneId } = req.query;
+    const {
+      category,
+      query,
+      barcode,
+      deliveryZoneId,
+      brandId,
+      countryOfOrigin,
+      storageType,
+      supplierId,
+      inStock,
+      minPrice,
+      maxPrice,
+      onSale,
+      verifiedOnly,
+      sortBy
+    } = req.query;
+
+    const parseOptionalNum = (val: unknown): number | undefined => {
+      if (val === undefined || val === null || val === '') return undefined;
+      const num = Number(val);
+      return Number.isFinite(num) && num >= 0 ? num : undefined;
+    };
+
+    const allowedSorts = ['relevance', 'price_asc', 'price_desc', 'rating_desc', 'discount_desc'];
+    const parsedSort =
+      typeof sortBy === 'string' && allowedSorts.includes(sortBy)
+        ? (sortBy as 'relevance' | 'price_asc' | 'price_desc' | 'rating_desc' | 'discount_desc')
+        : undefined;
+
     const products = db.getProductsWithOffers({
       category: category as string,
       query: query as string,
       barcode: barcode as string,
-      deliveryZoneId: deliveryZoneId as string
+      deliveryZoneId: deliveryZoneId as string,
+      brandId: brandId as string | string[] | undefined,
+      countryOfOrigin: countryOfOrigin as string | string[] | undefined,
+      storageType: storageType as string | string[] | undefined,
+      supplierId: supplierId as string | string[] | undefined,
+      inStock: inStock === 'true' || inStock === '1',
+      minPrice: parseOptionalNum(minPrice),
+      maxPrice: parseOptionalNum(maxPrice),
+      onSale: onSale === 'true' || onSale === '1',
+      verifiedOnly: verifiedOnly === 'true' || verifiedOnly === '1',
+      sortBy: parsedSort
     });
     res.json({ success: true, count: products.length, data: products });
   } catch (error: any) {

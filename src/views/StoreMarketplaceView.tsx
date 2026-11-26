@@ -28,7 +28,7 @@ import {
 } from '../types/index.ts';
 import { ProductCard } from '../components/ProductCard.tsx';
 import { formatCurrency } from '../utils/format.ts';
-import { getLocalizedText } from '../utils/translations.ts';
+import { getLocalizedText, translations } from '../utils/translations.ts';
 import {
   WHOLESALE_SUPPLIERS,
   BAGHDAD_DISTRICTS,
@@ -41,6 +41,21 @@ import { StoreLocationModal } from '../components/StoreLocationModal.tsx';
 import { resolveCategoryKey } from '../data/categories.ts';
 import { FAMOUS_BRANDS } from '../data/brands.ts';
 import { getInitialOfferQuantity, getOrderRulesSummary } from '../../shared/orderRules.ts';
+import {
+  ProductFilterState,
+  EMPTY_PRODUCT_FILTERS,
+  applyProductFilters,
+  getFilterFacets,
+  countActiveFilters,
+  parseSearchQueryHints,
+  scoreProductSearchMatch,
+  FilterableSupplier
+} from '../../shared/productFilters.ts';
+import {
+  ProductFilterDrawer,
+  ProductFilterControlsBar,
+  ProductActiveFilterChips
+} from '../components/ProductFilterDrawer.tsx';
 
 interface StoreMarketplaceViewProps {
   products: ProductWithOffers[];
@@ -69,6 +84,7 @@ interface StoreMarketplaceViewProps {
   onOpenAllBrands?: (brandId?: string) => void;
   onOpenExpiryManager?: () => void;
   onOpenCollectiveDeals?: () => void;
+  suppliers?: FilterableSupplier[];
 }
 
 interface HorizontalProductShelfProps {
@@ -142,7 +158,8 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
   onResetGlobalFilters,
   onOpenAllBrands,
   onOpenExpiryManager,
-  onOpenCollectiveDeals
+  onOpenCollectiveDeals,
+  suppliers = []
 }) => {
   const isAr = language === 'ar';
 
@@ -168,6 +185,14 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
 
   // Optional feedback banner acknowledgement
   const [feedbackSent, setFeedbackSent] = useState<'yes' | 'no' | null>(null);
+
+  // Search results filters & sorting (auto-reset on searchQuery change)
+  const [searchFilters, setSearchFilters] = useState<ProductFilterState>(EMPTY_PRODUCT_FILTERS);
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    setSearchFilters(EMPTY_PRODUCT_FILTERS);
+  }, [searchQuery]);
 
   const handleQuickAdd = (e: React.MouseEvent, product: ProductWithOffers) => {
     e.stopPropagation();
@@ -618,6 +643,48 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
 
   const hasActiveSearch = Boolean(searchQuery && searchQuery.trim().length > 0);
   const activeHero = heroSlides[heroSlide] || heroSlides[0];
+  const t = translations[language];
+
+  const effectiveSuppliers = useMemo<FilterableSupplier[]>(() => {
+    if (suppliers && suppliers.length > 0) return suppliers;
+    return WHOLESALE_SUPPLIERS.map((s) => ({
+      id: s.id,
+      companyName: s.nameAr,
+      verificationStatus: s.verificationStatus || 'verified',
+      isVerified: true
+    }));
+  }, [suppliers]);
+
+  const searchScoreMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!hasActiveSearch) return map;
+    const parsed = parseSearchQueryHints(searchQuery);
+    for (const p of products) {
+      const scored = scoreProductSearchMatch(p, parsed);
+      map.set(p.barcode, scored.totalScore);
+    }
+    return map;
+  }, [hasActiveSearch, searchQuery, products]);
+
+  const searchFacets = useMemo(() => {
+    if (!hasActiveSearch) {
+      return getFilterFacets([], [], searchFilters, { suppliers: effectiveSuppliers });
+    }
+    return getFilterFacets(products, [], searchFilters, {
+      suppliers: effectiveSuppliers,
+      searchScores: searchScoreMap
+    });
+  }, [hasActiveSearch, products, searchFilters, effectiveSuppliers, searchScoreMap]);
+
+  const filteredSearchProducts = useMemo(() => {
+    if (!hasActiveSearch) return products;
+    return applyProductFilters(products, [], searchFilters, {
+      suppliers: effectiveSuppliers,
+      searchScores: searchScoreMap
+    });
+  }, [hasActiveSearch, products, searchFilters, effectiveSuppliers, searchScoreMap]);
+
+  const activeSearchFilterCount = countActiveFilters(searchFilters);
 
   return (
     <div className="space-y-5 font-brand pb-6">
@@ -694,12 +761,12 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
       {/* ================= SEARCH RESULTS PANEL (When Search Query Active) ================= */}
       {hasActiveSearch && (
         <div className="bg-white rounded-2xl border border-[#EAECEF] p-3.5 sm:p-4 space-y-3 shadow-[0_1px_4px_rgba(15,23,42,0.03)]">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
             <div>
               <h2 className="text-sm sm:text-base font-black text-[#111827]">
                 {isAr
-                  ? `نتائج البحث عن "${searchQuery}" (${products.length} منتج)`
-                  : `Search results for "${searchQuery}" (${products.length})`}
+                  ? `نتائج البحث عن "${searchQuery}" (${filteredSearchProducts.length} منتج)`
+                  : `Search results for "${searchQuery}" (${filteredSearchProducts.length})`}
               </h2>
               <p className="text-[11px] text-[#6B7280]">
                 {isAr
@@ -707,40 +774,81 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
                   : 'Matching wholesale products'}
               </p>
             </div>
-            {onResetGlobalFilters && (
-              <button
-                type="button"
-                onClick={onResetGlobalFilters}
-                className="px-3 py-1.5 rounded-xl bg-[#00A046] hover:bg-[#008A3C] text-white text-xs font-bold transition cursor-pointer shrink-0 whitespace-nowrap"
-              >
-                {isAr ? 'عرض كل المتجر' : 'Show Full Store'}
-              </button>
-            )}
-          </div>
-
-          {products.length === 0 ? (
-            <div className="py-8 text-center space-y-2.5 bg-[#F8FAFC] rounded-xl border border-[#EAECEF]">
-              <p className="text-sm font-bold text-[#111827]">
-                {isAr ? 'لم يتم العثور على منتجات مطابقة للبحث' : 'No matching products found'}
-              </p>
-              <p className="text-xs text-[#6B7280]">
-                {isAr
-                  ? 'جرّب البحث باسم مختلف مثل "قهوة"، "أرز"، "زيت" أو أعد عرض المتجر بالكامل.'
-                  : 'Try another keyword or reset search to browse all categories.'}
-              </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <ProductFilterControlsBar
+                filters={searchFilters}
+                onChangeSort={(sortBy) => setSearchFilters((prev) => ({ ...prev, sortBy }))}
+                onOpenDrawer={() => setIsFilterDrawerOpen(true)}
+                language={language}
+              />
               {onResetGlobalFilters && (
                 <button
                   type="button"
                   onClick={onResetGlobalFilters}
-                  className="px-4 py-1.5 rounded-xl bg-[#00A046] hover:bg-[#008A3C] text-white text-xs font-bold transition cursor-pointer"
+                  className="px-3 py-1.5 rounded-xl bg-[#00A046] hover:bg-[#008A3C] text-white text-xs font-bold transition cursor-pointer shrink-0 whitespace-nowrap"
                 >
-                  {isAr ? 'إعادة عرض جميع المنتجات' : 'Reset Search'}
+                  {isAr ? 'عرض كل المتجر' : 'Show Full Store'}
                 </button>
               )}
             </div>
+          </div>
+
+          <ProductActiveFilterChips
+            filters={searchFilters}
+            facets={searchFacets}
+            onChangeFilters={setSearchFilters}
+            language={language}
+          />
+
+          {filteredSearchProducts.length === 0 ? (
+            <div className="py-8 text-center space-y-2.5 bg-[#F8FAFC] rounded-xl border border-[#EAECEF]">
+              <p className="text-sm font-bold text-[#111827]">
+                {activeSearchFilterCount > 0 && products.length > 0
+                  ? t.filterNoResultsTitle
+                  : isAr
+                  ? 'لم يتم العثور على منتجات مطابقة للبحث'
+                  : 'No matching products found'}
+              </p>
+              <p className="text-xs text-[#6B7280]">
+                {activeSearchFilterCount > 0 && products.length > 0
+                  ? t.filterNoResultsSubtitle
+                  : isAr
+                  ? 'جرّب البحث باسم مختلف مثل "قهوة"، "أرز"، "زيت" أو أعد عرض المتجر بالكامل.'
+                  : 'Try another keyword or reset search to browse all categories.'}
+              </p>
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                {activeSearchFilterCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSearchFilters({
+                        ...EMPTY_PRODUCT_FILTERS,
+                        sortBy: searchFilters.sortBy
+                      })
+                    }
+                    className="px-4 py-1.5 rounded-xl bg-[#00A046] hover:bg-[#008A3C] text-white text-xs font-bold transition cursor-pointer"
+                  >
+                    {t.filterClearFilters}
+                  </button>
+                )}
+                {onResetGlobalFilters && (
+                  <button
+                    type="button"
+                    onClick={onResetGlobalFilters}
+                    className={`px-4 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      activeSearchFilterCount > 0
+                        ? 'bg-white border border-[#E5E7EB] text-[#111827] hover:border-[#00A046]'
+                        : 'bg-[#00A046] hover:bg-[#008A3C] text-white'
+                    }`}
+                  >
+                    {isAr ? 'إعادة عرض جميع المنتجات' : 'Reset Search'}
+                  </button>
+                )}
+              </div>
+            </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
-              {products.map((product) => {
+              {filteredSearchProducts.map((product) => {
                 const alertForItem = lowStockAlerts.find((a) => a.barcode === product.barcode);
                 return (
                   <ProductCard
@@ -1421,6 +1529,16 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
         onClose={() => setIsLocationModalOpen(false)}
         currentDistrict={currentDistrict}
         onSelectDistrict={(dist) => setCurrentDistrict(dist)}
+        language={language}
+      />
+
+      {/* Search Results Filter Drawer */}
+      <ProductFilterDrawer
+        isOpen={isFilterDrawerOpen}
+        onClose={() => setIsFilterDrawerOpen(false)}
+        filters={searchFilters}
+        facets={searchFacets}
+        onChangeFilters={setSearchFilters}
         language={language}
       />
     </div>
