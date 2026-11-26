@@ -32,6 +32,11 @@ import {
 import { ProductWithOffers, SupplierOfferItem, Currency, Language } from '../types/index.ts';
 import { formatCurrency } from '../utils/format.ts';
 import { getLocalizedText } from '../utils/translations.ts';
+import { resolveWholesaleSupplierByOffer } from '../data/nearbySuppliers.ts';
+import {
+  getInitialOfferQuantity,
+  isOfferMinQuantityEnforced
+} from '../../shared/orderRules.ts';
 
 // Helper to infer retail selling units per wholesale carton/pack for profit calculation
 function getRetailUnitsInfo(product: ProductWithOffers, isAr: boolean): { count: number; unitLabel: string } {
@@ -125,7 +130,8 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
     if (product && product.offers) {
       const initial: Record<string, number> = {};
       product.offers.forEach((o) => {
-        initial[o.id] = o.minOrderQuantity || 1;
+        const supp = resolveWholesaleSupplierByOffer(o.supplierId, o.supplierName, o.supplierCity);
+        initial[o.id] = getInitialOfferQuantity(o.minOrderQuantity, supp.orderRules);
       });
       setQuantities(initial);
       const firstOffer = product.offers[0];
@@ -282,8 +288,20 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
     }
   };
 
+  const activeOfferOrderRules = activeOffer
+    ? resolveWholesaleSupplierByOffer(
+        activeOffer.supplierId,
+        activeOffer.supplierName,
+        activeOffer.supplierCity
+      ).orderRules
+    : undefined;
+  const activeOfferMinQty = activeOffer
+    ? getInitialOfferQuantity(activeOffer.minOrderQuantity, activeOfferOrderRules)
+    : 1;
+  const showActiveOfferMinQty = isOfferMinQuantityEnforced(activeOfferOrderRules);
+
   const activeQty = activeOffer
-    ? quantities[activeOffer.id] || activeOffer.minOrderQuantity || 1
+    ? quantities[activeOffer.id] || activeOfferMinQty
     : 1;
 
   const discountPercent =
@@ -343,7 +361,8 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
   };
 
   const handleAddOffer = (offer: SupplierOfferItem) => {
-    const qty = quantities[offer.id] || offer.minOrderQuantity || 1;
+    const supp = resolveWholesaleSupplierByOffer(offer.supplierId, offer.supplierName, offer.supplierCity);
+    const qty = quantities[offer.id] || getInitialOfferQuantity(offer.minOrderQuantity, supp.orderRules);
     onAddToCart(product, offer, qty);
     setAddedOfferId(offer.id);
     setTimeout(() => setAddedOfferId(null), 1600);
@@ -360,7 +379,8 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
     e.stopPropagation();
     const offer = simProd.offers[0];
     if (!offer || offer.availableStock <= 0) return;
-    onAddToCart(simProd, offer, offer.minOrderQuantity || 1);
+    const supp = resolveWholesaleSupplierByOffer(offer.supplierId, offer.supplierName, offer.supplierCity);
+    onAddToCart(simProd, offer, getInitialOfferQuantity(offer.minOrderQuantity, supp.orderRules));
     setAddedSimilarBarcode(simProd.barcode);
     setTimeout(() => setAddedSimilarBarcode(null), 1500);
   };
@@ -838,7 +858,7 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
                           </span>
                         </button>
 
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                        <div className={`grid grid-cols-2 ${showActiveOfferMinQty ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-2 text-xs`}>
                           <div className="bg-white p-2 rounded-lg border border-[#E5E7EB]">
                             <span className="text-[#6B7280] text-[10px] block">
                               {isAr ? 'التوصيل' : 'Delivery'}
@@ -867,14 +887,16 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
                             </div>
                           </div>
 
-                          <div className="bg-white p-2 rounded-lg border border-[#E5E7EB]">
-                            <span className="text-[#6B7280] text-[10px] block">
-                              {isAr ? 'أدنى طلب' : 'Min Order'}
-                            </span>
-                            <div className="font-semibold text-[#1F2328] mt-0.5 tabular-nums truncate">
-                              {activeOffer.minOrderQuantity} {isAr ? 'كرتون' : 'ctn'}
+                          {showActiveOfferMinQty && (
+                            <div className="bg-white p-2 rounded-lg border border-[#E5E7EB]">
+                              <span className="text-[#6B7280] text-[10px] block">
+                                {isAr ? 'أدنى طلب' : 'Min Order'}
+                              </span>
+                              <div className="font-semibold text-[#1F2328] mt-0.5 tabular-nums truncate">
+                                {activeOffer.minOrderQuantity} {isAr ? 'كرتون' : 'ctn'}
+                              </div>
                             </div>
-                          </div>
+                          )}
 
                           <div className="bg-white p-2 rounded-lg border border-[#E5E7EB]">
                             <span className="text-[#6B7280] text-[10px] block">
@@ -1465,7 +1487,7 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
                     handleQuantityChange(
                       activeOffer.id,
                       activeQty - 1,
-                      activeOffer.minOrderQuantity,
+                      activeOfferMinQty,
                       activeOffer.availableStock
                     )
                   }
@@ -1482,7 +1504,7 @@ export const OfferComparisonModal: React.FC<OfferComparisonModalProps> = ({
                     handleQuantityChange(
                       activeOffer.id,
                       activeQty + 1,
-                      activeOffer.minOrderQuantity,
+                      activeOfferMinQty,
                       activeOffer.availableStock
                     )
                   }

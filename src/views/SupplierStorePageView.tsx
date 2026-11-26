@@ -38,6 +38,11 @@ import {
   getVerificationStatusLabel
 } from '../utils/translations.ts';
 import { SupplierRatingSection } from '../components/SupplierRatingSection.tsx';
+import {
+  getOrderRulesSummary,
+  isOfferMinQuantityEnforced,
+  getInitialOfferQuantity
+} from '../../shared/orderRules.ts';
 
 interface SupplierStorePageViewProps {
   supplier: WholesaleSupplier;
@@ -196,8 +201,19 @@ export const SupplierStorePageView: React.FC<SupplierStorePageViewProps> = ({
     return list;
   }, [supplierProducts, selectedCategory, selectedBrand, storeSearchQuery, sortBy]);
 
+  const orderRulesSummary = useMemo(
+    () => getOrderRulesSummary(supplier.orderRules, supplier.minOrderIQD),
+    [supplier.orderRules, supplier.minOrderIQD]
+  );
+
+  const isOfferMinEnforced = isOfferMinQuantityEnforced(supplier.orderRules);
+
   const handleQuickAdd = (product: ProductWithOffers, offer: SupplierOfferItem) => {
-    onAddToCart(product, offer, offer.minOrderQuantity || 1);
+    onAddToCart(
+      product,
+      offer,
+      getInitialOfferQuantity(offer.minOrderQuantity, supplier.orderRules)
+    );
     setAddedBarcode(product.barcode);
     setTimeout(() => {
       setAddedBarcode((prev) => (prev === product.barcode ? null : prev));
@@ -375,7 +391,18 @@ export const SupplierStorePageView: React.FC<SupplierStorePageViewProps> = ({
               <div className="min-w-0">
                 <span className="text-[10px] text-[#6B7280] block">{isAr ? 'الحد الأدنى للطلب' : 'Minimum Order'}</span>
                 <span className="text-xs font-black text-[#1F2328] font-mono tabular-nums block truncate">
-                  {formatCurrency(supplier.minOrderIQD, currency, language)}
+                  {orderRulesSummary.minOrderValueIQD > 0
+                    ? formatCurrency(orderRulesSummary.minOrderValueIQD, currency, language)
+                    : orderRulesSummary.rules.length > 0
+                    ? orderRulesSummary.rules
+                        .map((r) => {
+                          if (r.rule === 'minTotalQuantity') return isAr ? `${r.value} وحدة` : `${r.value} units`;
+                          if (r.rule === 'minCartons') return isAr ? `${r.value} كرتون` : `${r.value} ctns`;
+                          if (r.rule === 'minSkuCount') return isAr ? `${r.value} أصناف` : `${r.value} SKUs`;
+                          return formatCurrency(r.value, currency, language);
+                        })
+                        .join(' • ')
+                    : formatCurrency(0, currency, language)}
                 </span>
               </div>
             </div>
@@ -698,9 +725,11 @@ export const SupplierStorePageView: React.FC<SupplierStorePageViewProps> = ({
                         </span>
                       </div>
 
-                      <span className="text-[10px] text-[#6B7280] font-semibold">
-                        {isAr ? `أدنى طلب: ${offer.minOrderQuantity}` : `Min: ${offer.minOrderQuantity}`}
-                      </span>
+                      {isOfferMinEnforced && (
+                        <span className="text-[10px] text-[#6B7280] font-semibold">
+                          {isAr ? `أدنى طلب: ${offer.minOrderQuantity}` : `Min: ${offer.minOrderQuantity}`}
+                        </span>
+                      )}
                     </div>
 
                     <button

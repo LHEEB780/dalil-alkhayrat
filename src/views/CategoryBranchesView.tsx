@@ -26,8 +26,9 @@ import {
   resolveCategoryKey,
   matchesProductCategoryKeywords
 } from '../data/categories.ts';
-import { StoreDistrict } from '../data/nearbySuppliers.ts';
+import { StoreDistrict, resolveWholesaleSupplierByOffer } from '../data/nearbySuppliers.ts';
 import { getLocalizedText } from '../utils/translations.ts';
+import { getInitialOfferQuantity } from '../../shared/orderRules.ts';
 
 interface CategoryBranchesViewProps {
   selectedCategory: string;
@@ -285,7 +286,12 @@ export const CategoryBranchesView: React.FC<CategoryBranchesViewProps> = ({
     e.stopPropagation();
     const offer = product.offers[0];
     if (!offer || offer.availableStock <= 0) return;
-    onAddToCart(product, offer, offer.minOrderQuantity || 1);
+    const supp = resolveWholesaleSupplierByOffer(
+      offer.supplierId,
+      offer.supplierName,
+      offer.supplierCity
+    );
+    onAddToCart(product, offer, getInitialOfferQuantity(offer.minOrderQuantity, supp.orderRules));
     setAddedBarcode(product.barcode);
     setTimeout(() => setAddedBarcode(null), 1400);
   };

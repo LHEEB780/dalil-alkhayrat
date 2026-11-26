@@ -49,6 +49,7 @@ import {
   resolveWholesaleSupplierByOffer
 } from './data/nearbySuppliers.ts';
 import { fetchWithRetry } from './utils/fetchWithRetry.ts';
+import { getInitialOfferQuantity } from '../shared/orderRules.ts';
 
 export default function App() {
   const [currency, setCurrency] = useState<Currency>('IQD');
@@ -1000,7 +1001,20 @@ export default function App() {
                 : (barcode) => {
                     const p = products.find(prod => prod.barcode === barcode);
                     if (p && p.offers[0]) {
-                      handleAddToCart(p, p.offers[0], p.offers[0].minOrderQuantity || 1);
+                      const offer = p.offers[0];
+                      const apiSupp = allSuppliers.find(s => s.id === offer.supplierId);
+                      const suppRules =
+                        apiSupp?.orderRules ||
+                        resolveWholesaleSupplierByOffer(
+                          offer.supplierId,
+                          offer.supplierName,
+                          offer.supplierCity
+                        ).orderRules;
+                      handleAddToCart(
+                        p,
+                        offer,
+                        getInitialOfferQuantity(offer.minOrderQuantity, suppRules)
+                      );
                       setIsCartOpen(true);
                     }
                   }
@@ -1048,6 +1062,7 @@ export default function App() {
             onOpenStorePOS={() => setActiveTab('store_pos')}
             onOpenStoreManagement={() => setActiveTab('store_management')}
             onExitPreview={handleGoBack}
+            onSwitchAccount={handleLogout}
           />
         )}
 

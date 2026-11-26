@@ -47,6 +47,7 @@ import {
   getTodayIsoDate,
   isValidIsoDate
 } from '../../shared/expiryAlerts.ts';
+import { getInitialOfferQuantity } from '../../shared/orderRules.ts';
 
 import heroCampaignImg from '../assets/images/deals_hero_campaign_1794819183884.jpg';
 import videoShowcaseImg from '../assets/images/deals_video_showcase_1794819184683.jpg';
@@ -609,7 +610,15 @@ export const CollectiveDealsView: React.FC<CollectiveDealsViewProps> = ({
       return;
     }
     if (onAddToCart) {
-      const qty = customQty && customQty > 0 ? customQty : targetOffer.minOrderQuantity || 1;
+      const supp = resolveWholesaleSupplierByOffer(
+        targetOffer.supplierId,
+        targetOffer.supplierName,
+        targetOffer.supplierCity
+      );
+      const qty =
+        customQty && customQty > 0
+          ? customQty
+          : getInitialOfferQuantity(targetOffer.minOrderQuantity, supp.orderRules);
       onAddToCart(product, targetOffer, qty);
       const key = `${product.barcode}_${targetOffer.id}`;
       setAddedProductKey(key);

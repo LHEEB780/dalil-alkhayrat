@@ -63,7 +63,8 @@ import {
   BAGHDAD_DISTRICTS,
   StoreDistrict,
   WHOLESALE_SUPPLIERS,
-  WholesaleSupplier
+  WholesaleSupplier,
+  resolveWholesaleSupplierByOffer
 } from '../data/nearbySuppliers.ts';
 import { formatCurrency } from '../utils/format.ts';
 import { getLocalizedText } from '../utils/translations.ts';
@@ -72,6 +73,7 @@ import { SupplierLedgerDetailView } from '../components/SupplierLedgerDetailView
 import { RetailerPaymentLedgerView } from './RetailerPaymentLedgerView.tsx';
 import { RetailerInvoicesView } from './RetailerInvoicesView.tsx';
 import { NearExpiryAlertsCard } from '../components/NearExpiryAlertsCard.tsx';
+import { getInitialOfferQuantity } from '../../shared/orderRules.ts';
 
 interface ChatThreadMessage {
   id: string;
@@ -728,10 +730,15 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
       if (prod && prod.offers.length > 0) {
         const matchedOffer =
           prod.offers.find((o) => o.supplierId === order.supplierId) || prod.offers[0];
+        const supp = resolveWholesaleSupplierByOffer(
+          matchedOffer.supplierId,
+          matchedOffer.supplierName,
+          matchedOffer.supplierCity
+        );
         onAddToCart(
           prod,
           matchedOffer,
-          Math.max(line.quantity, matchedOffer.minOrderQuantity || 1)
+          Math.max(line.quantity, getInitialOfferQuantity(matchedOffer.minOrderQuantity, supp.orderRules))
         );
         addedCount++;
       }
@@ -2362,9 +2369,15 @@ export const RetailerAccountHubView: React.FC<RetailerAccountHubViewProps> = ({
                       {prod.offers[0] && (
                         <button
                           type="button"
-                          onClick={() =>
-                            onAddToCart(prod, prod.offers[0], prod.offers[0].minOrderQuantity || 1)
-                          }
+                          onClick={() => {
+                            const offer = prod.offers[0];
+                            const supp = resolveWholesaleSupplierByOffer(
+                              offer.supplierId,
+                              offer.supplierName,
+                              offer.supplierCity
+                            );
+                            onAddToCart(prod, offer, getInitialOfferQuantity(offer.minOrderQuantity, supp.orderRules));
+                          }}
                           className="flex-1 min-h-[36px] py-1.5 rounded-xl bg-[#0B5D32] hover:bg-[#084726] text-white text-[11px] font-black flex items-center justify-center gap-1 cursor-pointer"
                         >
                           <ShoppingCart className="w-3.5 h-3.5" />

@@ -34,11 +34,13 @@ import {
   BAGHDAD_DISTRICTS,
   StoreDistrict,
   WholesaleSupplier,
-  calculateDistanceKm
+  calculateDistanceKm,
+  resolveWholesaleSupplierByOffer
 } from '../data/nearbySuppliers.ts';
 import { StoreLocationModal } from '../components/StoreLocationModal.tsx';
 import { resolveCategoryKey } from '../data/categories.ts';
 import { FAMOUS_BRANDS } from '../data/brands.ts';
+import { getInitialOfferQuantity, getOrderRulesSummary } from '../../shared/orderRules.ts';
 
 interface StoreMarketplaceViewProps {
   products: ProductWithOffers[];
@@ -171,7 +173,12 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
     e.stopPropagation();
     const bestOffer = product.offers[0];
     if (!bestOffer || bestOffer.availableStock <= 0) return;
-    onAddToCart(product, bestOffer, bestOffer.minOrderQuantity || 1);
+    const supp = resolveWholesaleSupplierByOffer(
+      bestOffer.supplierId,
+      bestOffer.supplierName,
+      bestOffer.supplierCity
+    );
+    onAddToCart(product, bestOffer, getInitialOfferQuantity(bestOffer.minOrderQuantity, supp.orderRules));
     setAddedBarcodes((prev) => ({ ...prev, [product.barcode]: true }));
     setTimeout(() => {
       setAddedBarcodes((prev) => ({ ...prev, [product.barcode]: false }));
@@ -744,7 +751,13 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
                     onCompareOffers={onCompareOffers}
                     onQuickAddBestOffer={(p) => {
                       if (p.offers[0]) {
-                        onAddToCart(p, p.offers[0], p.offers[0].minOrderQuantity || 1);
+                        const offer = p.offers[0];
+                        const supp = resolveWholesaleSupplierByOffer(
+                          offer.supplierId,
+                          offer.supplierName,
+                          offer.supplierCity
+                        );
+                        onAddToCart(p, offer, getInitialOfferQuantity(offer.minOrderQuantity, supp.orderRules));
                       }
                     }}
                     storeStockStatus={
@@ -1284,12 +1297,18 @@ export const StoreMarketplaceView: React.FC<StoreMarketplaceViewProps> = ({
                           {isAr ? supplier.districtAr : supplier.districtEn}
                         </span>
                       </span>
-                      {supplier.minOrderIQD > 0 && (
-                        <span className="shrink-0 font-bold text-[#0F3D24] tabular-nums">
-                          {isAr ? 'الحد الأدنى:' : 'Min:'}{' '}
-                          {formatCurrency(supplier.minOrderIQD, currency, language)}
-                        </span>
-                      )}
+                      {(() => {
+                        const minOrderVal = getOrderRulesSummary(
+                          supplier.orderRules,
+                          supplier.minOrderIQD
+                        ).minOrderValueIQD;
+                        return minOrderVal > 0 ? (
+                          <span className="shrink-0 font-bold text-[#0F3D24] tabular-nums">
+                            {isAr ? 'الحد الأدنى:' : 'Min:'}{' '}
+                            {formatCurrency(minOrderVal, currency, language)}
+                          </span>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
                 </div>

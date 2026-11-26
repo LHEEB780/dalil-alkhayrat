@@ -1522,14 +1522,26 @@ export const RetailerInvoicesView: React.FC<RetailerInvoicesViewProps> = ({
                           </div>
 
                           <div className="flex items-center gap-2 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => window.print()}
-                              className="min-h-[34px] px-3 py-1.5 rounded-lg bg-[#F4F4EA] hover:bg-[#E7ECE5] border border-[#DCE5DC] text-[#142018] text-[11px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                            <a
+                              href={`/api/invoices/${encodeURIComponent(inv.invoiceRef)}/print?lang=${language}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="min-h-[34px] px-3 py-1.5 rounded-lg bg-[#0B5D32] hover:bg-[#084725] text-white text-[11px] font-black flex items-center gap-1 cursor-pointer whitespace-nowrap"
                             >
                               <Printer className="w-3.5 h-3.5" />
                               <span>{isAr ? 'طباعة' : 'Print'}</span>
-                            </button>
+                            </a>
+                            <a
+                              href={`/api/invoices/${encodeURIComponent(inv.invoiceRef)}/print?lang=${language}&download=1`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              download
+                              title={isAr ? 'حفظ الفاتورة' : 'Download invoice'}
+                              aria-label={isAr ? 'حفظ الفاتورة' : 'Download invoice'}
+                              className="min-h-[34px] px-2.5 py-1.5 rounded-lg bg-[#F4F4EA] hover:bg-[#E7ECE5] border border-[#DCE5DC] text-[#142018] text-[11px] font-black flex items-center justify-center cursor-pointer whitespace-nowrap"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </a>
                             {inv.creditAccountId && onOpenSupplierStatement && inv.payments.length > 0 && (
                               <button
                                 type="button"

@@ -31,6 +31,7 @@ import { formatCurrency } from '../utils/format.ts';
 import { getSellerBusinessTypeLabel, getVerificationStatusLabel } from '../utils/translations.ts';
 import { fetchWithRetry } from '../utils/fetchWithRetry.ts';
 import { SupplierRatingModal } from '../components/SupplierRatingSection.tsx';
+import { getOrderRulesSummary } from '../../shared/orderRules.ts';
 
 interface SuppliersDirectoryViewProps {
   language: Language;
@@ -192,7 +193,12 @@ export const SuppliersDirectoryView: React.FC<SuppliersDirectoryViewProps> = ({
     result.sort((a, b) => {
       if (sortBy === 'distance') return a.distanceKm - b.distanceKm;
       if (sortBy === 'rating') return b.rating - a.rating;
-      if (sortBy === 'min_order') return a.minOrderIQD - b.minOrderIQD;
+      if (sortBy === 'min_order') {
+        return (
+          getOrderRulesSummary(a.orderRules, a.minOrderIQD).minOrderValueIQD -
+          getOrderRulesSummary(b.orderRules, b.minOrderIQD).minOrderValueIQD
+        );
+      }
       if (sortBy === 'vans') return b.activeVansCount - a.activeVansCount;
       return 0;
     });
@@ -651,14 +657,30 @@ export const SuppliersDirectoryView: React.FC<SuppliersDirectoryViewProps> = ({
                 </div>
 
                 {/* Min Order */}
-                <div className="flex items-center justify-between text-xs pt-2 border-t border-[#DCE5DC] tabular-nums">
-                  <span className="text-[#5F7164] font-semibold">
-                    {isAr ? 'الحد الأدنى للطلب:' : 'Min Order:'}
-                  </span>
-                  <span className="font-black text-[#142018]">
-                    {formatCurrency(supplier.minOrderIQD, currency)}
-                  </span>
-                </div>
+                {(() => {
+                  const summary = getOrderRulesSummary(supplier.orderRules, supplier.minOrderIQD);
+                  return (
+                    <div className="flex items-center justify-between text-xs pt-2 border-t border-[#DCE5DC] tabular-nums">
+                      <span className="text-[#5F7164] font-semibold">
+                        {isAr ? 'الحد الأدنى للطلب:' : 'Min Order:'}
+                      </span>
+                      <span className="font-black text-[#142018]">
+                        {summary.minOrderValueIQD > 0
+                          ? formatCurrency(summary.minOrderValueIQD, currency)
+                          : summary.rules.length > 0
+                          ? summary.rules
+                              .map((r) => {
+                                if (r.rule === 'minTotalQuantity') return isAr ? `${r.value} وحدة` : `${r.value} units`;
+                                if (r.rule === 'minCartons') return isAr ? `${r.value} كرتون` : `${r.value} ctns`;
+                                if (r.rule === 'minSkuCount') return isAr ? `${r.value} أصناف` : `${r.value} SKUs`;
+                                return formatCurrency(r.value, currency);
+                              })
+                              .join(' • ')
+                          : formatCurrency(0, currency)}
+                      </span>
+                    </div>
+                  );
+                })()}
 
                 {/* Action Buttons */}
                 <div className="pt-1 space-y-2">

@@ -38,7 +38,8 @@ import {
   ChevronUp,
   FileText,
   ShoppingCart,
-  Maximize2
+  Maximize2,
+  Repeat
 } from 'lucide-react';
 import { Currency, Language } from '../types/index.ts';
 import { formatCurrency } from '../utils/format.ts';
@@ -51,6 +52,7 @@ interface PublicStorefrontViewProps {
   onOpenStorePOS: () => void;
   onOpenStoreManagement?: () => void;
   onExitPreview?: () => void;
+  onSwitchAccount?: () => void;
   isOwner?: boolean;
   language?: Language;
 }
@@ -359,6 +361,7 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
   onOpenStorePOS,
   onOpenStoreManagement,
   onExitPreview,
+  onSwitchAccount,
   isOwner = false,
   language = 'ar'
 }) => {
@@ -825,6 +828,16 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
                 <span>{isAr ? 'إدارة المتجر' : 'Manage Store'}</span>
               </button>
             )}
+            {onSwitchAccount && (
+              <button
+                type="button"
+                onClick={onSwitchAccount}
+                className="px-3 py-1.5 rounded-xl bg-[#FFE600] hover:bg-[#f2da00] text-[#142018] font-black text-xs transition cursor-pointer flex items-center gap-1.5"
+              >
+                <Repeat className="w-3.5 h-3.5" />
+                <span>{isAr ? 'تبديل الحساب' : 'Switch Account'}</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onExitPreview || onOpenStorePOS}
@@ -834,6 +847,34 @@ export const PublicStorefrontView: React.FC<PublicStorefrontViewProps> = ({
               <span>{isAr ? 'رجوع' : 'Exit Preview'}</span>
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Retail Customer Storefront Top Switch-Account Bar */}
+      {!isOwner && onSwitchAccount && (
+        <div className="sticky top-2 z-30 bg-white/95 backdrop-blur-md border border-[#DCE5DC] rounded-2xl px-3.5 py-2.5 shadow-sm flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-[#0B5D32] text-[#FFE600] flex items-center justify-center shrink-0 shadow-2xs">
+              <Store className="w-4.5 h-4.5" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs sm:text-sm font-black text-[#142018] truncate">
+                {storeData?.name || (isAr ? 'سوبرماركت المنصور المركزي' : 'Al-Mansour Supermarket')}
+              </div>
+              <div className="text-[10.5px] font-semibold text-[#5F7164] truncate">
+                {isAr ? 'متجر التجزئة للزبائن · توصيل فوري' : 'Retail Storefront · Fast Delivery'}
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onSwitchAccount}
+            className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#0B5D32] hover:bg-[#084725] text-white font-black text-xs flex items-center gap-1.5 shadow-xs transition cursor-pointer shrink-0 whitespace-nowrap"
+          >
+            <Repeat className="w-3.5 h-3.5 text-[#FFE600]" />
+            <span>{isAr ? 'تبديل للحسابات الأخرى' : 'Switch Account'}</span>
+          </button>
         </div>
       )}
 

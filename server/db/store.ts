@@ -711,7 +711,13 @@ class AppDataStore {
       const offer = this.offers.find(o => o.id === offerId)!;
       const product = this.products.find(p => p.barcode === offer.barcode)!;
 
-      if (offer.minOrderQuantity > 0 && totalOfferQty < offer.minOrderQuantity) {
+      const supplier = this.suppliers.find(s => s.id === offer.supplierId);
+
+      if (
+        supplier?.orderRules?.enforceOfferMinQuantity === true &&
+        offer.minOrderQuantity > 0 &&
+        totalOfferQty < offer.minOrderQuantity
+      ) {
         throw new Error(
           `الكمية المطلوبة من (${product.nameAr}) لدى المورد (${offer.supplierName}) هي ${totalOfferQty}، والحد الأدنى للعرض هو ${offer.minOrderQuantity} (ينقصك ${offer.minOrderQuantity - totalOfferQty})`
         );
@@ -774,7 +780,7 @@ class AppDataStore {
         case 'minOrderValueIQD':
           return `الحد الأدنى لقيمة الطلب (المطلوب ${rule.required.toLocaleString()} د.ع، الحالي ${rule.current.toLocaleString()} د.ع، ينقصك ${rule.missing.toLocaleString()} د.ع)`;
         case 'minTotalQuantity':
-          return `الحد الأدنى لإجمالي الكمية (المطلوب ${rule.required}، الحالي ${rule.current}، ينقصك ${rule.missing})`;
+          return `الحد الأدنى لإجمالي الوحدات (المطلوب ${rule.required} وحدة، الحالي ${rule.current}، ينقصك ${rule.missing})`;
         case 'minCartons':
           return `الحد الأدنى للكراتين (المطلوب ${rule.required} كرتون، الحالي ${rule.current}، ينقصك ${rule.missing})`;
         case 'minSkuCount':

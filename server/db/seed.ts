@@ -886,9 +886,7 @@ export const initialSuppliers: SupplierProfile[] = [
     verificationStatus: 'verified_business',
     serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_najaf_center', 'zone_najaf_kufa', 'zone_karbala_center'],
     orderRules: {
-      minOrderValueIQD: 150000,
-      minCartons: 3,
-      minSkuCount: 2
+      minOrderValueIQD: 150000
     },
     createdAt: '2023-01-15'
   },
@@ -928,8 +926,7 @@ export const initialSuppliers: SupplierProfile[] = [
     verificationStatus: 'authorized_distributor',
     serviceZoneIds: ['zone_baghdad_rusafa', 'zone_najaf_center', 'zone_babil_hilla'],
     orderRules: {
-      minCartons: 5,
-      minTotalQuantity: 6
+      minOrderValueIQD: 100000
     },
     createdAt: '2023-06-10'
   }

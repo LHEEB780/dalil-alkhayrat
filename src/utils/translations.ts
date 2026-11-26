@@ -391,7 +391,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     orderRuleMissingValue: (missingFormatted, minFormatted) =>
       `ينقصك ${missingFormatted} للوصول إلى الحد الأدنى للطلب (${minFormatted})`,
     orderRuleMissingQuantity: (missing, min) =>
-      `ينقصك ${missing} قطع للوصول إلى الحد الأدنى لإجمالي الكمية (${min})`,
+      `ينقصك ${missing} وحدة للوصول إلى الحد الأدنى لإجمالي الوحدات (${min})`,
     orderRuleMissingCartons: (missing, min) =>
       `ينقصك ${missing} كراتين للوصول إلى الحد الأدنى للكراتين (${min})`,
     orderRuleMissingSkus: (missing, min) =>
@@ -591,7 +591,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     orderRuleMissingValue: (missingFormatted, minFormatted) =>
       `You are missing ${missingFormatted} to reach the minimum order value (${minFormatted})`,
     orderRuleMissingQuantity: (missing, min) =>
-      `You are missing ${missing} units to reach the minimum total quantity (${min})`,
+      `You are missing ${missing} units to reach the minimum total units (${min})`,
     orderRuleMissingCartons: (missing, min) =>
       `You are missing ${missing} cartons to reach the minimum cartons requirement (${min})`,
     orderRuleMissingSkus: (missing, min) =>

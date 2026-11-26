@@ -14,6 +14,8 @@ import { FAMOUS_BRANDS, FamousBrand, matchBrandToProduct } from '../data/brands.
 import { Currency, Language, ProductWithOffers, SupplierOfferItem } from '../types/index.ts';
 import { ProductCard } from '../components/ProductCard.tsx';
 import { formatCurrency } from '../utils/format.ts';
+import { resolveWholesaleSupplierByOffer } from '../data/nearbySuppliers.ts';
+import { getInitialOfferQuantity } from '../../shared/orderRules.ts';
 
 interface AllBrandsViewProps {
   products: ProductWithOffers[];
@@ -244,7 +246,13 @@ export const AllBrandsView: React.FC<AllBrandsViewProps> = ({
                     onCompareOffers={onCompareOffers}
                     onQuickAddBestOffer={(p) => {
                       if (p.offers[0]) {
-                        onAddToCart(p, p.offers[0], p.offers[0].minOrderQuantity || 1);
+                        const offer = p.offers[0];
+                        const supp = resolveWholesaleSupplierByOffer(
+                          offer.supplierId,
+                          offer.supplierName,
+                          offer.supplierCity
+                        );
+                        onAddToCart(p, offer, getInitialOfferQuantity(offer.minOrderQuantity, supp.orderRules));
                       }
                     }}
                     isFavorite={wishlistBarcodes.includes(product.barcode)}

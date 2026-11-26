@@ -173,3 +173,32 @@ html.dark-theme textarea {
   color: #f3f4f6 !important;
 }
 
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #142018 !important;
+  }
+  .print-hide {
+    display: none !important;
+  }
+  .van-invoice-print-overlay {
+    position: static !important;
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+  .van-invoice-print-sheet {
+    position: static !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+  }
+  .van-invoice-print-scroll {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+}

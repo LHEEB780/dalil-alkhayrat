@@ -3,6 +3,7 @@ export interface SupplierOrderRules {
   minTotalQuantity?: number;
   minCartons?: number;
   minSkuCount?: number;
+  enforceOfferMinQuantity?: boolean;
 }
 
 export interface SupplierOrderRuleItem {
@@ -37,9 +38,93 @@ export interface SupplierOrderValidationResult {
   failedRules: FailedSupplierOrderRule[];
 }
 
+export interface OrderRuleSummaryItem {
+  rule: OrderRuleType;
+  value: number;
+}
+
+export interface OrderRulesSummary {
+  rules: OrderRuleSummaryItem[];
+  minOrderValueIQD: number;
+}
+
 export function isCartonUnit(unit?: string): boolean {
   if (!unit) return false;
   return /(كرتون|كراتين|carton|ctn)/i.test(unit);
+}
+
+export function isOfferMinQuantityEnforced(orderRules?: SupplierOrderRules): boolean {
+  return orderRules?.enforceOfferMinQuantity === true;
+}
+
+export function getInitialOfferQuantity(
+  minOrderQuantity?: number,
+  orderRules?: SupplierOrderRules
+): number {
+  if (
+    isOfferMinQuantityEnforced(orderRules) &&
+    typeof minOrderQuantity === 'number' &&
+    minOrderQuantity > 0
+  ) {
+    return minOrderQuantity;
+  }
+  return 1;
+}
+
+export function getEffectiveOrderRules(
+  orderRules?: SupplierOrderRules,
+  legacyMinOrderIQD?: number
+): SupplierOrderRules | undefined {
+  const hasValueRule =
+    typeof orderRules?.minOrderValueIQD === 'number' && orderRules.minOrderValueIQD > 0;
+  const hasOtherRules =
+    (typeof orderRules?.minTotalQuantity === 'number' && orderRules.minTotalQuantity > 0) ||
+    (typeof orderRules?.minCartons === 'number' && orderRules.minCartons > 0) ||
+    (typeof orderRules?.minSkuCount === 'number' && orderRules.minSkuCount > 0) ||
+    Boolean(orderRules?.enforceOfferMinQuantity);
+
+  if (hasValueRule || hasOtherRules) {
+    return orderRules;
+  }
+  if (typeof legacyMinOrderIQD === 'number' && legacyMinOrderIQD > 0) {
+    return { minOrderValueIQD: legacyMinOrderIQD };
+  }
+  return orderRules;
+}
+
+/**
+ * Single source of truth for displaying and sorting active supplier order rules.
+ * Falls back to legacyMinOrderIQD as a minOrderValueIQD rule if orderRules is absent.
+ */
+export function getOrderRulesSummary(
+  orderRules?: SupplierOrderRules,
+  legacyMinOrderIQD?: number
+): OrderRulesSummary {
+  const effective = getEffectiveOrderRules(orderRules, legacyMinOrderIQD);
+  const rules: OrderRuleSummaryItem[] = [];
+
+  if (typeof effective?.minOrderValueIQD === 'number' && effective.minOrderValueIQD > 0) {
+    rules.push({ rule: 'minOrderValueIQD', value: effective.minOrderValueIQD });
+  }
+  if (typeof effective?.minTotalQuantity === 'number' && effective.minTotalQuantity > 0) {
+    rules.push({ rule: 'minTotalQuantity', value: effective.minTotalQuantity });
+  }
+  if (typeof effective?.minCartons === 'number' && effective.minCartons > 0) {
+    rules.push({ rule: 'minCartons', value: effective.minCartons });
+  }
+  if (typeof effective?.minSkuCount === 'number' && effective.minSkuCount > 0) {
+    rules.push({ rule: 'minSkuCount', value: effective.minSkuCount });
+  }
+
+  const minOrderValueIQD =
+    typeof effective?.minOrderValueIQD === 'number' && effective.minOrderValueIQD > 0
+      ? effective.minOrderValueIQD
+      : 0;
+
+  return {
+    rules,
+    minOrderValueIQD
+  };
 }
 
 /**

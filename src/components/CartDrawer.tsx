@@ -14,11 +14,13 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { CartItem, Currency, Language } from '../types/index.ts';
-import { StoreDistrict, WHOLESALE_SUPPLIERS } from '../data/nearbySuppliers.ts';
+import { StoreDistrict, resolveWholesaleSupplierByOffer } from '../data/nearbySuppliers.ts';
 import { formatCurrency } from '../utils/format.ts';
 import { translations } from '../utils/translations.ts';
 import {
   validateSupplierOrderRules,
+  getEffectiveOrderRules,
+  getOrderRulesSummary,
   FailedSupplierOrderRule,
   SupplierOrderRules
 } from '../../shared/orderRules.ts';
@@ -114,13 +116,27 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
   const hasUnsupportedSuppliers = unsupportedSupplierIds.size > 0;
 
-  const supplierOrderValidations = useMemo(() => {
-    const getSupplierOrderRules = (supplierId: string): SupplierOrderRules | undefined => {
-      const apiSupplier = suppliers.find((s) => s.id === supplierId);
-      if (apiSupplier?.orderRules) return apiSupplier.orderRules;
-      return WHOLESALE_SUPPLIERS.find((s) => s.id === supplierId)?.orderRules;
-    };
+  const supplierOrderRulesMap = useMemo(() => {
+    return supplierGroups.reduce((acc, group) => {
+      const apiSupplier = suppliers.find((s) => s.id === group.supplierId);
+      const localSupplier = resolveWholesaleSupplierByOffer(
+        group.supplierId,
+        group.supplierName,
+        group.supplierCity
+      );
+      const effectiveRules = getEffectiveOrderRules(
+        apiSupplier?.orderRules || localSupplier?.orderRules,
+        localSupplier?.minOrderIQD
+      );
+      acc[group.supplierId] = {
+        effectiveRules,
+        summary: getOrderRulesSummary(effectiveRules, localSupplier?.minOrderIQD)
+      };
+      return acc;
+    }, {} as Record<string, { effectiveRules: SupplierOrderRules | undefined; summary: ReturnType<typeof getOrderRulesSummary> }>);
+  }, [supplierGroups, suppliers]);
 
+  const supplierOrderValidations = useMemo(() => {
     return supplierGroups.reduce((acc, group) => {
       const ruleItems = group.items.map((item) => ({
         barcode: item.product.barcode,
@@ -131,11 +147,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       }));
       acc[group.supplierId] = validateSupplierOrderRules(
         ruleItems,
-        getSupplierOrderRules(group.supplierId)
+        supplierOrderRulesMap[group.supplierId]?.effectiveRules
       );
       return acc;
     }, {} as Record<string, ReturnType<typeof validateSupplierOrderRules>>);
-  }, [supplierGroups, suppliers]);
+  }, [supplierGroups, supplierOrderRulesMap]);
 
   const hasUnmetOrderRules = useMemo(
     () => supplierGroups.some((g) => !supplierOrderValidations[g.supplierId]?.isValid),
@@ -331,16 +347,34 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                     </div>
                   )}
 
-                  {hasFailedOrderRules && (
-                    <div className="px-3.5 py-2.5 bg-red-50 border-b border-red-200 text-red-700 text-xs flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[#B91C1C]" />
-                      <div className="space-y-0.5">
-                        {orderValidation.failedRules.map((rule) => (
-                          <div key={rule.rule}>{formatFailedRuleAlert(rule)}</div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  {(() => {
+                    const orderSummary = supplierOrderRulesMap[group.supplierId]?.summary;
+                    if (hasFailedOrderRules) {
+                      return (
+                        <div className="px-3.5 py-2.5 bg-red-50 border-b border-red-200 text-red-700 text-xs flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[#B91C1C]" />
+                          <div className="space-y-0.5">
+                            {orderValidation.failedRules.map((rule) => (
+                              <div key={rule.rule}>{formatFailedRuleAlert(rule)}</div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (orderSummary && orderSummary.minOrderValueIQD > 0) {
+                      return (
+                        <div className="px-3.5 py-2.5 bg-emerald-50 border-b border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 shrink-0 text-[#00A046]" />
+                          <span>
+                            {isAr
+                              ? `تم الوصول إلى الحد الأدنى للطلب (${formatCurrency(orderSummary.minOrderValueIQD, currency, language)})`
+                              : `Minimum order reached (${formatCurrency(orderSummary.minOrderValueIQD, currency, language)})`}
+                          </span>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
 
                   {/* Items in this supplier's sub-order */}
                   <div className="divide-y divide-[#E5E7EB] p-3 space-y-3">

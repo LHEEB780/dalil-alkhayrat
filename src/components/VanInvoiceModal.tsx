@@ -6,6 +6,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  Download,
   MapPin,
   MessageCircle,
   Phone,
@@ -90,12 +91,14 @@ export const VanInvoiceModal: React.FC<VanInvoiceModalProps> = ({
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [copiedReceipt, setCopiedReceipt] = useState(false);
   const [whatsappSentBanner, setWhatsappSentBanner] = useState(false);
+  const [printFeedback, setPrintFeedback] = useState(false);
 
   useEffect(() => {
     setCustomerPhone(customerStore?.phone || '');
     setPhoneError(null);
     setCopiedReceipt(false);
     setWhatsappSentBanner(false);
+    setPrintFeedback(false);
   }, [receipt?.id, receipt?.receiptNumber, customerStore?.phone]);
 
   const formattedDate = useMemo(() => {
@@ -221,15 +224,18 @@ export const VanInvoiceModal: React.FC<VanInvoiceModalProps> = ({
   if (!receipt) return null;
 
   const isDirectSale = receipt.type === 'direct_sale';
+  const receiptRef = receipt.receiptNumber || receipt.id;
+  const printUrl = `/api/van/invoice/${encodeURIComponent(receiptRef)}/print?lang=${language}`;
+  const downloadUrl = `${printUrl}&download=1`;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/65 backdrop-blur-xs sm:p-4"
+      className="van-invoice-print-overlay fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/65 backdrop-blur-xs sm:p-4"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`bg-white w-full sm:max-w-lg max-h-[94vh] rounded-t-3xl sm:rounded-3xl shadow-2xl border border-[#DCE5DC] overflow-hidden flex flex-col font-brand ${
+        className={`van-invoice-print-sheet bg-white w-full sm:max-w-lg max-h-[94vh] rounded-t-3xl sm:rounded-3xl shadow-2xl border border-[#DCE5DC] overflow-hidden flex flex-col font-brand ${
           isAr ? 'text-right' : 'text-left'
         }`}
       >
@@ -262,7 +268,7 @@ export const VanInvoiceModal: React.FC<VanInvoiceModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 border border-white/20 flex items-center justify-center text-white cursor-pointer transition shrink-0"
+                className="print-hide w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 border border-white/20 flex items-center justify-center text-white cursor-pointer transition shrink-0"
                 aria-label={isAr ? 'إغلاق الفاتورة' : 'Close invoice'}
               >
                 <X className="w-4 h-4" />
@@ -342,7 +348,7 @@ export const VanInvoiceModal: React.FC<VanInvoiceModalProps> = ({
         </div>
 
         {/* ================= 2. SCROLLABLE INVOICE BODY ================= */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-[#FAFBF8]">
+        <div className="van-invoice-print-scroll flex-1 overflow-y-auto p-4 space-y-3.5 bg-[#FAFBF8]">
           {/* Billed To & Rep Metadata Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <div className="bg-white rounded-2xl border border-[#DCE5DC] p-3 space-y-1">
@@ -410,7 +416,7 @@ export const VanInvoiceModal: React.FC<VanInvoiceModalProps> = ({
                 <span>{isAr ? 'الإجمالي' : 'Subtotal'}</span>
               </div>
 
-              <div className="divide-y divide-[#EAEFEA] max-h-60 overflow-y-auto">
+              <div className="van-invoice-print-scroll divide-y divide-[#EAEFEA] max-h-60 overflow-y-auto">
                 {receipt.items.map((it: any, idx: number) => {
                   const thumbUrl =
                     it.imageUrl || resolveProductImage(it.barcode || '', it.productName || '');
@@ -518,7 +524,7 @@ export const VanInvoiceModal: React.FC<VanInvoiceModalProps> = ({
           </div>
 
           {/* ================= 3. DIRECT WHATSAPP SHARE TO CUSTOMER NUMBER ================= */}
-          <div className="bg-gradient-to-br from-[#ECFDF5] to-[#F7FBF8] rounded-2xl border border-[#A7F3D0] p-3.5 space-y-2.5">
+          <div className="print-hide bg-gradient-to-br from-[#ECFDF5] to-[#F7FBF8] rounded-2xl border border-[#A7F3D0] p-3.5 space-y-2.5">
             <div className="flex items-center justify-between gap-2">
               <label className="text-xs font-black text-[#065F46] flex items-center gap-1.5">
                 <MessageCircle className="w-4 h-4 text-[#16A34A]" />
@@ -570,33 +576,59 @@ export const VanInvoiceModal: React.FC<VanInvoiceModalProps> = ({
         </div>
 
         {/* ================= 4. STICKY FOOTER ACTIONS ================= */}
-        <div className="bg-white border-t border-[#EAEFEA] px-4 py-3 grid grid-cols-2 gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={handleCopyText}
-            className="min-h-[42px] py-2.5 px-3 rounded-xl bg-[#F4F4EA] hover:bg-[#E7ECE5] border border-[#DCE5DC] text-[#142018] font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
-          >
-            {copiedReceipt ? (
-              <>
-                <Check className="w-4 h-4 text-[#0B5D32]" />
-                <span className="text-[#0B5D32]">{isAr ? 'تم نسخ الفاتورة' : 'Copied!'}</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4" />
-                <span>{isAr ? 'نسخ نص الفاتورة' : 'Copy Invoice'}</span>
-              </>
-            )}
-          </button>
+        <div className="print-hide bg-white border-t border-[#EAEFEA] px-4 py-3 space-y-2 shrink-0">
+          {printFeedback && (
+            <p className="text-[11px] font-bold text-[#0B5D32] text-center">
+              {isAr
+                ? '✓ تم فتح صفحة الطباعة — اختر الطابعة أو حفظ كـ PDF'
+                : '✓ Print sheet opened — select printer or Save as PDF'}
+            </p>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCopyText}
+              className="flex-1 min-h-[42px] py-2.5 px-3 rounded-xl bg-[#F4F4EA] hover:bg-[#E7ECE5] border border-[#DCE5DC] text-[#142018] font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+            >
+              {copiedReceipt ? (
+                <>
+                  <Check className="w-4 h-4 text-[#0B5D32]" />
+                  <span className="text-[#0B5D32]">{isAr ? 'تم نسخ الفاتورة' : 'Copied!'}</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4" />
+                  <span>{isAr ? 'نسخ النص' : 'Copy'}</span>
+                </>
+              )}
+            </button>
 
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="min-h-[42px] py-2.5 px-3 rounded-xl bg-[#0B5D32] hover:bg-[#084725] text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition shadow-sm"
-          >
-            <Printer className="w-4 h-4" />
-            <span>{isAr ? 'طباعة الفاتورة' : 'Print Invoice'}</span>
-          </button>
+            <a
+              href={printUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => {
+                setPrintFeedback(true);
+                setTimeout(() => setPrintFeedback(false), 3500);
+              }}
+              className="flex-[1.3] min-h-[42px] py-2.5 px-3 rounded-xl bg-[#0B5D32] hover:bg-[#084725] text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition shadow-sm"
+            >
+              <Printer className="w-4 h-4" />
+              <span>{isAr ? 'طباعة الفاتورة' : 'Print Invoice'}</span>
+            </a>
+
+            <a
+              href={downloadUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              download
+              title={isAr ? 'حفظ الفاتورة كملف' : 'Download printable invoice'}
+              aria-label={isAr ? 'حفظ الفاتورة كملف' : 'Download printable invoice'}
+              className="min-h-[42px] w-[42px] rounded-xl bg-[#F4F4EA] hover:bg-[#E7ECE5] border border-[#DCE5DC] text-[#142018] flex items-center justify-center cursor-pointer transition shrink-0"
+            >
+              <Download className="w-4 h-4" />
+            </a>
+          </div>
         </div>
       </div>
     </div>

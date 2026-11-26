@@ -259,7 +259,7 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     storeImageUrl: 'https://images.unsplash.com/photo-1553413077-190dd305871c?auto=format&fit=crop&w=600&q=80',
     brandsDistributed: ['عافية', 'أرز العنبر العراقي', 'شكر الاتحاد', 'نيدو', 'ألتونسا'],
     serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_najaf_center', 'zone_najaf_kufa', 'zone_karbala_center'],
-    orderRules: { minOrderValueIQD: 150000, minCartons: 3, minSkuCount: 2 }
+    orderRules: { minOrderValueIQD: 150000 }
   },
   {
     id: 'supp_nahrain',
@@ -296,7 +296,7 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     storeImageUrl: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=600&q=80',
     brandsDistributed: ['شاي الكوزي', 'قهوة العميد', 'نسكافيه', 'لافازا', 'ديلما'],
     serviceZoneIds: ['zone_baghdad_rusafa', 'zone_najaf_center', 'zone_karbala_center', 'zone_karbala_hindiya'],
-    orderRules: { minOrderValueIQD: 120000, minCartons: 4 }
+    orderRules: { minOrderValueIQD: 120000 }
   },
   {
     id: 'supp_babylon',
@@ -333,7 +333,7 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     storeImageUrl: 'https://images.unsplash.com/photo-1578575437130-527eed3abbec?auto=format&fit=crop&w=600&q=80',
     brandsDistributed: ['عافية', 'زيت الذرة الشهبندر', 'تونة ألوها', 'معجون المزرعة', 'سمنة شوكة وملعقة'],
     serviceZoneIds: ['zone_baghdad_karkh', 'zone_babil_hilla', 'zone_babil_musayyib', 'zone_karbala_hindiya'],
-    orderRules: { minOrderValueIQD: 200000, minTotalQuantity: 10 }
+    orderRules: { minOrderValueIQD: 200000 }
   },
   {
     id: 'supp_jamila',
@@ -370,7 +370,7 @@ export const WHOLESALE_SUPPLIERS: WholesaleSupplier[] = [
     storeImageUrl: 'https://images.unsplash.com/photo-1605371924599-2d0365da1ae0?auto=format&fit=crop&w=600&q=80',
     brandsDistributed: ['أرز محمود', 'طحين صفر تركي', 'سكر الاتحاد', 'عدس كندي', 'فاصولياء بيضاء'],
     serviceZoneIds: ['zone_baghdad_rusafa', 'zone_baghdad_karkh', 'zone_babil_hilla', 'zone_babil_musayyib', 'zone_karbala_center'],
-    orderRules: { minOrderValueIQD: 400000, minCartons: 10, minSkuCount: 2 }
+    orderRules: { minOrderValueIQD: 400000 }
   },
   {
     id: 'supp_baghdad_canned',
@@ -457,7 +457,8 @@ export function resolveWholesaleSupplierByOffer(
       verificationStatus: 'authorized_distributor',
       badgeAr: 'موزع معتمد ✓',
       badgeEn: 'Verified Distributor ✓',
-      orderRules: { minCartons: 5, minTotalQuantity: 6 }
+      minOrderIQD: 100000,
+      orderRules: { minOrderValueIQD: 100000 }
     };
   }
 
@@ -477,6 +478,7 @@ export function resolveWholesaleSupplierByOffer(
       verificationStatus: 'verified',
       badgeAr: 'مجمع جملة معتمد ✓',
       badgeEn: 'Verified Wholesale Hub ✓',
+      minOrderIQD: 120000,
       orderRules: { minOrderValueIQD: 120000 }
     };
   }

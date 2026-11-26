@@ -1056,6 +1056,460 @@ apiRouter.patch('/van/shift-reports/:reportId/settle', (req: Request, res: Respo
   }
 });
 
+const SUPPLIER_LOGO_BY_ID: Record<string, string> = {
+  supp_tigris: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=150&q=80',
+  supp_rafidain: 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?auto=format&fit=crop&w=150&q=80',
+  supp_nahrain: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=150&q=80',
+  supp_babylon: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?auto=format&fit=crop&w=150&q=80',
+  supp_jamila: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=150&q=80',
+  supp_baghdad_canned: 'https://images.unsplash.com/photo-1534723452862-4c874018d66d?auto=format&fit=crop&w=150&q=80',
+  supp_baghdad_hub: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=150&q=80',
+  supp_dijla: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=150&q=80'
+};
+
+function escapeHtml(val: unknown): string {
+  return String(val ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function resolvePrintableProductImage(barcode: string, productName: string): string {
+  const matched = db.products.find(p => p.barcode === barcode);
+  if (matched?.imageUrl) return matched.imageUrl;
+  const lower = (productName || '').toLowerCase();
+  if (lower.includes('أرز') || lower.includes('ارز') || lower.includes('rice')) {
+    return '/assets/images/white_basmati_rice.jpg';
+  }
+  if (lower.includes('زيت') || lower.includes('سمن') || lower.includes('oil')) {
+    return '/assets/images/white_sunflower_oil.jpg';
+  }
+  if (lower.includes('حليب') || lower.includes('لبن') || lower.includes('milk')) {
+    return '/assets/images/white_milk_powder.jpg';
+  }
+  if (lower.includes('معجون') || lower.includes('طماطم') || lower.includes('tomato')) {
+    return '/assets/images/white_tomato_paste.jpg';
+  }
+  if (lower.includes('شاي') || lower.includes('tea')) {
+    return '/assets/images/white_ceylon_tea.jpg';
+  }
+  if (lower.includes('سكر') || lower.includes('sugar')) {
+    return '/assets/images/white_sugar_pack.jpg';
+  }
+  return '/assets/images/white_canned_goods.jpg';
+}
+
+function renderPrintableInvoiceHtml(params: {
+  lang: 'ar' | 'en';
+  docTitle: string;
+  invoiceNumber: string;
+  issueDate: string;
+  supplierName: string;
+  supplierAddress: string;
+  supplierPhone: string;
+  supplierLogoUrl?: string;
+  storeName: string;
+  storePhone?: string;
+  storeAddress?: string;
+  driverName?: string;
+  vehicleInfo?: string;
+  paymentLabel: string;
+  items: {
+    barcode: string;
+    productName: string;
+    unit: string;
+    quantity: number;
+    unitPriceIQD: number;
+    totalIQD: number;
+    tierApplied?: boolean;
+    imageUrl?: string;
+  }[];
+  grossAmountIQD?: number;
+  discountIQD?: number;
+  totalAmountIQD: number;
+  footerNote: string;
+  autoPrint?: boolean;
+}): string {
+  const isAr = params.lang === 'ar';
+  const dir = isAr ? 'rtl' : 'ltr';
+  const totalQty = params.items.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+  const gross = params.grossAmountIQD && params.grossAmountIQD > 0
+    ? params.grossAmountIQD
+    : params.totalAmountIQD + (params.discountIQD || 0);
+
+  const itemsHtml = params.items
+    .map((it) => {
+      const thumb = it.imageUrl || resolvePrintableProductImage(it.barcode, it.productName);
+      return `
+        <tr>
+          <td style="padding:10px 8px;border-bottom:1px solid #EAEFEA;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <img src="${escapeHtml(thumb)}" alt="${escapeHtml(it.productName)}"
+                style="width:42px;height:42px;object-fit:contain;border-radius:8px;border:1px solid #DCE5DC;background:#fff;padding:2px;flex-shrink:0;" />
+              <div>
+                <div style="font-weight:800;color:#142018;font-size:13px;">${escapeHtml(it.productName)}</div>
+                <div style="font-size:11px;color:#5F7164;margin-top:2px;">
+                  ${escapeHtml(it.unit)}
+                  ${it.tierApplied ? `<span style="background:#ECFDF5;color:#0B5D32;padding:1px 6px;border-radius:4px;font-weight:800;margin-inline-start:6px;">${isAr ? 'سعر جملة' : 'Bulk Tier'}</span>` : ''}
+                </div>
+              </div>
+            </div>
+          </td>
+          <td style="padding:10px 8px;border-bottom:1px solid #EAEFEA;font-family:monospace;font-weight:700;text-align:center;font-size:12px;">
+            ${Number(it.quantity).toLocaleString()} × ${Number(it.unitPriceIQD).toLocaleString()} ${isAr ? 'د.ع' : 'IQD'}
+          </td>
+          <td style="padding:10px 8px;border-bottom:1px solid #EAEFEA;font-family:monospace;font-weight:900;text-align:end;color:#0B5D32;font-size:13px;">
+            ${Number(it.totalIQD).toLocaleString()} ${isAr ? 'د.ع' : 'IQD'}
+          </td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  return `<!doctype html>
+<html lang="${isAr ? 'ar' : 'en'}" dir="${dir}">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(params.docTitle)} - ${escapeHtml(params.invoiceNumber)}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 16px;
+      background: #F4F4EA;
+      color: #142018;
+      font-family: 'Cairo', Tahoma, Arial, sans-serif;
+    }
+    .toolbar {
+      max-width: 720px;
+      margin: 0 auto 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background: #fff;
+      border: 1px solid #DCE5DC;
+      border-radius: 14px;
+      padding: 10px 14px;
+    }
+    .btn {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 18px;
+      font-family: inherit;
+      font-weight: 800;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .btn-print { background: #0B5D32; color: #fff; }
+    .btn-close { background: #F4F4EA; color: #142018; border: 1px solid #DCE5DC; }
+    .sheet {
+      max-width: 720px;
+      margin: 0 auto;
+      background: #fff;
+      border: 1px solid #DCE5DC;
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(11,93,50,0.08);
+    }
+    .hero {
+      background: linear-gradient(135deg, #084725, #0B5D32, #117A42);
+      color: #fff;
+      padding: 18px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .supplier-box { display: flex; align-items: center; gap: 12px; }
+    .logo {
+      width: 58px; height: 58px;
+      border-radius: 14px;
+      background: #fff;
+      padding: 3px;
+      border: 2px solid #FFE600;
+      object-fit: cover;
+    }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      padding: 16px 20px;
+      background: #FAFBF8;
+      border-bottom: 1px solid #EAEFEA;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #DCE5DC;
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 12px;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      background: #EEF4EE;
+      color: #3D5244;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 10px 8px;
+      text-align: start;
+      border-bottom: 1px solid #DCE5DC;
+    }
+    .totals {
+      padding: 16px 20px;
+      background: #FAFBF8;
+      border-top: 1px solid #EAEFEA;
+    }
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+    .grand {
+      font-size: 18px;
+      font-weight: 900;
+      color: #0B5D32;
+      padding-top: 8px;
+      border-top: 1px dashed #BBD0BB;
+      margin-top: 8px;
+    }
+    .footer-note {
+      margin: 0 20px 18px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #ECFDF5;
+      border: 1px solid #A7F3D0;
+      color: #065F46;
+      font-size: 11.5px;
+      font-weight: 700;
+    }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .toolbar { display: none !important; }
+      .sheet { border: none; box-shadow: none; border-radius: 0; max-width: 100%; }
+      .hero { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button class="btn btn-print" onclick="window.print()">${isAr ? '🖨️ طباعة / حفظ كـ PDF' : '🖨️ Print / Save PDF'}</button>
+    <button class="btn btn-close" onclick="window.close()">${isAr ? 'إغلاق' : 'Close'}</button>
+  </div>
+
+  <div class="sheet">
+    <div class="hero">
+      <div class="supplier-box">
+        ${params.supplierLogoUrl ? `<img class="logo" src="${escapeHtml(params.supplierLogoUrl)}" alt="${escapeHtml(params.supplierName)}" />` : ''}
+        <div>
+          <div style="font-size:11px;color:#FFE600;font-weight:800;">${escapeHtml(params.docTitle)}</div>
+          <div style="font-size:17px;font-weight:900;margin-top:2px;">${escapeHtml(params.supplierName)}</div>
+          <div style="font-size:11px;opacity:0.9;margin-top:2px;">
+            ${escapeHtml(params.supplierAddress)}${params.supplierPhone ? ` · ${escapeHtml(params.supplierPhone)}` : ''}
+          </div>
+        </div>
+      </div>
+      <div style="text-align:${isAr ? 'left' : 'right'};">
+        <div style="font-size:10px;opacity:0.8;">${isAr ? 'رقم الفاتورة' : 'Invoice #'}</div>
+        <div style="font-family:monospace;font-size:16px;font-weight:900;color:#FFE600;">${escapeHtml(params.invoiceNumber)}</div>
+        <div style="font-size:11px;opacity:0.9;margin-top:2px;">${escapeHtml(params.issueDate)}</div>
+      </div>
+    </div>
+
+    <div class="meta-grid">
+      <div class="card">
+        <div style="color:#5F7164;font-weight:700;font-size:11px;">${isAr ? 'العميل / المتجر المستلم' : 'Customer Store'}</div>
+        <div style="font-weight:900;font-size:14px;margin-top:3px;">${escapeHtml(params.storeName)}</div>
+        ${params.storeAddress ? `<div style="color:#5F7164;margin-top:2px;">${escapeHtml(params.storeAddress)}</div>` : ''}
+        ${params.storePhone ? `<div style="font-family:monospace;color:#0B5D32;font-weight:700;margin-top:2px;">${escapeHtml(params.storePhone)}</div>` : ''}
+      </div>
+      <div class="card">
+        <div style="color:#5F7164;font-weight:700;font-size:11px;">${isAr ? 'التوزيع والسداد' : 'Dispatch & Payment'}</div>
+        ${params.driverName ? `<div style="font-weight:900;font-size:13px;margin-top:3px;">${escapeHtml(params.driverName)}</div>` : ''}
+        ${params.vehicleInfo ? `<div style="color:#5F7164;margin-top:2px;">${escapeHtml(params.vehicleInfo)}</div>` : ''}
+        <div style="display:inline-block;margin-top:6px;padding:2px 8px;border-radius:6px;background:#ECFDF5;color:#065F46;font-weight:800;font-size:11px;">
+          ${escapeHtml(params.paymentLabel)}
+        </div>
+      </div>
+    </div>
+
+    ${params.items.length > 0 ? `
+      <div style="padding:0 20px;">
+        <table>
+          <thead>
+            <tr>
+              <th>${isAr ? 'الصنف والوحدة' : 'Item & Unit'}</th>
+              <th style="text-align:center;">${isAr ? 'الكمية × السعر' : 'Qty × Price'}</th>
+              <th style="text-align:end;">${isAr ? 'الإجمالي' : 'Total'}</th>
+            </tr>
+          </thead>
+          <tbody>${itemsHtml}</tbody>
+        </table>
+      </div>
+    ` : ''}
+
+    <div class="totals">
+      ${totalQty > 0 ? `<div class="total-row"><span>${isAr ? 'إجمالي الوحدات:' : 'Total Units:'}</span><strong>${totalQty}</strong></div>` : ''}
+      ${(params.discountIQD || 0) > 0 ? `
+        <div class="total-row"><span>${isAr ? 'المجموع الفرعي:' : 'Subtotal:'}</span><span>${gross.toLocaleString()} ${isAr ? 'د.ع' : 'IQD'}</span></div>
+        <div class="total-row" style="color:#92400E;"><span>${isAr ? 'الخصم التجاري:' : 'Discount:'}</span><span>-${Number(params.discountIQD).toLocaleString()} ${isAr ? 'د.ع' : 'IQD'}</span></div>
+      ` : ''}
+      <div class="total-row grand">
+        <span>${isAr ? 'الإجمالي النهائي المستحق:' : 'Grand Total:'}</span>
+        <span>${Number(params.totalAmountIQD).toLocaleString()} ${isAr ? 'د.ع' : 'IQD'}</span>
+      </div>
+    </div>
+
+    <div class="footer-note">${escapeHtml(params.footerNote)}</div>
+  </div>
+
+  ${params.autoPrint ? `<script>window.addEventListener('load',function(){setTimeout(function(){try{window.print();}catch(e){}},350);});</script>` : ''}
+</body>
+</html>`;
+}
+
+apiRouter.get('/van/invoice/:receiptNumber/print', (req: Request, res: Response) => {
+  const { receiptNumber } = req.params;
+  const lang: 'ar' | 'en' = req.query.lang === 'en' ? 'en' : 'ar';
+  const tx = db.vanTransactions.find(t => t.receiptNumber === receiptNumber || t.id === receiptNumber);
+  if (!tx) {
+    return res.status(404).send(lang === 'ar' ? 'الفاتورة غير موجودة' : 'Invoice not found');
+  }
+
+  const supplier = db.suppliers.find(s => s.id === tx.supplierId);
+  const store = db.stores.find(s => s.id === tx.storeId);
+  const driver = db.drivers.find(d => d.id === tx.driverId);
+
+  const html = renderPrintableInvoiceHtml({
+    lang,
+    docTitle:
+      tx.type === 'debt_collection'
+        ? lang === 'ar'
+          ? 'سند قبض وتحصيل آجل ميداني'
+          : 'Field Debt Collection Receipt'
+        : lang === 'ar'
+        ? 'فاتورة مبيعات جملة معتمدة'
+        : 'Verified Wholesale Van Invoice',
+    invoiceNumber: tx.receiptNumber,
+    issueDate: new Date(tx.createdAt).toLocaleString(lang === 'ar' ? 'ar-IQ' : 'en-US'),
+    supplierName: supplier?.companyName || 'شركة الرافدين للتجارة العامة والأغذية',
+    supplierAddress: [supplier?.city, supplier?.address].filter(Boolean).join(' · '),
+    supplierPhone: supplier?.phone || '+964 780 112 2334',
+    supplierLogoUrl: SUPPLIER_LOGO_BY_ID[tx.supplierId] || SUPPLIER_LOGO_BY_ID.supp_rafidain,
+    storeName: tx.storeName,
+    storePhone: store?.phone,
+    storeAddress: store?.address || store?.district,
+    driverName: tx.driverName,
+    vehicleInfo: driver ? `${driver.vanWarehouseName} · ${driver.vehiclePlate}` : undefined,
+    paymentLabel:
+      tx.paymentType === 'cash'
+        ? lang === 'ar'
+          ? 'دفع نقدي (كاش)'
+          : 'Cash Paid'
+        : lang === 'ar'
+        ? 'آجل على الحساب'
+        : 'Credit Ledger',
+    items: tx.items || [],
+    grossAmountIQD: tx.grossAmountIQD,
+    discountIQD: tx.discountIQD,
+    totalAmountIQD: tx.totalAmountIQD,
+    footerNote:
+      tx.type === 'direct_sale'
+        ? lang === 'ar'
+          ? '✅ تمت مزامنة البضاعة تلقائياً إلى مخزون كاشير المتجر.'
+          : '✅ Items automatically synced to store POS inventory.'
+        : lang === 'ar'
+        ? '✅ تم ترحيل الدفعة إلى دفتر الأستاذ للمورد وتحديث عهدة الفان.'
+        : '✅ Payment posted to supplier ledger & van custody.',
+    autoPrint: req.query.download !== '1'
+  });
+
+  if (req.query.download === '1') {
+    const safeName = receiptNumber.replace(/[^a-zA-Z0-9_-]/g, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="invoice-${safeName}.html"`);
+  }
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  return res.send(html);
+});
+
+apiRouter.get('/invoices/:ref/print', (req: Request, res: Response) => {
+  const { ref } = req.params;
+  const lang: 'ar' | 'en' = req.query.lang === 'en' ? 'en' : 'ar';
+
+  const vanTx = db.vanTransactions.find(t => t.receiptNumber === ref || t.id === ref);
+  if (vanTx) {
+    return res.redirect(`/api/van/invoice/${encodeURIComponent(vanTx.receiptNumber)}/print?lang=${lang}${req.query.download === '1' ? '&download=1' : ''}`);
+  }
+
+  const ledger = db.ledgerEntries.find(e => e.referenceId === ref || e.id === ref);
+  const ord = db.subOrders.find(
+    o =>
+      o.id === ref ||
+      o.parentOrderId === ref ||
+      (ledger ? o.id === ledger.referenceId || o.parentOrderId === ledger.referenceId : false)
+  );
+  if (!ord && !ledger) {
+    return res.status(404).send(lang === 'ar' ? 'الفاتورة غير موجودة' : 'Invoice not found');
+  }
+
+  const supplierId = ord?.supplierId || ledger?.supplierId || 'supp_rafidain';
+  const supplier = db.suppliers.find(s => s.id === supplierId);
+  const storeId = ord?.storeId || ledger?.storeId || 'store_almansoor';
+  const store = db.stores.find(s => s.id === storeId);
+
+  const html = renderPrintableInvoiceHtml({
+    lang,
+    docTitle: lang === 'ar' ? 'فاتورة توريد جملة معتمدة' : 'Verified Wholesale Supply Invoice',
+    invoiceNumber: ord?.id || ledger?.referenceId || ref,
+    issueDate: ord?.createdAt
+      ? new Date(ord.createdAt).toLocaleDateString(lang === 'ar' ? 'ar-IQ' : 'en-US')
+      : ledger?.entryDate || '',
+    supplierName: supplier?.companyName || ord?.supplierName || 'شركة الرافدين للتجارة العامة والأغذية',
+    supplierAddress: [supplier?.city, supplier?.address].filter(Boolean).join(' · '),
+    supplierPhone: supplier?.phone || '+964 780 112 2334',
+    supplierLogoUrl: SUPPLIER_LOGO_BY_ID[supplierId] || SUPPLIER_LOGO_BY_ID.supp_rafidain,
+    storeName: ord?.storeName || store?.name || 'سوبرماركت المنصور المركزي',
+    storePhone: ord?.storePhone || store?.phone,
+    storeAddress: ord?.storeAddress || store?.address || store?.district,
+    paymentLabel:
+      ord?.paymentMethod === 'credit' || ledger?.referenceType === 'INVOICE'
+        ? lang === 'ar'
+          ? 'فاتورة آجل'
+          : 'Credit Invoice'
+        : lang === 'ar'
+        ? 'مدفوعة'
+        : 'Paid',
+    items: (ord?.items || []).map(it => ({
+      barcode: it.barcode,
+      productName: it.productName,
+      unit: it.unit,
+      quantity: it.quantity,
+      unitPriceIQD: it.unitPriceIQD,
+      totalIQD: it.totalPriceIQD
+    })),
+    totalAmountIQD: ord?.subtotalIQD || ledger?.debitIQD || 0,
+    footerNote:
+      ledger?.descriptionAr ||
+      (lang === 'ar'
+        ? '✅ فاتورة إلكترونية موثقة صادرة عبر منصة دليل الخيرات.'
+        : '✅ Verified electronic invoice issued via Dalil Al-Khairat.'),
+    autoPrint: req.query.download !== '1'
+  });
+
+  if (req.query.download === '1') {
+    const safeName = ref.replace(/[^a-zA-Z0-9_-]/g, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="invoice-${safeName}.html"`);
+  }
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  return res.send(html);
+});
+
 // ================= 5. STORE INVENTORY & POS =================
 apiRouter.get('/store/inventory/:storeId', (req: Request, res: Response) => {
   try {
