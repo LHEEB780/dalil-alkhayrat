@@ -39,7 +39,8 @@ import {
   VanExpenseRecord,
   VanExpenseCategory,
   VanReturnRecord,
-  VanUnloadRecord
+  VanUnloadRecord,
+  AdminAuditLog
 } from './types.ts';
 import {
   validateSupplierOrderRules,
@@ -123,6 +124,78 @@ class AppDataStore {
   creditUpgradeRequests: CreditUpgradeRequest[] = [];
   storeStaff: StoreStaffAccount[] = [];
   supplierInventoryBatches: SupplierInventoryBatch[] = [...initialSupplierInventoryBatches];
+  auditLogs: AdminAuditLog[] = [
+    {
+      id: 'aud_seed_1',
+      at: '2026-11-24T10:15:00.000Z',
+      actorId: 'admin_root',
+      actorName: 'المدير العام (Super Admin)',
+      action: 'supplier.verify',
+      entityType: 'supplier',
+      entityId: 'supp_rafidain',
+      summaryAr: 'اعتماد وتوثيق شركة الرافدين للتجارة العامة والأغذية كمورد تجاري موثق',
+      summaryEn: 'Verified Al-Rafidain General Trading & Food Co. as a verified business supplier',
+      before: { verificationStatus: 'pending' },
+      after: { verificationStatus: 'verified_business' },
+      reason: 'استكمال السجل التجاري وإجازة الاستيراد المصدقة'
+    },
+    {
+      id: 'aud_seed_2',
+      at: '2026-11-23T14:40:00.000Z',
+      actorId: 'admin_root',
+      actorName: 'المدير العام (Super Admin)',
+      action: 'credit.block_account',
+      entityType: 'credit_account',
+      entityId: 'cred_karrada_rafidain',
+      summaryAr: 'تعليق التسهيل الائتماني لحساب أسواق دجلة الخير - الكرادة لتجاوز فترة السداد 60 يوماً',
+      summaryEn: 'Suspended credit facility for Tigris Khair Markets - Karrada due to >60d overdue aging',
+      before: { isBlocked: false },
+      after: { isBlocked: true },
+      reason: 'تجاوز سقف التأخير المسموح في شريحة 61-90 يوماً'
+    },
+    {
+      id: 'aud_seed_3',
+      at: '2026-11-21T09:05:00.000Z',
+      actorId: 'admin_root',
+      actorName: 'المدير العام (Super Admin)',
+      action: 'supplier.verify',
+      entityType: 'supplier',
+      entityId: 'supp_dijla',
+      summaryAr: 'منح شارة موزع معتمد لمجموعة دجلة للمشروبات والسلع الغذائية',
+      summaryEn: 'Granted Authorized Distributor status to Dijla Beverages & Food Group',
+      before: { verificationStatus: 'verified' },
+      after: { verificationStatus: 'authorized_distributor' },
+      reason: 'تقديم كتاب الوكالة الحصرية المصدق'
+    },
+    {
+      id: 'aud_seed_4',
+      at: '2026-11-18T16:20:00.000Z',
+      actorId: 'admin_root',
+      actorName: 'المدير العام (Super Admin)',
+      action: 'order.assign_driver',
+      entityType: 'sub_order',
+      entityId: 'ord_sub_101',
+      summaryAr: 'متابعة وتثبيت إسناد الطلبية الفرعية ord_sub_101 إلى فان أحمد كاظم البغدادي',
+      summaryEn: 'Confirmed driver assignment on sub-order ord_sub_101 to Ahmed Kadhim Al-Baghdadi',
+      before: { status: 'approved' },
+      after: { status: 'out_for_delivery', assignedDriverId: 'drv_ahmed_baghdad' },
+      reason: 'تأمين التوصيل الصباحي السريع لقاطع الكرخ والمنصور'
+    },
+    {
+      id: 'aud_seed_5',
+      at: '2026-11-15T11:30:00.000Z',
+      actorId: 'admin_root',
+      actorName: 'المدير العام (Super Admin)',
+      action: 'settings.update_rules',
+      entityType: 'platform_settings',
+      entityId: 'global_order_rules',
+      summaryAr: 'تفعيل سياسة الحد الأدنى للطلب بالقيمة المالية للمورد فقط عبر المنصة',
+      summaryEn: 'Enforced supplier-level minimum order value policy across platform',
+      before: { enforceOfferMinQuantityDefault: true },
+      after: { enforceOfferMinQuantityDefault: false },
+      reason: 'تبسيط تجربة الشراء بالجملة للتجار الصغار'
+    }
+  ];
   supplierReviews: SupplierReview[] = [
     {
       id: 'rev_raf_1',
@@ -2635,6 +2708,428 @@ class AppDataStore {
     }
 
     return offer;
+  }
+
+  // ================= ADMIN OPERATIONS CENTER & AUDIT =================
+  recordAudit(
+    entry: Omit<AdminAuditLog, 'id' | 'at'> & { at?: string }
+  ): AdminAuditLog {
+    const log: AdminAuditLog = {
+      id: `aud_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      at: entry.at || new Date().toISOString(),
+      actorId: entry.actorId,
+      actorName: entry.actorName,
+      action: entry.action,
+      entityType: entry.entityType,
+      entityId: entry.entityId,
+      summaryAr: entry.summaryAr,
+      summaryEn: entry.summaryEn,
+      before: entry.before,
+      after: entry.after,
+      reason: entry.reason
+    };
+    this.auditLogs.unshift(log);
+    return log;
+  }
+
+  queryAuditLogs(params?: {
+    action?: string;
+    entityType?: string;
+    actorId?: string;
+    from?: string;
+    to?: string;
+    page?: number;
+    pageSize?: number;
+  }) {
+    let filtered = [...this.auditLogs];
+
+    if (params?.action && params.action.trim()) {
+      const q = params.action.trim().toLowerCase();
+      filtered = filtered.filter((l) => l.action.toLowerCase().includes(q));
+    }
+    if (params?.entityType && params.entityType.trim()) {
+      const et = params.entityType.trim().toLowerCase();
+      filtered = filtered.filter((l) => l.entityType.toLowerCase() === et);
+    }
+    if (params?.actorId && params.actorId.trim()) {
+      const aid = params.actorId.trim().toLowerCase();
+      filtered = filtered.filter((l) => l.actorId.toLowerCase().includes(aid));
+    }
+    if (params?.from) {
+      const fromMs = Date.parse(params.from);
+      if (Number.isFinite(fromMs)) {
+        filtered = filtered.filter((l) => Date.parse(l.at) >= fromMs);
+      }
+    }
+    if (params?.to) {
+      // If date-only YYYY-MM-DD, include entire end day
+      const toStr = params.to.length === 10 ? `${params.to}T23:59:59.999Z` : params.to;
+      const toMs = Date.parse(toStr);
+      if (Number.isFinite(toMs)) {
+        filtered = filtered.filter((l) => Date.parse(l.at) <= toMs);
+      }
+    }
+
+    filtered.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+
+    const pageSize = Math.min(100, Math.max(1, Number(params?.pageSize) || 10));
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(totalPages, Math.max(1, Number(params?.page) || 1));
+    const start = (page - 1) * pageSize;
+
+    return {
+      items: filtered.slice(start, start + pageSize),
+      total,
+      page,
+      pageSize,
+      totalPages,
+      availableActions: Array.from(new Set(this.auditLogs.map((l) => l.action))).sort(),
+      availableEntityTypes: Array.from(new Set(this.auditLogs.map((l) => l.entityType))).sort()
+    };
+  }
+
+  getAdminOverview(range: '7d' | '30d' | '90d' = '30d') {
+    const daysCount = range === '7d' ? 7 : range === '90d' ? 90 : 30;
+    const now = new Date();
+    const endMs = now.getTime();
+    const startDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    startDay.setUTCDate(startDay.getUTCDate() - (daysCount - 1));
+    const startMs = startDay.getTime();
+
+    const rangeOrders = this.subOrders.filter((o) => {
+      const ts = Date.parse(o.createdAt);
+      return Number.isFinite(ts) && ts >= startMs && ts <= endMs;
+    });
+
+    const nonCancelledOrders = rangeOrders.filter((o) => o.status !== 'cancelled');
+    const gmvIQD = nonCancelledOrders.reduce((sum, o) => sum + (Number(o.subtotalIQD) || 0), 0);
+    const ordersCount = rangeOrders.length;
+    const deliveredCount = rangeOrders.filter((o) => o.status === 'delivered').length;
+    const deliveredRatePercent =
+      ordersCount > 0 ? Math.round((deliveredCount / ordersCount) * 1000) / 10 : 0;
+    const avgOrderValueIQD =
+      nonCancelledOrders.length > 0
+        ? Math.round(gmvIQD / nonCancelledOrders.length)
+        : 0;
+
+    const getSupplierStatus = (s: SupplierProfile) =>
+      s.verificationStatus ?? (s.isVerified ? 'verified' : 'pending');
+
+    const activeSuppliersCount = this.suppliers.filter(
+      (s) => getSupplierStatus(s) !== 'pending'
+    ).length;
+    const pendingSuppliersList = this.suppliers.filter(
+      (s) => getSupplierStatus(s) === 'pending'
+    );
+    const activeStoresCount = this.stores.filter((s) => s.isVerified !== false).length;
+    const activeDriversCount = this.drivers.filter((d) => d.isActiveShift !== false).length;
+
+    const totalUsedCreditIQD = this.creditAccounts.reduce(
+      (sum, c) => sum + (Number(c.currentUsedCreditIQD) || 0),
+      0
+    );
+    const totalOverdueDebtIQD = this.creditAccounts.reduce(
+      (sum, c) =>
+        sum +
+        (Number(c.aging?.bucket31_60) || 0) +
+        (Number(c.aging?.bucket61_90) || 0) +
+        (Number(c.aging?.bucket90Plus) || 0),
+      0
+    );
+
+    const pendingCreditUpgrades = this.creditUpgradeRequests.filter(
+      (r) => r.status === 'platform_review'
+    );
+    const lowStockOffersCount = this.offers.filter(
+      (o) => Number(o.availableStock) <= 20
+    ).length;
+
+    // Daily time series within selected range
+    const dailyMap = new Map<string, { gmvIQD: number; ordersCount: number }>();
+    for (let i = 0; i < daysCount; i += 1) {
+      const d = new Date(startDay);
+      d.setUTCDate(startDay.getUTCDate() + i);
+      const isoDate = d.toISOString().slice(0, 10);
+      dailyMap.set(isoDate, { gmvIQD: 0, ordersCount: 0 });
+    }
+    for (const o of rangeOrders) {
+      const key = (o.createdAt || '').slice(0, 10);
+      const bucket = dailyMap.get(key);
+      if (!bucket) continue;
+      bucket.ordersCount += 1;
+      if (o.status !== 'cancelled') {
+        bucket.gmvIQD += Number(o.subtotalIQD) || 0;
+      }
+    }
+    const dailySeries = Array.from(dailyMap.entries()).map(([date, val]) => ({
+      date,
+      label: date.slice(5).replace('-', '/'),
+      gmvIQD: val.gmvIQD,
+      ordersCount: val.ordersCount
+    }));
+
+    // Order status distribution
+    const allStatuses: Array<
+      'pending' | 'approved' | 'assigned_driver' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'disputed'
+    > = ['pending', 'approved', 'assigned_driver', 'out_for_delivery', 'delivered', 'cancelled', 'disputed'];
+    const statusDistribution = allStatuses.map((status) => ({
+      status,
+      count: rangeOrders.filter((o) => o.status === status).length
+    }));
+
+    // Top 5 suppliers by GMV
+    const suppAgg = new Map<string, { supplierId: string; supplierName: string; gmvIQD: number; ordersCount: number }>();
+    for (const o of nonCancelledOrders) {
+      const cur = suppAgg.get(o.supplierId) || {
+        supplierId: o.supplierId,
+        supplierName: o.supplierName,
+        gmvIQD: 0,
+        ordersCount: 0
+      };
+      cur.gmvIQD += Number(o.subtotalIQD) || 0;
+      cur.ordersCount += 1;
+      suppAgg.set(o.supplierId, cur);
+    }
+    const topSuppliers = Array.from(suppAgg.values())
+      .sort((a, b) => b.gmvIQD - a.gmvIQD)
+      .slice(0, 5);
+
+    // Top 5 products by revenue
+    const prodAgg = new Map<string, { barcode: string; productName: string; revenueIQD: number; quantity: number }>();
+    for (const o of nonCancelledOrders) {
+      for (const item of o.items || []) {
+        const cur = prodAgg.get(item.barcode) || {
+          barcode: item.barcode,
+          productName: item.productName,
+          revenueIQD: 0,
+          quantity: 0
+        };
+        cur.revenueIQD += Number(item.totalPriceIQD) || 0;
+        cur.quantity += Number(item.quantity) || 0;
+        prodAgg.set(item.barcode, cur);
+      }
+    }
+    const topProducts = Array.from(prodAgg.values())
+      .sort((a, b) => b.revenueIQD - a.revenueIQD)
+      .slice(0, 5);
+
+    // Needs attention queue (live platform snapshot)
+    const needsAttention: Array<{
+      id: string;
+      type: 'pending_supplier' | 'credit_upgrade' | 'stuck_order' | 'disputed_order' | 'blocked_credit';
+      severity: 'high' | 'medium';
+      titleAr: string;
+      titleEn: string;
+      subtitleAr: string;
+      subtitleEn: string;
+      targetSection: string;
+      entityId: string;
+    }> = [];
+
+    for (const s of pendingSuppliersList) {
+      needsAttention.push({
+        id: `att_supp_${s.id}`,
+        type: 'pending_supplier',
+        severity: 'high',
+        titleAr: `مورد بانتظار التوثيق: ${s.companyName}`,
+        titleEn: `Supplier pending verification: ${s.companyName}`,
+        subtitleAr: `${s.city} • ${s.contactPerson}`,
+        subtitleEn: `${s.city} • ${s.contactPerson}`,
+        targetSection: 'suppliers',
+        entityId: s.id
+      });
+    }
+
+    for (const req of pendingCreditUpgrades) {
+      needsAttention.push({
+        id: `att_upg_${req.id}`,
+        type: 'credit_upgrade',
+        severity: 'medium',
+        titleAr: `طلب رفع حد ائتمان: ${req.storeName}`,
+        titleEn: `Credit upgrade request: ${req.storeName}`,
+        subtitleAr: `من ${req.currentLimitIQD.toLocaleString('en-US')} إلى ${req.requestedLimitIQD.toLocaleString('en-US')} د.ع`,
+        subtitleEn: `From ${req.currentLimitIQD.toLocaleString('en-US')} to ${req.requestedLimitIQD.toLocaleString('en-US')} IQD`,
+        targetSection: 'credit_upgrades',
+        entityId: req.id
+      });
+    }
+
+    const stuckCutoffMs = endMs - 24 * 60 * 60 * 1000;
+    for (const o of this.subOrders) {
+      const ts = Date.parse(o.createdAt);
+      if (o.status === 'pending' && Number.isFinite(ts) && ts < stuckCutoffMs) {
+        needsAttention.push({
+          id: `att_stuck_${o.id}`,
+          type: 'stuck_order',
+          severity: 'high',
+          titleAr: `طلب عالق أكثر من 24 ساعة (${o.id})`,
+          titleEn: `Order stuck pending >24h (${o.id})`,
+          subtitleAr: `${o.storeName} ← ${o.supplierName}`,
+          subtitleEn: `${o.storeName} ← ${o.supplierName}`,
+          targetSection: 'orders',
+          entityId: o.id
+        });
+      }
+      if (o.status === 'disputed') {
+        needsAttention.push({
+          id: `att_disp_${o.id}`,
+          type: 'disputed_order',
+          severity: 'high',
+          titleAr: `طلب بحالة نزاع مفتوح (${o.id})`,
+          titleEn: `Disputed order (${o.id})`,
+          subtitleAr: `${o.storeName} • ${(Number(o.subtotalIQD) || 0).toLocaleString('en-US')} د.ع`,
+          subtitleEn: `${o.storeName} • ${(Number(o.subtotalIQD) || 0).toLocaleString('en-US')} IQD`,
+          targetSection: 'disputes',
+          entityId: o.id
+        });
+      }
+    }
+
+    for (const acc of this.creditAccounts) {
+      if (acc.isBlocked) {
+        needsAttention.push({
+          id: `att_blk_${acc.id}`,
+          type: 'blocked_credit',
+          severity: 'medium',
+          titleAr: `حساب ائتمان موقوف: ${acc.storeName}`,
+          titleEn: `Blocked credit account: ${acc.storeName}`,
+          subtitleAr: acc.blockReason || 'يتطلب مراجعة مالية والتسوية',
+          subtitleEn: acc.blockReason || 'Requires financial review',
+          targetSection: 'credit_limits',
+          entityId: acc.id
+        });
+      }
+    }
+
+    return {
+      range,
+      kpis: {
+        gmvIQD,
+        ordersCount,
+        deliveredCount,
+        deliveredRatePercent,
+        avgOrderValueIQD,
+        activeSuppliersCount,
+        activeStoresCount,
+        activeDriversCount,
+        pendingSuppliersCount: pendingSuppliersList.length,
+        totalUsedCreditIQD,
+        totalOverdueDebtIQD,
+        pendingCreditUpgradesCount: pendingCreditUpgrades.length,
+        lowStockOffersCount
+      },
+      dailySeries,
+      statusDistribution,
+      topSuppliers,
+      topProducts,
+      needsAttention
+    };
+  }
+
+  searchAdminEntities(query: string) {
+    const q = (query || '').trim().toLowerCase();
+    if (!q) {
+      return {
+        suppliers: [],
+        stores: [],
+        drivers: [],
+        products: [],
+        orders: []
+      };
+    }
+
+    const suppliers = this.suppliers
+      .filter(
+        (s) =>
+          s.id.toLowerCase().includes(q) ||
+          s.companyName.toLowerCase().includes(q) ||
+          s.contactPerson.toLowerCase().includes(q) ||
+          s.city.toLowerCase().includes(q)
+      )
+      .slice(0, 6)
+      .map((s) => ({
+        id: s.id,
+        labelAr: s.companyName,
+        labelEn: s.companyName,
+        metaAr: `${s.city} • ${s.id}`,
+        metaEn: `${s.city} • ${s.id}`,
+        targetSection: 'suppliers' as const
+      }));
+
+    const stores = this.stores
+      .filter(
+        (s) =>
+          s.id.toLowerCase().includes(q) ||
+          s.name.toLowerCase().includes(q) ||
+          s.ownerName.toLowerCase().includes(q) ||
+          s.city.toLowerCase().includes(q)
+      )
+      .slice(0, 6)
+      .map((s) => ({
+        id: s.id,
+        labelAr: s.name,
+        labelEn: s.name,
+        metaAr: `${s.city} - ${s.district} • ${s.id}`,
+        metaEn: `${s.city} - ${s.district} • ${s.id}`,
+        targetSection: 'stores' as const
+      }));
+
+    const drivers = this.drivers
+      .filter(
+        (d) =>
+          d.id.toLowerCase().includes(q) ||
+          d.name.toLowerCase().includes(q) ||
+          d.vehiclePlate.toLowerCase().includes(q) ||
+          d.supplierName.toLowerCase().includes(q)
+      )
+      .slice(0, 6)
+      .map((d) => ({
+        id: d.id,
+        labelAr: d.name,
+        labelEn: d.name,
+        metaAr: `${d.vehiclePlate} • ${d.supplierName}`,
+        metaEn: `${d.vehiclePlate} • ${d.supplierName}`,
+        targetSection: 'drivers' as const
+      }));
+
+    const products = this.products
+      .filter(
+        (p) =>
+          p.barcode.toLowerCase().includes(q) ||
+          p.nameAr.toLowerCase().includes(q) ||
+          (p.nameEn && p.nameEn.toLowerCase().includes(q)) ||
+          p.brand.toLowerCase().includes(q)
+      )
+      .slice(0, 6)
+      .map((p) => ({
+        id: p.barcode,
+        labelAr: p.nameAr,
+        labelEn: p.nameEn || p.nameAr,
+        metaAr: `${p.brand} • ${p.barcode}`,
+        metaEn: `${p.brand} • ${p.barcode}`,
+        targetSection: 'products' as const
+      }));
+
+    const orders = this.subOrders
+      .filter(
+        (o) =>
+          o.id.toLowerCase().includes(q) ||
+          o.parentOrderId.toLowerCase().includes(q) ||
+          o.storeName.toLowerCase().includes(q) ||
+          o.supplierName.toLowerCase().includes(q)
+      )
+      .slice(0, 6)
+      .map((o) => ({
+        id: o.id,
+        labelAr: `${o.id} — ${o.storeName}`,
+        labelEn: `${o.id} — ${o.storeName}`,
+        metaAr: `${o.supplierName} • ${o.subtotalIQD.toLocaleString('en-US')} د.ع`,
+        metaEn: `${o.supplierName} • ${o.subtotalIQD.toLocaleString('en-US')} IQD`,
+        targetSection: 'orders' as const
+      }));
+
+    return { suppliers, stores, drivers, products, orders };
   }
 }
 

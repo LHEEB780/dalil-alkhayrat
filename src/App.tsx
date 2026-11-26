@@ -26,6 +26,7 @@ import { AllCategoriesView } from './views/AllCategoriesView.tsx';
 import { CategoryBranchesView } from './views/CategoryBranchesView.tsx';
 import { AllBrandsView } from './views/AllBrandsView.tsx';
 import { ApiDocsView } from './views/ApiDocsView.tsx';
+import { AdminConsoleView } from './views/admin/AdminConsoleView.tsx';
 
 import {
   ProductWithOffers,
@@ -458,7 +459,7 @@ export default function App() {
         setActiveTab('b2c');
         break;
       case 'admin':
-        setActiveTab('api_docs');
+        setActiveTab('admin_console');
         break;
       default:
         setActiveTab('marketplace');
@@ -1077,6 +1078,16 @@ export default function App() {
 
         {activeTab === 'api_docs' && (
           <ApiDocsView />
+        )}
+
+        {activeTab === 'admin_console' && userSession?.role === 'admin' && (
+          <AdminConsoleView
+            language={language}
+            currency={currency}
+            userSession={userSession}
+            onLanguageChange={setLanguage}
+            onLogout={handleLogout}
+          />
         )}
 
         {activeTab === 'account_hub' && userSession && !isCashierUser && (

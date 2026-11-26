@@ -74,6 +74,7 @@ export type AppTab =
   | 'store_management'
   | 'low_stock_alerts'
   | 'api_docs'
+  | 'admin_console'
   | 'account_hub';
 
 export type AccountSectionId =

@@ -231,6 +231,69 @@ export interface TranslationDictionary {
   storageFrozen: string;
   storageDry: string;
   storageControlled: string;
+
+  // Operations & Admin Center
+  adminConsoleTitle: string;
+  adminConsoleSubtitle: string;
+  adminConsoleBadge: string;
+  adminSoleSuperAdminTitle: string;
+  adminSoleSuperAdminDesc: string;
+  adminSearchPlaceholder: string;
+  adminSearching: string;
+  adminSearchNoResults: string;
+  adminNeedsAttentionTitle: string;
+  adminNeedsAttentionEmpty: string;
+  adminRange7d: string;
+  adminRange30d: string;
+  adminRange90d: string;
+  adminRefresh: string;
+  adminRetry: string;
+  adminLoadError: string;
+  adminKpiGmv: string;
+  adminKpiOrders: string;
+  adminKpiDelivered: string;
+  adminKpiAvgOrder: string;
+  adminKpiActiveAccounts: string;
+  adminKpiSuppliersShort: string;
+  adminKpiStoresShort: string;
+  adminKpiDriversShort: string;
+  adminKpiPendingSuppliers: string;
+  adminKpiUsedCredit: string;
+  adminKpiOverdueDebt: string;
+  adminKpiCreditUpgrades: string;
+  adminKpiLowStock: string;
+  adminChartTitle: string;
+  adminChartSubtitle: string;
+  adminChartRevenueLabel: string;
+  adminChartOrdersLabel: string;
+  adminStatusDistTitle: string;
+  adminTopSuppliersTitle: string;
+  adminTopProductsTitle: string;
+  adminNoDataInRange: string;
+  adminComingSoonBadge: string;
+  adminEditingComingSoon: string;
+  adminComingSoonNote: string;
+  adminBackToOverview: string;
+  adminAuditTitle: string;
+  adminAuditSubtitle: string;
+  adminAuditFilterAction: string;
+  adminAuditFilterEntity: string;
+  adminAuditFilterActor: string;
+  adminAuditFilterFrom: string;
+  adminAuditFilterTo: string;
+  adminAuditResetFilters: string;
+  adminAuditEmpty: string;
+  adminAuditBeforeAfter: string;
+  adminAuditReasonLabel: string;
+  adminRolesTitle: string;
+  adminRolesSubtitle: string;
+  adminRoleActiveLabel: string;
+  adminRoleTemplateLabel: string;
+  adminPermissionsCount: (count: number) => string;
+  adminSensitiveBadge: string;
+  adminConfirmReasonLabel: string;
+  adminConfirmReasonPlaceholder: string;
+  adminConfirmReasonRequired: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -466,7 +529,70 @@ export const translations: Record<Language, TranslationDictionary> = {
     storageChilled: 'مبرد',
     storageFrozen: 'مجمد',
     storageDry: 'جاف',
-    storageControlled: 'تخزين متحكم به'
+    storageControlled: 'تخزين متحكم به',
+
+    // Operations & Admin Center
+    adminConsoleTitle: 'مركز عمليات المنصة والإدارة',
+    adminConsoleSubtitle: 'لوحة القيادة التنفيذية لمتابعة التجارة والائتمان وسجل التدقيق',
+    adminConsoleBadge: 'إدارة المنصة',
+    adminSoleSuperAdminTitle: 'حساب المدير العام الوحيد (Super Admin)',
+    adminSoleSuperAdminDesc: 'هذا الحساب يمتلك الصلاحيات الكاملة حالياً. قوالب الأدوار الأخرى جاهزة ومعطّلة لحين تفعيل تعدد المشرفين في المراحل القادمة.',
+    adminSearchPlaceholder: 'ابحث عن مورد، متجر، سائق، منتج، أو رقم طلب...',
+    adminSearching: 'جاري البحث في المنصة...',
+    adminSearchNoResults: 'لا توجد نتائج مطابقة لبحثك',
+    adminNeedsAttentionTitle: 'عناصر تحتاج انتباهك',
+    adminNeedsAttentionEmpty: 'لا توجد تنبيهات حرجة حالياً — جميع العمليات مستقرة.',
+    adminRange7d: 'آخر 7 أيام',
+    adminRange30d: 'آخر 30 يوماً',
+    adminRange90d: 'آخر 90 يوماً',
+    adminRefresh: 'تحديث',
+    adminRetry: 'إعادة المحاولة',
+    adminLoadError: 'تعذر تحميل بيانات لوحة العمليات',
+    adminKpiGmv: 'حجم التداول (GMV)',
+    adminKpiOrders: 'الطلبات غير الملغاة',
+    adminKpiDelivered: 'المُسلَّمة ونسبة الإتمام',
+    adminKpiAvgOrder: 'متوسط قيمة الطلب',
+    adminKpiActiveAccounts: 'الشركاء النشطون',
+    adminKpiSuppliersShort: 'مورد',
+    adminKpiStoresShort: 'متجر',
+    adminKpiDriversShort: 'سائق',
+    adminKpiPendingSuppliers: 'موردون بانتظار التوثيق',
+    adminKpiUsedCredit: 'إجمالي الائتمان المستخدم',
+    adminKpiOverdueDebt: 'ديون متأخرة (+30 يوم)',
+    adminKpiCreditUpgrades: 'طلبات رفع الحد المعلقة',
+    adminKpiLowStock: 'عروض بمخزون منخفض (≤20)',
+    adminChartTitle: 'اتجاه المبيعات والطلبات اليومية',
+    adminChartSubtitle: 'حجم التداول اليومي (د.ع) وعدد الطلبات خلال الفترة المختارة',
+    adminChartRevenueLabel: 'المبيعات (د.ع)',
+    adminChartOrdersLabel: 'عدد الطلبات',
+    adminStatusDistTitle: 'توزيع حالات الطلبات',
+    adminTopSuppliersTitle: 'أعلى 5 موردين حسب المبيعات',
+    adminTopProductsTitle: 'أعلى 5 منتجات حسب الإيرادات',
+    adminNoDataInRange: 'لا توجد طلبات مسجلة في هذا النطاق الزمني',
+    adminComingSoonBadge: 'قريباً',
+    adminEditingComingSoon: 'التعديل قريباً',
+    adminComingSoonNote: 'هذا القسم ضمن خارطة مراحل بناء مركز العمليات (المراحل 2–7)، وتتوفر حالياً بياناته في اللوحة الرئيسية والبحث الشامل.',
+    adminBackToOverview: 'العودة إلى لوحة المؤشرات',
+    adminAuditTitle: 'سجل التدقيق والعمليات الحساسة',
+    adminAuditSubtitle: 'توثيق غير قابل للتعديل لجميع الإجراءات الإدارية والسبب والبيانات قبل وبعد التنفيذ',
+    adminAuditFilterAction: 'نوع الإجراء',
+    adminAuditFilterEntity: 'نوع الكيان',
+    adminAuditFilterActor: 'معرّف المنفّذ',
+    adminAuditFilterFrom: 'من تاريخ',
+    adminAuditFilterTo: 'إلى تاريخ',
+    adminAuditResetFilters: 'إعادة ضبط الفلاتر',
+    adminAuditEmpty: 'لا توجد سجلات مطابقة لمعايير التصفية الحالية',
+    adminAuditBeforeAfter: 'تفاصيل التغيير (قبل / بعد)',
+    adminAuditReasonLabel: 'السبب الموثّق:',
+    adminRolesTitle: 'الأدوار ومصفوفة الصلاحيات',
+    adminRolesSubtitle: 'عرض هيكلي للأدوار الوظيفية وصلاحياتها (قراءة فقط في المرحلة 1)',
+    adminRoleActiveLabel: 'نشط حالياً',
+    adminRoleTemplateLabel: 'قالب غير مفعّل',
+    adminPermissionsCount: (count) => `${count} صلاحية`,
+    adminSensitiveBadge: 'حسّاس',
+    adminConfirmReasonLabel: 'سبب الإجراء (إلزامي للتوثيق في سجل التدقيق)',
+    adminConfirmReasonPlaceholder: 'اكتب السبب الإداري الواضح قبل التأكيد...',
+    adminConfirmReasonRequired: 'يرجى إدخال سبب واضح لا يقل عن 3 أحرف للمتابعة'
   },
   en: {
     // Brand & General
@@ -700,7 +826,70 @@ export const translations: Record<Language, TranslationDictionary> = {
     storageChilled: 'Chilled',
     storageFrozen: 'Frozen',
     storageDry: 'Dry',
-    storageControlled: 'Controlled'
+    storageControlled: 'Controlled',
+
+    // Operations & Admin Center
+    adminConsoleTitle: 'Platform Operations & Admin Center',
+    adminConsoleSubtitle: 'Executive hub for marketplace volume, credit exposure, and audit compliance',
+    adminConsoleBadge: 'Platform Admin',
+    adminSoleSuperAdminTitle: 'Sole Super Admin Account',
+    adminSoleSuperAdminDesc: 'Your active session holds full Super Admin permissions. Additional role templates are pre-configured and inactive until multi-admin management launches.',
+    adminSearchPlaceholder: 'Search suppliers, stores, drivers, products, or order IDs...',
+    adminSearching: 'Searching platform...',
+    adminSearchNoResults: 'No matching entities found',
+    adminNeedsAttentionTitle: 'Needs Attention Queue',
+    adminNeedsAttentionEmpty: 'No critical alerts right now — platform operations look healthy.',
+    adminRange7d: 'Last 7 days',
+    adminRange30d: 'Last 30 days',
+    adminRange90d: 'Last 90 days',
+    adminRefresh: 'Refresh',
+    adminRetry: 'Retry',
+    adminLoadError: 'Failed to load operations overview',
+    adminKpiGmv: 'Gross Merchandise Value (GMV)',
+    adminKpiOrders: 'Non-Cancelled Orders',
+    adminKpiDelivered: 'Delivered & Completion Rate',
+    adminKpiAvgOrder: 'Average Order Value',
+    adminKpiActiveAccounts: 'Active Ecosystem Partners',
+    adminKpiSuppliersShort: 'Suppliers',
+    adminKpiStoresShort: 'Stores',
+    adminKpiDriversShort: 'Drivers',
+    adminKpiPendingSuppliers: 'Suppliers Pending Verification',
+    adminKpiUsedCredit: 'Total Used Credit',
+    adminKpiOverdueDebt: 'Overdue Debt (>30d)',
+    adminKpiCreditUpgrades: 'Pending Credit Upgrades',
+    adminKpiLowStock: 'Low Stock Offers (≤20)',
+    adminChartTitle: 'Daily Sales & Order Volume',
+    adminChartSubtitle: 'Daily GMV (IQD) and order count across the selected timeframe',
+    adminChartRevenueLabel: 'GMV (IQD)',
+    adminChartOrdersLabel: 'Orders',
+    adminStatusDistTitle: 'Order Status Distribution',
+    adminTopSuppliersTitle: 'Top 5 Suppliers by GMV',
+    adminTopProductsTitle: 'Top 5 Products by Revenue',
+    adminNoDataInRange: 'No orders recorded in this date range',
+    adminComingSoonBadge: 'Coming Soon',
+    adminEditingComingSoon: 'Editing Coming Soon',
+    adminComingSoonNote: 'This module is scheduled for Phases 2–7 of the Operations Center rollout. Live summary metrics remain accessible from Overview & Global Search.',
+    adminBackToOverview: 'Back to Operations Overview',
+    adminAuditTitle: 'Operations Audit Logs',
+    adminAuditSubtitle: 'Immutable chronological record of administrative actions, reasons, and before/after snapshots',
+    adminAuditFilterAction: 'Action Code',
+    adminAuditFilterEntity: 'Entity Type',
+    adminAuditFilterActor: 'Actor ID',
+    adminAuditFilterFrom: 'From Date',
+    adminAuditFilterTo: 'To Date',
+    adminAuditResetFilters: 'Reset Filters',
+    adminAuditEmpty: 'No audit log entries match the selected filters',
+    adminAuditBeforeAfter: 'Change Snapshot (Before / After)',
+    adminAuditReasonLabel: 'Recorded Reason:',
+    adminRolesTitle: 'Admin Roles & Permissions Matrix',
+    adminRolesSubtitle: 'Read-only inspection of built-in role templates and permission groups (Phase 1)',
+    adminRoleActiveLabel: 'Currently Active',
+    adminRoleTemplateLabel: 'Inactive Template',
+    adminPermissionsCount: (count) => `${count} permissions`,
+    adminSensitiveBadge: 'Sensitive',
+    adminConfirmReasonLabel: 'Action Reason (mandatory for Audit Log)',
+    adminConfirmReasonPlaceholder: 'Enter a clear administrative reason before confirming...',
+    adminConfirmReasonRequired: 'Please enter a clear reason (at least 3 characters) to proceed'
   }
 };
 

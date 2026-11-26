@@ -609,4 +609,17 @@ export interface VanUnloadRecord {
   createdAt: string;
 }
 
-
+export interface AdminAuditLog {
+  id: string;
+  at: string; // ISO timestamp
+  actorId: string;
+  actorName: string;
+  action: string; // e.g., 'supplier.suspend'
+  entityType: string;
+  entityId: string;
+  summaryAr: string;
+  summaryEn?: string;
+  before?: unknown;
+  after?: unknown;
+  reason?: string;
+}
