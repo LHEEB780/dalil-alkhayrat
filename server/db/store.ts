@@ -40,7 +40,12 @@ import {
   VanExpenseCategory,
   VanReturnRecord,
   VanUnloadRecord,
-  AdminAuditLog
+  AdminAuditLog,
+  AccountStatus,
+  AdminInternalNote,
+  AccountKycInfo,
+  KycChecklistItem,
+  KycChecklistKey
 } from './types.ts';
 import {
   validateSupplierOrderRules,
@@ -124,6 +129,57 @@ class AppDataStore {
   creditUpgradeRequests: CreditUpgradeRequest[] = [];
   storeStaff: StoreStaffAccount[] = [];
   supplierInventoryBatches: SupplierInventoryBatch[] = [...initialSupplierInventoryBatches];
+
+  constructor() {
+    this.storeStaff = [
+      {
+        id: 'staff_mansoor_cashier',
+        storeId: 'store_almansoor',
+        storeName: 'سوبرماركت المنصور المركزي',
+        name: 'حسين علاء الكاظمي',
+        role: 'cashier',
+        phone: '07712223344',
+        branchId: 'branch_main',
+        branchName: 'الفرع الرئيسي - المنصور',
+        isActive: true,
+        accountStatus: 'active',
+        kyc: {
+          checklist: [
+            { key: 'commercial_license', status: 'approved' },
+            { key: 'owner_id', status: 'approved' },
+            { key: 'address_proof', status: 'approved' },
+            { key: 'phone_verified', status: 'approved' }
+          ]
+        },
+        passwordHash: this.hashStaffPassword('1234'),
+        createdAt: '2026-09-12T08:00:00.000Z',
+        lastLoginAt: '2026-11-24T09:15:00.000Z'
+      },
+      {
+        id: 'staff_karrada_accountant',
+        storeId: 'store_karrada',
+        storeName: 'أسواق دجلة الخير - الكرادة',
+        name: 'نور الهدى صباح',
+        role: 'accountant',
+        phone: '07708889911',
+        branchId: 'branch_karrada',
+        branchName: 'فرع الكرادة داخل',
+        isActive: true,
+        accountStatus: 'active',
+        kyc: {
+          checklist: [
+            { key: 'commercial_license', status: 'approved' },
+            { key: 'owner_id', status: 'approved' },
+            { key: 'address_proof', status: 'approved' },
+            { key: 'phone_verified', status: 'approved' }
+          ]
+        },
+        passwordHash: this.hashStaffPassword('1234'),
+        createdAt: '2026-10-03T10:30:00.000Z',
+        lastLoginAt: '2026-11-23T16:40:00.000Z'
+      }
+    ];
+  }
   auditLogs: AdminAuditLog[] = [
     {
       id: 'aud_seed_1',
@@ -357,16 +413,67 @@ class AppDataStore {
     return this.deliveryZones;
   }
 
+  // ================= CENTRALIZED ACCOUNT OPERABILITY HELPERS =================
+  getSupplierAccountStatus(s: SupplierProfile): AccountStatus {
+    return s.accountStatus || 'active';
+  }
+
+  getSupplierVerificationStatus(s: SupplierProfile): VerificationStatus {
+    return s.verificationStatus ?? (s.isVerified ? 'verified' : 'pending');
+  }
+
+  isSupplierOperable(s: SupplierProfile): boolean {
+    return (
+      this.getSupplierAccountStatus(s) === 'active' &&
+      this.getSupplierVerificationStatus(s) !== 'pending'
+    );
+  }
+
+  getStoreAccountStatus(st: StoreProfile): AccountStatus {
+    return st.accountStatus || 'active';
+  }
+
+  getStoreVerificationStatus(st: StoreProfile): 'pending' | 'verified' {
+    return st.verificationStatus ?? (st.isVerified === false ? 'pending' : 'verified');
+  }
+
+  isStoreOperable(st: StoreProfile): boolean {
+    return this.getStoreAccountStatus(st) === 'active';
+  }
+
+  getDriverAccountStatus(d: DriverProfile): AccountStatus {
+    return d.accountStatus || 'active';
+  }
+
+  assertDriverOperable(driverId: string): DriverProfile {
+    const driver = this.drivers.find(d => d.id === driverId);
+    if (!driver) {
+      throw new Error('السائق غير موجود');
+    }
+    if (this.getDriverAccountStatus(driver) !== 'active') {
+      throw new Error(`لا يمكن تنفيذ الإجراء: حساب السائق (${driver.name}) موقوف أو غير نشط حالياً`);
+    }
+    return driver;
+  }
+
+  getStaffAccountStatus(staff: StoreStaffAccount): AccountStatus {
+    if (staff.accountStatus) return staff.accountStatus;
+    return staff.isActive === false ? 'suspended' : 'active';
+  }
+
   getSuppliers(params?: {
     deliveryZoneId?: string;
     businessType?: SellerBusinessType;
     verificationStatus?: VerificationStatus;
   }): SupplierProfile[] {
-    let result = this.suppliers.map(s => ({
-      ...s,
-      businessType: s.businessType ?? 'wholesaler',
-      verificationStatus: s.verificationStatus ?? (s.isVerified ? 'verified' : 'pending')
-    }));
+    let result = this.suppliers
+      .filter(s => this.isSupplierOperable(s))
+      .map(s => ({
+        ...s,
+        businessType: s.businessType ?? 'wholesaler',
+        verificationStatus: this.getSupplierVerificationStatus(s),
+        accountStatus: this.getSupplierAccountStatus(s)
+      }));
 
     if (params?.deliveryZoneId) {
       result = result.filter(s => s.serviceZoneIds.includes(params.deliveryZoneId!));
@@ -418,13 +525,14 @@ class AppDataStore {
       searchScoreMap = searchOutcome.scoreMap;
     }
 
-    const eligibleSupplierIds = params?.deliveryZoneId
-      ? new Set(this.getSuppliersByZone(params.deliveryZoneId).map(s => s.id))
-      : null;
+    const activeSuppliers = this.getSuppliers(
+      params?.deliveryZoneId ? { deliveryZoneId: params.deliveryZoneId } : undefined
+    );
+    const eligibleSupplierIds = new Set(activeSuppliers.map(s => s.id));
 
     const offersByBarcode = new Map<string, SupplierOffer[]>();
     for (const o of this.offers) {
-      if (eligibleSupplierIds && !eligibleSupplierIds.has(o.supplierId)) continue;
+      if (!eligibleSupplierIds.has(o.supplierId)) continue;
       let list = offersByBarcode.get(o.barcode);
       if (!list) {
         list = [];
@@ -466,7 +574,7 @@ class AppDataStore {
       };
     });
 
-    const baseMapped = eligibleSupplierIds
+    const baseMapped = params?.deliveryZoneId
       ? mapped.filter(p => p.offers.length > 0)
       : mapped;
 
@@ -726,6 +834,9 @@ class AppDataStore {
   }): ParentOrder {
     const store = this.stores.find(s => s.id === params.storeId);
     if (!store) throw new Error('Store profile not found');
+    if (!this.isStoreOperable(store)) {
+      throw new Error(`حساب المتجر (${store.name}) موقوف أو غير نشط حالياً ولا يمكنه إتمام الطلبات`);
+    }
 
     if (!params.items || params.items.length === 0) {
       throw new Error('بيانات الطلب غير مكتملة');
@@ -751,11 +862,13 @@ class AppDataStore {
         throw new Error(`Offer or product not found for barcode ${reqItem.barcode}`);
       }
 
-      if (params.deliveryZoneId) {
-        const supplier = this.suppliers.find(s => s.id === offer.supplierId);
-        if (supplier && !supplier.serviceZoneIds.includes(params.deliveryZoneId)) {
-          throw new Error(`المورد (${supplier.companyName}) لا يغطي منطقة التوصيل المختارة حالياً`);
-        }
+      const supplier = this.suppliers.find(s => s.id === offer.supplierId);
+      if (!supplier || !this.isSupplierOperable(supplier)) {
+        throw new Error(`لا يمكن إتمام الطلب: حساب المورد (${offer.supplierName}) موقوف أو غير نشط حالياً`);
+      }
+
+      if (params.deliveryZoneId && !supplier.serviceZoneIds.includes(params.deliveryZoneId)) {
+        throw new Error(`المورد (${supplier.companyName}) لا يغطي منطقة التوصيل المختارة حالياً`);
       }
 
       offerQuantities[offer.id] = (offerQuantities[offer.id] || 0) + qty;
@@ -1257,8 +1370,7 @@ class AppDataStore {
     quantity: number;
     unitPriceIQD?: number;
   }): VanInventoryItem {
-    const driver = this.drivers.find(d => d.id === params.driverId);
-    if (!driver) throw new Error('السائق غير موجود');
+    const driver = this.assertDriverOperable(params.driverId);
     const qty = Math.floor(Number(params.quantity));
     if (!Number.isFinite(qty) || qty <= 0) {
       throw new Error('كمية التحميل يجب أن تكون أكبر من صفر');
@@ -1309,8 +1421,7 @@ class AppDataStore {
     barcode: string;
     delta: number;
   }): VanInventoryItem {
-    const driver = this.drivers.find(d => d.id === params.driverId);
-    if (!driver) throw new Error('السائق غير موجود');
+    this.assertDriverOperable(params.driverId);
     const delta = Math.trunc(Number(params.delta));
     if (!Number.isFinite(delta) || delta === 0) {
       throw new Error('مقدار التعديل غير صالح');
@@ -1347,8 +1458,7 @@ class AppDataStore {
     items: { barcode: string; quantity: number }[];
     notes?: string;
   }): VanLoadRequest {
-    const driver = this.drivers.find(d => d.id === params.driverId);
-    if (!driver) throw new Error('السائق غير موجود');
+    const driver = this.assertDriverOperable(params.driverId);
     if (!Array.isArray(params.items) || params.items.length === 0) {
       throw new Error('يرجى اختيار صنف واحد على الأقل لطلب تجهيز الفان');
     }
@@ -2624,7 +2734,7 @@ class AppDataStore {
     if (!this.verifyStaffPassword(password, staff.passwordHash)) {
       return { status: 'invalid_credentials' };
     }
-    if (!staff.isActive) {
+    if (!staff.isActive || this.getStaffAccountStatus(staff) !== 'active') {
       return { status: 'inactive' };
     }
     staff.lastLoginAt = new Date().toISOString();
@@ -2813,17 +2923,21 @@ class AppDataStore {
         ? Math.round(gmvIQD / nonCancelledOrders.length)
         : 0;
 
-    const getSupplierStatus = (s: SupplierProfile) =>
-      s.verificationStatus ?? (s.isVerified ? 'verified' : 'pending');
-
-    const activeSuppliersCount = this.suppliers.filter(
-      (s) => getSupplierStatus(s) !== 'pending'
-    ).length;
+    const activeSuppliersCount = this.suppliers.filter((s) => this.isSupplierOperable(s)).length;
     const pendingSuppliersList = this.suppliers.filter(
-      (s) => getSupplierStatus(s) === 'pending'
+      (s) =>
+        this.getSupplierAccountStatus(s) === 'active' &&
+        this.getSupplierVerificationStatus(s) === 'pending'
     );
-    const activeStoresCount = this.stores.filter((s) => s.isVerified !== false).length;
-    const activeDriversCount = this.drivers.filter((d) => d.isActiveShift !== false).length;
+    const pendingStoresList = this.stores.filter(
+      (st) =>
+        this.getStoreAccountStatus(st) === 'active' &&
+        this.getStoreVerificationStatus(st) === 'pending'
+    );
+    const activeStoresCount = this.stores.filter((st) => this.isStoreOperable(st)).length;
+    const activeDriversCount = this.drivers.filter(
+      (d) => this.getDriverAccountStatus(d) === 'active'
+    ).length;
 
     const totalUsedCreditIQD = this.creditAccounts.reduce(
       (sum, c) => sum + (Number(c.currentUsedCreditIQD) || 0),
@@ -2917,7 +3031,7 @@ class AppDataStore {
     // Needs attention queue (live platform snapshot)
     const needsAttention: Array<{
       id: string;
-      type: 'pending_supplier' | 'credit_upgrade' | 'stuck_order' | 'disputed_order' | 'blocked_credit';
+      type: 'pending_supplier' | 'pending_store' | 'credit_upgrade' | 'stuck_order' | 'disputed_order' | 'blocked_credit';
       severity: 'high' | 'medium';
       titleAr: string;
       titleEn: string;
@@ -2938,6 +3052,20 @@ class AppDataStore {
         subtitleEn: `${s.city} • ${s.contactPerson}`,
         targetSection: 'suppliers',
         entityId: s.id
+      });
+    }
+
+    for (const st of pendingStoresList) {
+      needsAttention.push({
+        id: `att_store_${st.id}`,
+        type: 'pending_store',
+        severity: 'medium',
+        titleAr: `متجر بانتظار التوثيق: ${st.name}`,
+        titleEn: `Store pending verification: ${st.name}`,
+        subtitleAr: `${st.city} • ${st.ownerName}`,
+        subtitleEn: `${st.city} • ${st.ownerName}`,
+        targetSection: 'stores',
+        entityId: st.id
       });
     }
 
@@ -3014,6 +3142,7 @@ class AppDataStore {
         activeStoresCount,
         activeDriversCount,
         pendingSuppliersCount: pendingSuppliersList.length,
+        pendingStoresCount: pendingStoresList.length,
         totalUsedCreditIQD,
         totalOverdueDebtIQD,
         pendingCreditUpgradesCount: pendingCreditUpgrades.length,
@@ -3130,6 +3259,881 @@ class AppDataStore {
       }));
 
     return { suppliers, stores, drivers, products, orders };
+  }
+
+  // ================= ADMIN PHASE 2: ACCOUNT & VERIFICATION MANAGEMENT =================
+  private defaultKycChecklist(): KycChecklistItem[] {
+    return [
+      { key: 'commercial_license', status: 'pending' },
+      { key: 'owner_id', status: 'pending' },
+      { key: 'address_proof', status: 'pending' },
+      { key: 'phone_verified', status: 'pending' }
+    ];
+  }
+
+  private resolveAccountRecord(
+    type: 'suppliers' | 'stores' | 'drivers' | 'staff',
+    id: string
+  ):
+    | { kind: 'suppliers'; record: SupplierProfile; entityType: string; displayName: string }
+    | { kind: 'stores'; record: StoreProfile; entityType: string; displayName: string }
+    | { kind: 'drivers'; record: DriverProfile; entityType: string; displayName: string }
+    | { kind: 'staff'; record: StoreStaffAccount; entityType: string; displayName: string }
+    | null {
+    if (type === 'suppliers') {
+      const s = this.suppliers.find((x) => x.id === id);
+      return s ? { kind: 'suppliers', record: s, entityType: 'supplier', displayName: s.companyName } : null;
+    }
+    if (type === 'stores') {
+      const st = this.stores.find((x) => x.id === id);
+      return st ? { kind: 'stores', record: st, entityType: 'store', displayName: st.name } : null;
+    }
+    if (type === 'drivers') {
+      const d = this.drivers.find((x) => x.id === id);
+      return d ? { kind: 'drivers', record: d, entityType: 'driver', displayName: d.name } : null;
+    }
+    const staff = this.storeStaff.find((x) => x.id === id);
+    return staff ? { kind: 'staff', record: staff, entityType: 'store_staff', displayName: staff.name } : null;
+  }
+
+  private getEffectiveLifecycleState(
+    type: 'suppliers' | 'stores' | 'drivers' | 'staff',
+    record: any
+  ): 'pending' | 'active' | 'suspended' | 'rejected' | 'archived' {
+    if (type === 'suppliers') {
+      const accStatus = this.getSupplierAccountStatus(record as SupplierProfile);
+      if (accStatus !== 'active') return accStatus;
+      return this.getSupplierVerificationStatus(record as SupplierProfile) === 'pending' ? 'pending' : 'active';
+    }
+    if (type === 'stores') {
+      const accStatus = this.getStoreAccountStatus(record as StoreProfile);
+      if (accStatus !== 'active') return accStatus;
+      return this.getStoreVerificationStatus(record as StoreProfile) === 'pending' ? 'pending' : 'active';
+    }
+    if (type === 'drivers') {
+      return this.getDriverAccountStatus(record as DriverProfile);
+    }
+    return this.getStaffAccountStatus(record as StoreStaffAccount);
+  }
+
+  getAllowedAdminAccountActions(
+    type: 'suppliers' | 'stores' | 'drivers' | 'staff',
+    record: any
+  ): Array<'approve' | 'reject' | 'suspend' | 'reactivate' | 'archive'> {
+    const state = this.getEffectiveLifecycleState(type, record);
+    switch (state) {
+      case 'pending':
+        return ['approve', 'reject'];
+      case 'active':
+        return ['suspend', 'archive'];
+      case 'suspended':
+        return ['reactivate', 'archive'];
+      case 'rejected':
+        return ['approve'];
+      case 'archived':
+        return ['reactivate'];
+      default:
+        return [];
+    }
+  }
+
+  private enrichAccountListItem(
+    type: 'suppliers' | 'stores' | 'drivers' | 'staff',
+    raw: any
+  ) {
+    const lifecycleState = this.getEffectiveLifecycleState(type, raw);
+    const allowedActions = this.getAllowedAdminAccountActions(type, raw);
+    if (type === 'suppliers') {
+      const s = raw as SupplierProfile;
+      const suppOrders = this.subOrders.filter((o) => o.supplierId === s.id);
+      const gmvIQD = suppOrders
+        .filter((o) => o.status !== 'cancelled')
+        .reduce((sum, o) => sum + (Number(o.subtotalIQD) || 0), 0);
+      return {
+        ...s,
+        accountStatus: this.getSupplierAccountStatus(s),
+        verificationStatus: this.getSupplierVerificationStatus(s),
+        lifecycleState,
+        allowedActions,
+        metrics: {
+          ordersCount: suppOrders.length,
+          gmvIQD,
+          offersCount: this.offers.filter((o) => o.supplierId === s.id).length,
+          vansCount: this.drivers.filter((d) => d.supplierId === s.id).length
+        }
+      };
+    }
+    if (type === 'stores') {
+      const st = raw as StoreProfile;
+      const storeOrders = this.subOrders.filter((o) => o.storeId === st.id);
+      const totalSpendIQD = storeOrders
+        .filter((o) => o.status !== 'cancelled')
+        .reduce((sum, o) => sum + (Number(o.subtotalIQD) || 0), 0);
+      const usedCreditIQD = this.creditAccounts
+        .filter((c) => c.storeId === st.id)
+        .reduce((sum, c) => sum + (Number(c.currentUsedCreditIQD) || 0), 0);
+      return {
+        ...st,
+        accountStatus: this.getStoreAccountStatus(st),
+        verificationStatus: this.getStoreVerificationStatus(st),
+        lifecycleState,
+        allowedActions,
+        metrics: {
+          ordersCount: storeOrders.length,
+          totalSpendIQD,
+          usedCreditIQD,
+          staffCount: this.storeStaff.filter((m) => m.storeId === st.id).length
+        }
+      };
+    }
+    if (type === 'drivers') {
+      const d = raw as DriverProfile;
+      const driverOrders = this.subOrders.filter((o) => o.assignedDriverId === d.id);
+      const driverInv = this.vanInventory.filter((v) => v.driverId === d.id);
+      return {
+        ...d,
+        accountStatus: this.getDriverAccountStatus(d),
+        lifecycleState,
+        allowedActions,
+        metrics: {
+          assignedOrdersCount: driverOrders.length,
+          deliveredCount: driverOrders.filter((o) => o.status === 'delivered').length,
+          vanRemainingUnits: driverInv.reduce((sum, i) => sum + (Number(i.remainingQuantity) || 0), 0),
+          vanStockValueIQD: driverInv.reduce(
+            (sum, i) => sum + (Number(i.remainingQuantity) || 0) * (Number(i.unitPriceIQD) || 0),
+            0
+          )
+        }
+      };
+    }
+    const staff = this.toPublicStaff(raw as StoreStaffAccount);
+    return {
+      ...staff,
+      accountStatus: this.getStaffAccountStatus(raw as StoreStaffAccount),
+      lifecycleState,
+      allowedActions,
+      metrics: {
+        isActive: staff.isActive
+      }
+    };
+  }
+
+  listAdminAccounts(
+    type: 'suppliers' | 'stores' | 'drivers' | 'staff',
+    params?: {
+      search?: string;
+      statusTab?: string;
+      accountStatus?: string;
+      verificationStatus?: string;
+      businessType?: string;
+      city?: string;
+      sortBy?: string;
+      page?: number;
+      pageSize?: number;
+    }
+  ) {
+    const rawList: any[] =
+      type === 'suppliers'
+        ? this.suppliers
+        : type === 'stores'
+        ? this.stores
+        : type === 'drivers'
+        ? this.drivers
+        : this.storeStaff;
+
+    const enrichedAll = rawList.map((item) => this.enrichAccountListItem(type, item));
+
+    const statusCounts = {
+      all: enrichedAll.length,
+      pending: enrichedAll.filter((i) => i.lifecycleState === 'pending').length,
+      active: enrichedAll.filter((i) => i.lifecycleState === 'active').length,
+      suspended: enrichedAll.filter((i) => i.lifecycleState === 'suspended').length,
+      rejected_archived: enrichedAll.filter(
+        (i) => i.lifecycleState === 'rejected' || i.lifecycleState === 'archived'
+      ).length
+    };
+
+    const cities = Array.from(
+      new Set(
+        enrichedAll
+          .map((i: any) => i.city)
+          .filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
+      )
+    ).sort();
+
+    let filtered = [...enrichedAll];
+
+    if (params?.statusTab && params.statusTab !== 'all') {
+      if (params.statusTab === 'rejected_archived') {
+        filtered = filtered.filter(
+          (i) => i.lifecycleState === 'rejected' || i.lifecycleState === 'archived'
+        );
+      } else {
+        filtered = filtered.filter((i) => i.lifecycleState === params.statusTab);
+      }
+    }
+
+    if (params?.accountStatus && params.accountStatus !== 'all') {
+      filtered = filtered.filter((i) => i.accountStatus === params.accountStatus);
+    }
+
+    if (params?.verificationStatus && params.verificationStatus !== 'all') {
+      filtered = filtered.filter((i: any) => i.verificationStatus === params.verificationStatus);
+    }
+
+    if (params?.businessType && params.businessType !== 'all') {
+      filtered = filtered.filter((i: any) => i.businessType === params.businessType);
+    }
+
+    if (params?.city && params.city !== 'all') {
+      filtered = filtered.filter((i: any) => i.city === params.city);
+    }
+
+    if (params?.search && params.search.trim()) {
+      const q = params.search.trim().toLowerCase();
+      filtered = filtered.filter((item: any) => {
+        const hay = [
+          item.id,
+          item.companyName,
+          item.contactPerson,
+          item.name,
+          item.ownerName,
+          item.storeName,
+          item.supplierName,
+          item.phone,
+          item.city,
+          item.vehiclePlate,
+          item.branchName
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return hay.includes(q);
+      });
+    }
+
+    const sortBy = params?.sortBy || 'newest';
+    filtered.sort((a: any, b: any) => {
+      if (sortBy === 'name_asc') {
+        const nameA = String(a.companyName || a.name || '');
+        const nameB = String(b.companyName || b.name || '');
+        return nameA.localeCompare(nameB, 'ar');
+      }
+      if (sortBy === 'metric_desc') {
+        const valA = Number(
+          a.metrics?.gmvIQD ??
+            a.metrics?.totalSpendIQD ??
+            a.metrics?.deliveredCount ??
+            a.rating ??
+            0
+        );
+        const valB = Number(
+          b.metrics?.gmvIQD ??
+            b.metrics?.totalSpendIQD ??
+            b.metrics?.deliveredCount ??
+            b.rating ??
+            0
+        );
+        return valB - valA;
+      }
+      const timeA = Date.parse(a.createdAt || a.shiftStartTime || '1970-01-01');
+      const timeB = Date.parse(b.createdAt || b.shiftStartTime || '1970-01-01');
+      return (Number.isFinite(timeB) ? timeB : 0) - (Number.isFinite(timeA) ? timeA : 0);
+    });
+
+    const pageSize = Math.min(50, Math.max(1, Number(params?.pageSize) || 12));
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(totalPages, Math.max(1, Number(params?.page) || 1));
+    const start = (page - 1) * pageSize;
+
+    return {
+      items: filtered.slice(start, start + pageSize),
+      total,
+      page,
+      pageSize,
+      totalPages,
+      statusCounts,
+      cities
+    };
+  }
+
+  getAdminAccountDetail(type: 'suppliers' | 'stores' | 'drivers' | 'staff', id: string) {
+    const resolved = this.resolveAccountRecord(type, id);
+    if (!resolved) return null;
+
+    const item = this.enrichAccountListItem(type, resolved.record);
+    const kyc: AccountKycInfo = (resolved.record as any).kyc || {
+      checklist: this.defaultKycChecklist()
+    };
+    const adminNotes: AdminInternalNote[] = (resolved.record as any).adminNotes || [];
+
+    let recentOrders: SubOrder[] = [];
+    let creditAccounts: Array<CreditAccount & { supplierName?: string }> = [];
+
+    if (type === 'suppliers') {
+      recentOrders = this.subOrders
+        .filter((o) => o.supplierId === id)
+        .slice(0, 10);
+      creditAccounts = this.creditAccounts
+        .filter((c) => c.supplierId === id)
+        .map((c) => ({ ...c, supplierName: (resolved.record as SupplierProfile).companyName }));
+    } else if (type === 'stores') {
+      recentOrders = this.subOrders
+        .filter((o) => o.storeId === id)
+        .slice(0, 10);
+      creditAccounts = this.creditAccounts
+        .filter((c) => c.storeId === id)
+        .map((c) => ({
+          ...c,
+          supplierName: this.suppliers.find((s) => s.id === c.supplierId)?.companyName || c.supplierId
+        }));
+    } else if (type === 'drivers') {
+      recentOrders = this.subOrders
+        .filter((o) => o.assignedDriverId === id)
+        .slice(0, 10);
+    } else {
+      const staff = resolved.record as StoreStaffAccount;
+      recentOrders = this.subOrders
+        .filter((o) => o.storeId === staff.storeId)
+        .slice(0, 10);
+      creditAccounts = this.creditAccounts
+        .filter((c) => c.storeId === staff.storeId)
+        .map((c) => ({
+          ...c,
+          supplierName: this.suppliers.find((s) => s.id === c.supplierId)?.companyName || c.supplierId
+        }));
+    }
+
+    const auditLogs = this.auditLogs
+      .filter((l) => l.entityId === id && l.entityType === resolved.entityType)
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+
+    return {
+      account: {
+        ...item,
+        kyc,
+        adminNotes
+      },
+      recentOrders,
+      creditAccounts,
+      auditLogs
+    };
+  }
+
+  transitionAdminAccountStatus(params: {
+    type: 'suppliers' | 'stores' | 'drivers' | 'staff';
+    id: string;
+    action: 'approve' | 'reject' | 'suspend' | 'reactivate' | 'archive';
+    reason: string;
+    verificationStatus?: VerificationStatus;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const reason = (params.reason || '').trim();
+    if (reason.length < 5) {
+      throw new Error('يرجى إدخال سبب إداري واضح (5 أحرف على الأقل)');
+    }
+
+    const resolved = this.resolveAccountRecord(params.type, params.id);
+    if (!resolved) {
+      const err = new Error('الحساب المطلوب غير موجود');
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const allowed = this.getAllowedAdminAccountActions(params.type, resolved.record);
+    if (!allowed.includes(params.action)) {
+      throw new Error(
+        `الانتقال (${params.action}) غير مسموح من الحالة الحالية (${this.getEffectiveLifecycleState(
+          params.type,
+          resolved.record
+        )})`
+      );
+    }
+
+    const nowIso = new Date().toISOString();
+    const rec: any = resolved.record;
+
+    const before: Record<string, any> = {
+      accountStatus:
+        params.type === 'suppliers'
+          ? this.getSupplierAccountStatus(rec)
+          : params.type === 'stores'
+          ? this.getStoreAccountStatus(rec)
+          : params.type === 'drivers'
+          ? this.getDriverAccountStatus(rec)
+          : this.getStaffAccountStatus(rec)
+    };
+    if (params.type === 'suppliers') {
+      before.verificationStatus = this.getSupplierVerificationStatus(rec);
+      before.isVerified = Boolean(rec.isVerified);
+    } else if (params.type === 'stores') {
+      before.verificationStatus = this.getStoreVerificationStatus(rec);
+      before.isVerified = Boolean(rec.isVerified);
+    } else if (params.type === 'staff') {
+      before.isActive = Boolean(rec.isActive);
+    }
+
+    if (params.action === 'approve') {
+      rec.accountStatus = 'active';
+      if (params.type === 'suppliers') {
+        const validRanks: VerificationStatus[] = [
+          'verified',
+          'verified_business',
+          'authorized_distributor'
+        ];
+        const nextRank =
+          params.verificationStatus && validRanks.includes(params.verificationStatus)
+            ? params.verificationStatus
+            : 'verified';
+        rec.verificationStatus = nextRank;
+        rec.isVerified = true;
+      } else if (params.type === 'stores') {
+        rec.verificationStatus = 'verified';
+        rec.isVerified = true;
+      } else if (params.type === 'staff') {
+        rec.isActive = true;
+      }
+    } else if (params.action === 'reject') {
+      rec.accountStatus = 'rejected';
+      if (params.type === 'suppliers') {
+        rec.isVerified = false;
+      } else if (params.type === 'stores') {
+        rec.isVerified = false;
+      } else if (params.type === 'staff') {
+        rec.isActive = false;
+      }
+    } else if (params.action === 'suspend') {
+      rec.accountStatus = 'suspended';
+      if (params.type === 'staff') {
+        rec.isActive = false;
+      }
+    } else if (params.action === 'reactivate') {
+      rec.accountStatus = 'active';
+      if (params.type === 'staff') {
+        rec.isActive = true;
+      }
+    } else if (params.action === 'archive') {
+      rec.accountStatus = 'archived';
+      if (params.type === 'staff') {
+        rec.isActive = false;
+      }
+    }
+
+    rec.statusReason = reason;
+    rec.statusChangedAt = nowIso;
+    rec.statusChangedBy = params.actor.actorId;
+
+    const after: Record<string, any> = {
+      accountStatus: rec.accountStatus
+    };
+    if (params.type === 'suppliers' || params.type === 'stores') {
+      after.verificationStatus = rec.verificationStatus;
+      after.isVerified = Boolean(rec.isVerified);
+    } else if (params.type === 'staff') {
+      after.isActive = Boolean(rec.isActive);
+    }
+
+    const actionVerbAr: Record<typeof params.action, string> = {
+      approve: 'اعتماد وتوثيق',
+      reject: 'رفض',
+      suspend: 'إيقاف',
+      reactivate: 'إعادة تفعيل',
+      archive: 'أرشفة'
+    };
+    const actionVerbEn: Record<typeof params.action, string> = {
+      approve: 'Approved & verified',
+      reject: 'Rejected',
+      suspend: 'Suspended',
+      reactivate: 'Reactivated',
+      archive: 'Archived'
+    };
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: `${resolved.entityType}.${params.action}`,
+      entityType: resolved.entityType,
+      entityId: params.id,
+      summaryAr: `${actionVerbAr[params.action]} حساب ${resolved.displayName}`,
+      summaryEn: `${actionVerbEn[params.action]} account ${resolved.displayName}`,
+      before,
+      after,
+      reason
+    });
+
+    return this.getAdminAccountDetail(params.type, params.id);
+  }
+
+  updateAdminAccountDetails(params: {
+    type: 'suppliers' | 'stores' | 'drivers' | 'staff';
+    id: string;
+    patch: Record<string, any>;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const resolved = this.resolveAccountRecord(params.type, params.id);
+    if (!resolved) {
+      const err = new Error('الحساب المطلوب غير موجود');
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const rec: any = resolved.record;
+    const before: Record<string, any> = {};
+    const after: Record<string, any> = {};
+
+    const applyField = (field: string, val: any) => {
+      if (val === undefined) return;
+      before[field] = rec[field];
+      rec[field] = typeof val === 'string' ? val.trim() : val;
+      after[field] = rec[field];
+    };
+
+    applyField('phone', params.patch.phone);
+    applyField('address', params.patch.address);
+    applyField('city', params.patch.city);
+
+    if (params.type === 'suppliers') {
+      applyField('companyName', params.patch.companyName);
+      applyField('contactPerson', params.patch.contactPerson);
+      if (params.patch.businessType) {
+        applyField('businessType', params.patch.businessType);
+      }
+      if (Array.isArray(params.patch.serviceZoneIds)) {
+        before.serviceZoneIds = [...(rec.serviceZoneIds || [])];
+        rec.serviceZoneIds = params.patch.serviceZoneIds.map((z: any) => String(z));
+        after.serviceZoneIds = [...rec.serviceZoneIds];
+      }
+      if (
+        params.patch.minOrderValueIQD !== undefined &&
+        Number.isFinite(Number(params.patch.minOrderValueIQD))
+      ) {
+        before.minOrderValueIQD = rec.orderRules?.minOrderValueIQD ?? 0;
+        rec.orderRules = {
+          ...(rec.orderRules || {}),
+          minOrderValueIQD: Math.max(0, Number(params.patch.minOrderValueIQD))
+        };
+        after.minOrderValueIQD = rec.orderRules.minOrderValueIQD;
+      }
+    } else if (params.type === 'stores') {
+      applyField('name', params.patch.name);
+      applyField('ownerName', params.patch.ownerName);
+      applyField('district', params.patch.district);
+      if (params.patch.storeType) {
+        applyField('storeType', params.patch.storeType);
+      }
+    } else if (params.type === 'drivers') {
+      applyField('name', params.patch.name);
+      applyField('vehiclePlate', params.patch.vehiclePlate);
+      applyField('vehicleModel', params.patch.vehicleModel);
+      applyField('vanWarehouseName', params.patch.vanWarehouseName);
+    } else if (params.type === 'staff') {
+      applyField('name', params.patch.name);
+      applyField('branchName', params.patch.branchName);
+      if (params.patch.role === 'cashier' || params.patch.role === 'accountant') {
+        applyField('role', params.patch.role);
+      }
+    }
+
+    if (Object.keys(after).length > 0) {
+      this.recordAudit({
+        actorId: params.actor.actorId,
+        actorName: params.actor.actorName,
+        action: `${resolved.entityType}.update_details`,
+        entityType: resolved.entityType,
+        entityId: params.id,
+        summaryAr: `تحديث البيانات الأساسية لحساب ${resolved.displayName}`,
+        summaryEn: `Updated basic profile fields for ${resolved.displayName}`,
+        before,
+        after,
+        reason: typeof params.patch.reason === 'string' && params.patch.reason.trim()
+          ? params.patch.reason.trim()
+          : 'تحديث إداري للبيانات الأساسية'
+      });
+    }
+
+    return this.getAdminAccountDetail(params.type, params.id);
+  }
+
+  addAdminAccountNote(params: {
+    type: 'suppliers' | 'stores' | 'drivers' | 'staff';
+    id: string;
+    text: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const text = (params.text || '').trim();
+    if (text.length < 3) {
+      throw new Error('يرجى كتابة نص الملاحظة (3 أحرف على الأقل)');
+    }
+    const resolved = this.resolveAccountRecord(params.type, params.id);
+    if (!resolved) {
+      const err = new Error('الحساب المطلوب غير موجود');
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const rec: any = resolved.record;
+    if (!Array.isArray(rec.adminNotes)) {
+      rec.adminNotes = [];
+    }
+    const note: AdminInternalNote = {
+      id: `note_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      at: new Date().toISOString(),
+      author: params.actor.actorName,
+      text
+    };
+    rec.adminNotes.unshift(note);
+
+    this.recordAudit({
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: `${resolved.entityType}.add_note`,
+      entityType: resolved.entityType,
+      entityId: params.id,
+      summaryAr: `إضافة ملاحظة إدارية داخلية على حساب ${resolved.displayName}`,
+      summaryEn: `Added internal admin note on ${resolved.displayName}`,
+      before: null,
+      after: { noteText: text },
+      reason: text
+    });
+
+    return this.getAdminAccountDetail(params.type, params.id);
+  }
+
+  updateAdminAccountKyc(params: {
+    type: 'suppliers' | 'stores' | 'drivers' | 'staff';
+    id: string;
+    licenseNo?: string;
+    taxId?: string;
+    checklist?: KycChecklistItem[];
+    actor: { actorId: string; actorName: string };
+  }) {
+    const resolved = this.resolveAccountRecord(params.type, params.id);
+    if (!resolved) {
+      const err = new Error('الحساب المطلوب غير موجود');
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const rec: any = resolved.record;
+    const prevKyc: AccountKycInfo = rec.kyc || { checklist: this.defaultKycChecklist() };
+    const before = JSON.parse(JSON.stringify(prevKyc));
+
+    const validKeys: KycChecklistKey[] = [
+      'commercial_license',
+      'owner_id',
+      'address_proof',
+      'phone_verified'
+    ];
+    const nextChecklist: KycChecklistItem[] = Array.isArray(params.checklist)
+      ? params.checklist
+          .filter((item) => validKeys.includes(item.key))
+          .map((item) => ({
+            key: item.key,
+            status:
+              item.status === 'approved' || item.status === 'rejected' ? item.status : 'pending',
+            note: typeof item.note === 'string' && item.note.trim() ? item.note.trim() : undefined
+          }))
+      : prevKyc.checklist;
+
+    const nextKyc: AccountKycInfo = {
+      licenseNo:
+        params.licenseNo !== undefined ? params.licenseNo.trim() || undefined : prevKyc.licenseNo,
+      taxId: params.taxId !== undefined ? params.taxId.trim() || undefined : prevKyc.taxId,
+      checklist: nextChecklist.length > 0 ? nextChecklist : this.defaultKycChecklist()
+    };
+
+    rec.kyc = nextKyc;
+
+    this.recordAudit({
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: `${resolved.entityType}.update_kyc`,
+      entityType: resolved.entityType,
+      entityId: params.id,
+      summaryAr: `تحديث قائمة التحقق والوثائق (KYC) لحساب ${resolved.displayName}`,
+      summaryEn: `Updated KYC checklist for ${resolved.displayName}`,
+      before,
+      after: nextKyc,
+      reason: 'مراجعة وتحديث وثائق التحقق والتوثيق'
+    });
+
+    return this.getAdminAccountDetail(params.type, params.id);
+  }
+
+  createAdminSupplier(params: {
+    companyName: string;
+    contactPerson: string;
+    phone: string;
+    city: string;
+    address: string;
+    businessType?: SellerBusinessType;
+    verificationStatus?: VerificationStatus;
+    serviceZoneIds?: string[];
+    minOrderValueIQD?: number;
+    licenseNo?: string;
+    taxId?: string;
+    reason?: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const companyName = (params.companyName || '').trim();
+    const contactPerson = (params.contactPerson || '').trim();
+    const phone = (params.phone || '').trim();
+    const city = (params.city || '').trim();
+    const address = (params.address || '').trim();
+
+    if (companyName.length < 2 || contactPerson.length < 2 || phone.length < 6 || !city) {
+      throw new Error('يرجى إدخال اسم الشركة واسم المسؤول ورقم الهاتف والمدينة بشكل صحيح');
+    }
+
+    const verStatus: VerificationStatus = params.verificationStatus || 'pending';
+    const isVerified = verStatus !== 'pending';
+    const id = `supp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+    const created: SupplierProfile = {
+      id,
+      companyName,
+      contactPerson,
+      phone,
+      city,
+      address: address || city,
+      categories: ['مواد غذائية أساسية'],
+      rating: 0,
+      totalVans: 0,
+      activeCreditLinesCount: 0,
+      isVerified,
+      businessType: params.businessType || 'wholesaler',
+      verificationStatus: verStatus,
+      accountStatus: 'active',
+      kyc: {
+        licenseNo: params.licenseNo?.trim() || undefined,
+        taxId: params.taxId?.trim() || undefined,
+        checklist: isVerified
+          ? [
+              { key: 'commercial_license', status: 'approved' },
+              { key: 'owner_id', status: 'approved' },
+              { key: 'address_proof', status: 'approved' },
+              { key: 'phone_verified', status: 'approved' }
+            ]
+          : this.defaultKycChecklist()
+      },
+      serviceZoneIds:
+        Array.isArray(params.serviceZoneIds) && params.serviceZoneIds.length > 0
+          ? params.serviceZoneIds
+          : ['zone_baghdad_karkh', 'zone_baghdad_rusafa'],
+      orderRules: {
+        minOrderValueIQD: Math.max(0, Number(params.minOrderValueIQD) || 100000)
+      },
+      createdAt: new Date().toISOString().slice(0, 10)
+    };
+
+    this.suppliers.unshift(created);
+
+    this.recordAudit({
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'supplier.create',
+      entityType: 'supplier',
+      entityId: id,
+      summaryAr: `إنشاء حساب مورد جديد يدوياً: ${companyName}`,
+      summaryEn: `Manually created supplier account: ${companyName}`,
+      before: null,
+      after: {
+        id,
+        companyName,
+        accountStatus: created.accountStatus,
+        verificationStatus: created.verificationStatus
+      },
+      reason: (params.reason || '').trim() || 'تسجيل مورد جديد من لوحة الإدارة'
+    });
+
+    return this.getAdminAccountDetail('suppliers', id);
+  }
+
+  createAdminStore(params: {
+    name: string;
+    ownerName: string;
+    phone: string;
+    city: string;
+    district?: string;
+    address?: string;
+    storeType?: 'supermarket' | 'grocery' | 'wholesale_sub';
+    verificationStatus?: 'pending' | 'verified';
+    licenseNo?: string;
+    taxId?: string;
+    reason?: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const name = (params.name || '').trim();
+    const ownerName = (params.ownerName || '').trim();
+    const phone = (params.phone || '').trim();
+    const city = (params.city || '').trim();
+
+    if (name.length < 2 || ownerName.length < 2 || phone.length < 6 || !city) {
+      throw new Error('يرجى إدخال اسم المتجر واسم المالك ورقم الهاتف والمدينة بشكل صحيح');
+    }
+
+    const verStatus: 'pending' | 'verified' =
+      params.verificationStatus === 'verified' ? 'verified' : 'pending';
+    const id = `store_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const slugBase = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'store';
+
+    const created: StoreProfile = {
+      id,
+      name,
+      ownerName,
+      phone,
+      city,
+      district: (params.district || '').trim() || city,
+      address: (params.address || '').trim() || city,
+      storeType: params.storeType || 'grocery',
+      walletBalanceIQD: 0,
+      isVerified: verStatus === 'verified',
+      verificationStatus: verStatus,
+      accountStatus: 'active',
+      kyc: {
+        licenseNo: params.licenseNo?.trim() || undefined,
+        taxId: params.taxId?.trim() || undefined,
+        checklist:
+          verStatus === 'verified'
+            ? [
+                { key: 'commercial_license', status: 'approved' },
+                { key: 'owner_id', status: 'approved' },
+                { key: 'address_proof', status: 'approved' },
+                { key: 'phone_verified', status: 'approved' }
+              ]
+            : this.defaultKycChecklist()
+      },
+      customDomainSlug: `${slugBase}-${id.slice(-4)}`,
+      qrScanCount: 0,
+      createdAt: new Date().toISOString().slice(0, 10)
+    };
+
+    this.stores.unshift(created);
+
+    this.recordAudit({
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'store.create',
+      entityType: 'store',
+      entityId: id,
+      summaryAr: `إنشاء حساب متجر تجزئة يدوياً: ${name}`,
+      summaryEn: `Manually created retail store account: ${name}`,
+      before: null,
+      after: {
+        id,
+        name,
+        accountStatus: created.accountStatus,
+        verificationStatus: created.verificationStatus
+      },
+      reason: (params.reason || '').trim() || 'تسجيل متجر جديد من لوحة الإدارة'
+    });
+
+    return this.getAdminAccountDetail('stores', id);
   }
 }
 

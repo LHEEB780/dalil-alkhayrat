@@ -66,6 +66,7 @@ import { formatCurrency } from '../../utils/format.ts';
 import { getLocalizedText, translations } from '../../utils/translations.ts';
 import { ApiDocsView } from '../ApiDocsView.tsx';
 import { UserSession } from '../WelcomeAuthView.tsx';
+import { AccountsView, AccountSectionMode } from './AccountsView.tsx';
 
 export type AdminSectionId =
   | 'overview'
@@ -138,7 +139,8 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         labelEn: 'Suppliers',
         descAr: 'مراجعة طلبات التوثيق، تفعيل أو إيقاف الحسابات، وإدارة قواعد الطلب للموردين.',
         descEn: 'Review supplier verification requests, suspend/activate accounts, and manage order rules.',
-        icon: Building2
+        icon: Building2,
+        implemented: true
       },
       {
         id: 'stores',
@@ -146,7 +148,8 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         labelEn: 'Retail Stores',
         descAr: 'مراقبة متاجر التجزئة، درجات الموثوقية، التجميد المؤقت، وعناوين التوصيل.',
         descEn: 'Monitor retail stores, reliability scores, account blocks, and registered addresses.',
-        icon: Store
+        icon: Store,
+        implemented: true
       },
       {
         id: 'drivers',
@@ -154,7 +157,8 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         labelEn: 'Drivers & Reps',
         descAr: 'متابعة السائقين والمندوبين الميدانيين، الورديات النشطة، وحالة التفرغ.',
         descEn: 'Manage field van drivers, active shifts, and operational availability.',
-        icon: Truck
+        icon: Truck,
+        implemented: true
       },
       {
         id: 'store_staff',
@@ -162,7 +166,8 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         labelEn: 'Store Staff',
         descAr: 'عرض وإدارة حسابات الكاشير والمحاسبين المرتبطين بالمتاجر.',
         descEn: 'Audit cashier and accountant accounts linked to retail stores.',
-        icon: Users
+        icon: Users,
+        implemented: true
       }
     ]
   },
@@ -377,6 +382,7 @@ interface AdminOverviewData {
     activeStoresCount: number;
     activeDriversCount: number;
     pendingSuppliersCount: number;
+    pendingStoresCount?: number;
     totalUsedCreditIQD: number;
     totalOverdueDebtIQD: number;
     pendingCreditUpgradesCount: number;
@@ -405,7 +411,7 @@ interface AdminOverviewData {
   }>;
   needsAttention: Array<{
     id: string;
-    type: 'pending_supplier' | 'credit_upgrade' | 'stuck_order' | 'disputed_order' | 'blocked_credit';
+    type: 'pending_supplier' | 'pending_store' | 'credit_upgrade' | 'stuck_order' | 'disputed_order' | 'blocked_credit';
     severity: 'high' | 'medium';
     titleAr: string;
     titleEn: string;
@@ -481,6 +487,10 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
   const t = translations[language];
 
   const [activeSection, setActiveSection] = useState<AdminSectionId>('overview');
+  const [accountDeepLink, setAccountDeepLink] = useState<{
+    statusTab?: 'all' | 'pending' | 'active' | 'suspended' | 'rejected_archived';
+    selectedId?: string | null;
+  }>({});
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Overview state
@@ -632,8 +642,15 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
     return () => document.removeEventListener('mousedown', onPointerDown);
   }, []);
 
-  const handleNavigate = (section: AdminSectionId) => {
+  const handleNavigate = (
+    section: AdminSectionId,
+    options?: {
+      statusTab?: 'all' | 'pending' | 'active' | 'suspended' | 'rejected_archived';
+      selectedId?: string | null;
+    }
+  ) => {
     setActiveSection(section);
+    setAccountDeepLink(options || {});
     setMobileMenuOpen(false);
     setSearchDropdownOpen(false);
     setBellOpen(false);
@@ -773,7 +790,7 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                       />
                       <span className="truncate">{isAr ? item.labelAr : item.labelEn}</span>
                     </span>
-                    {!item.implemented && (
+                    {!item.implemented ? (
                       <span
                         className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
                           isActive
@@ -783,6 +800,31 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                       >
                         {t.adminComingSoonBadge}
                       </span>
+                    ) : (
+                      <>
+                        {item.id === 'suppliers' && (overview?.kpis.pendingSuppliersCount || 0) > 0 && (
+                          <span
+                            className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                              isActive
+                                ? 'bg-white/20 text-white'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {overview?.kpis.pendingSuppliersCount}
+                          </span>
+                        )}
+                        {item.id === 'stores' && (overview?.kpis.pendingStoresCount || 0) > 0 && (
+                          <span
+                            className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                              isActive
+                                ? 'bg-white/20 text-white'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {overview?.kpis.pendingStoresCount}
+                          </span>
+                        )}
+                      </>
                     )}
                   </button>
                 );
@@ -822,23 +864,38 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
       shortDate: point.date.slice(5)
     }));
 
+    const periodCaption =
+      range === '7d' ? t.adminRange7d : range === '30d' ? t.adminRange30d : t.adminRange90d;
+
     return (
-      <div className="space-y-6">
-        {/* Overview Header & Range Controls */}
-        <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
-          <div>
-            <h1 className="text-lg sm:text-xl font-black text-[#221F1F]">
+      <div className="space-y-3 sm:space-y-5">
+        {/* Overview Header & Range Controls (single compact row) */}
+        <div className="bg-white rounded-xl sm:rounded-2xl border border-[#E5E7EB] px-3 py-2.5 sm:px-4 sm:py-3.5 flex items-center justify-between gap-2 shadow-xs">
+          <div className="min-w-0">
+            <h1 className="text-sm sm:text-lg font-black text-[#221F1F] truncate">
               {isAr ? currentNavItem.labelAr : currentNavItem.labelEn}
             </h1>
-            <p className="text-xs sm:text-sm text-[#797878] mt-0.5">
+            <p className="hidden md:block text-xs text-[#797878] mt-0.5 truncate">
               {t.adminConsoleSubtitle}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-1">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <div className="inline-flex items-center rounded-lg sm:rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-0.5">
               {(['7d', '30d', '90d'] as const).map((r) => {
-                const label =
+                const compactLabel =
+                  r === '7d'
+                    ? isAr
+                      ? '7ي'
+                      : '7d'
+                    : r === '30d'
+                    ? isAr
+                      ? '30ي'
+                      : '30d'
+                    : isAr
+                    ? '90ي'
+                    : '90d';
+                const fullLabel =
                   r === '7d' ? t.adminRange7d : r === '30d' ? t.adminRange30d : t.adminRange90d;
                 const active = range === r;
                 return (
@@ -846,13 +903,14 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                     key={r}
                     type="button"
                     onClick={() => setRange(r)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                    className={`px-2 sm:px-2.5 py-1 rounded-md sm:rounded-lg text-[11px] sm:text-xs font-bold transition-colors cursor-pointer ${
                       active
                         ? 'bg-[#00A046] text-white shadow-xs'
                         : 'text-[#4A4747] hover:text-[#221F1F]'
                     }`}
                   >
-                    {label}
+                    <span className="sm:hidden">{compactLabel}</span>
+                    <span className="hidden sm:inline">{fullLabel}</span>
                   </button>
                 );
               })}
@@ -862,24 +920,26 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
               type="button"
               onClick={() => fetchOverview(range)}
               disabled={overviewLoading}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[#E5E7EB] bg-white text-xs font-bold text-[#221F1F] hover:bg-[#F9FAFB] transition-colors cursor-pointer disabled:opacity-60"
+              aria-label={t.adminRefresh}
+              title={t.adminRefresh}
+              className="inline-flex items-center justify-center gap-1.5 p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg sm:rounded-xl border border-[#E5E7EB] bg-white text-xs font-bold text-[#221F1F] hover:bg-[#F9FAFB] transition-colors cursor-pointer disabled:opacity-60"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${overviewLoading ? 'animate-spin' : ''}`} />
-              <span>{t.adminRefresh}</span>
+              <span className="hidden sm:inline">{t.adminRefresh}</span>
             </button>
           </div>
         </div>
 
         {/* Loading State */}
         {overviewLoading && !overview && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4">
             {[1, 2, 3, 4].map((idx) => (
               <div
                 key={idx}
-                className="bg-white rounded-2xl border border-[#E5E7EB] p-5 h-28 animate-pulse"
+                className="bg-white rounded-xl sm:rounded-2xl border border-[#E5E7EB] p-3 sm:p-4 h-24 animate-pulse"
               >
-                <div className="h-3 w-24 bg-gray-200 rounded mb-3" />
-                <div className="h-6 w-32 bg-gray-200 rounded" />
+                <div className="h-2.5 w-20 bg-gray-200 rounded mb-2.5" />
+                <div className="h-5 w-24 bg-gray-200 rounded" />
               </div>
             ))}
           </div>
@@ -887,15 +947,15 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
 
         {/* Error State */}
         {overviewError && (
-          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 text-red-800 text-xs sm:text-sm font-bold">
-              <AlertCircle className="w-5 h-5 shrink-0 text-red-600" />
+          <div className="bg-red-50 border border-red-200 rounded-xl sm:rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-red-800 text-xs sm:text-sm font-bold">
+              <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
               <span>{overviewError}</span>
             </div>
             <button
               type="button"
               onClick={() => fetchOverview(range)}
-              className="px-4 py-2 rounded-xl bg-red-600 text-white text-xs font-bold hover:bg-red-700 cursor-pointer self-start sm:self-auto"
+              className="px-3.5 py-1.5 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 cursor-pointer self-start sm:self-auto"
             >
               {t.adminRetry}
             </button>
@@ -905,170 +965,204 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
         {kpis && (
           <>
             {/* Primary Financial & Order KPIs */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-              <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-5 shadow-xs">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-[#797878]">{t.adminKpiGmv}</span>
-                  <div className="w-8 h-8 rounded-xl bg-emerald-50 text-[#00A046] flex items-center justify-center">
-                    <BadgeDollarSign className="w-4 h-4" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4">
+              <div className="bg-white rounded-xl sm:rounded-2xl border border-[#E5E7EB] p-3 sm:p-4 shadow-xs flex flex-col justify-between">
+                <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                  <span className="text-[11px] sm:text-xs font-bold text-[#797878] leading-tight line-clamp-1">
+                    {t.adminKpiGmv}
+                  </span>
+                  <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-emerald-50 text-[#00A046] flex items-center justify-center shrink-0">
+                    <BadgeDollarSign className="w-3.5 h-3.5" />
                   </div>
                 </div>
-                <div className="text-xl sm:text-2xl font-black text-[#221F1F]">
+                <div className="text-base sm:text-xl font-black text-[#221F1F] leading-tight truncate">
                   {formatCurrency(kpis.gmvIQD, currency, language)}
                 </div>
-                <div className="text-[11px] font-semibold text-[#797878] mt-1">
-                  {range === '7d' ? t.adminRange7d : range === '30d' ? t.adminRange30d : t.adminRange90d}
+                <div className="text-[10px] sm:text-[11px] font-semibold text-[#797878] truncate mt-1">
+                  {periodCaption}
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-5 shadow-xs">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-[#797878]">{t.adminKpiOrders}</span>
-                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                    <ShoppingBag className="w-4 h-4" />
+              <div className="bg-white rounded-xl sm:rounded-2xl border border-[#E5E7EB] p-3 sm:p-4 shadow-xs flex flex-col justify-between">
+                <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                  <span className="text-[11px] sm:text-xs font-bold text-[#797878] leading-tight line-clamp-1">
+                    {isAr ? 'الطلبات الفرعية (لكل مورد)' : 'Sub-orders'}
+                  </span>
+                  <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                    <ShoppingBag className="w-3.5 h-3.5" />
                   </div>
                 </div>
-                <div className="text-xl sm:text-2xl font-black text-[#221F1F]">
+                <div className="text-base sm:text-xl font-black text-[#221F1F] leading-tight">
                   {kpis.ordersCount.toLocaleString('en-US')}
                 </div>
-                <div className="text-[11px] font-semibold text-[#797878] mt-1">
-                  {isAr ? 'طلبات فرعية مؤكدة' : 'Confirmed sub-orders'}
+                <div className="text-[10px] sm:text-[11px] font-semibold text-[#797878] truncate mt-1">
+                  {periodCaption}
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-5 shadow-xs">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-[#797878]">{t.adminKpiDelivered}</span>
-                  <div className="w-8 h-8 rounded-xl bg-emerald-50 text-[#00A046] flex items-center justify-center">
-                    <CheckCircle2 className="w-4 h-4" />
+              <div className="bg-white rounded-xl sm:rounded-2xl border border-[#E5E7EB] p-3 sm:p-4 shadow-xs flex flex-col justify-between">
+                <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                  <span className="text-[11px] sm:text-xs font-bold text-[#797878] leading-tight line-clamp-1">
+                    {t.adminKpiDelivered}
+                  </span>
+                  <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-emerald-50 text-[#00A046] flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
                   </div>
                 </div>
-                <div className="text-xl sm:text-2xl font-black text-[#221F1F]">
+                <div className="text-base sm:text-xl font-black text-[#221F1F] leading-tight">
                   {kpis.deliveredCount.toLocaleString('en-US')}{' '}
-                  <span className="text-sm font-extrabold text-[#00A046]">
+                  <span className="text-xs sm:text-sm font-extrabold text-[#00A046]">
                     ({kpis.deliveredRatePercent}%)
                   </span>
                 </div>
-                <div className="text-[11px] font-semibold text-[#797878] mt-1">
-                  {isAr ? 'معدل التسليم المكتمل' : 'Completed delivery rate'}
+                <div className="text-[10px] sm:text-[11px] font-semibold text-[#797878] truncate mt-1">
+                  {isAr ? `نسبة الإتمام • ${periodCaption}` : `Completion • ${periodCaption}`}
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-5 shadow-xs">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-[#797878]">{t.adminKpiAvgOrder}</span>
-                  <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
-                    <TrendingUp className="w-4 h-4" />
+              <div className="bg-white rounded-xl sm:rounded-2xl border border-[#E5E7EB] p-3 sm:p-4 shadow-xs flex flex-col justify-between">
+                <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                  <span className="text-[11px] sm:text-xs font-bold text-[#797878] leading-tight line-clamp-1">
+                    {t.adminKpiAvgOrder}
+                  </span>
+                  <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                    <TrendingUp className="w-3.5 h-3.5" />
                   </div>
                 </div>
-                <div className="text-xl sm:text-2xl font-black text-[#221F1F]">
+                <div className="text-base sm:text-xl font-black text-[#221F1F] leading-tight truncate">
                   {formatCurrency(kpis.avgOrderValueIQD, currency, language)}
                 </div>
-                <div className="text-[11px] font-semibold text-[#797878] mt-1">
-                  {isAr ? 'متوسط سلة الطلب الفرعي' : 'Average sub-order basket'}
+                <div className="text-[10px] sm:text-[11px] font-semibold text-[#797878] truncate mt-1">
+                  {periodCaption}
                 </div>
               </div>
             </div>
 
             {/* Operational & Credit Snapshot Row */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-              <div className="bg-white rounded-xl border border-[#E5E7EB] p-3.5">
-                <div className="text-[11px] font-bold text-[#797878] mb-1">
-                  {t.adminKpiActiveAccounts}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3">
+              <div className="bg-white rounded-xl border border-[#E5E7EB] p-3 flex flex-col justify-between">
+                <div className="flex items-center justify-between gap-1.5 mb-1">
+                  <span className="text-[11px] font-bold text-[#797878] truncate">
+                    {t.adminKpiActiveAccounts}
+                  </span>
+                  <Users className="w-3.5 h-3.5 text-[#00A046] shrink-0" />
                 </div>
-                <div className="text-xs font-extrabold text-[#221F1F] flex flex-wrap gap-x-2 gap-y-0.5">
-                  <span>
-                    {kpis.activeSuppliersCount} {t.adminKpiSuppliersShort}
-                  </span>
-                  <span>•</span>
-                  <span>
-                    {kpis.activeStoresCount} {t.adminKpiStoresShort}
-                  </span>
-                  <span>•</span>
-                  <span>
-                    {kpis.activeDriversCount} {t.adminKpiDriversShort}
-                  </span>
+                <div className="text-xs font-black text-[#221F1F] truncate">
+                  {kpis.activeSuppliersCount}/{kpis.activeStoresCount}/{kpis.activeDriversCount}
+                </div>
+                <div className="text-[10px] font-semibold text-[#797878] truncate mt-0.5">
+                  {`${kpis.activeSuppliersCount} ${t.adminKpiSuppliersShort} • ${kpis.activeStoresCount} ${t.adminKpiStoresShort} • ${kpis.activeDriversCount} ${t.adminKpiDriversShort}`}
                 </div>
               </div>
 
               <button
                 type="button"
-                onClick={() => handleNavigate('suppliers')}
-                className="bg-white rounded-xl border border-[#E5E7EB] p-3.5 text-start hover:border-[#00A046] transition-colors cursor-pointer"
+                onClick={() => handleNavigate('suppliers', { statusTab: 'pending' })}
+                className="bg-white rounded-xl border border-[#E5E7EB] p-3 text-start hover:border-[#00A046] transition-colors cursor-pointer flex flex-col justify-between"
               >
-                <div className="text-[11px] font-bold text-[#797878] mb-1">
-                  {t.adminKpiPendingSuppliers}
+                <div className="flex items-center justify-between gap-1.5 mb-1">
+                  <span className="text-[11px] font-bold text-[#797878] truncate">
+                    {t.adminKpiPendingSuppliers}
+                  </span>
+                  <Building2 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                 </div>
                 <div
-                  className={`text-lg font-black ${
+                  className={`text-base sm:text-lg font-black leading-tight ${
                     kpis.pendingSuppliersCount > 0 ? 'text-amber-600' : 'text-[#221F1F]'
                   }`}
                 >
                   {kpis.pendingSuppliersCount}
                 </div>
+                <div className="text-[10px] font-semibold text-[#797878] truncate mt-0.5">
+                  {isAr ? 'حالة حالية' : 'Live snapshot'}
+                </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => handleNavigate('credit_limits')}
-                className="bg-white rounded-xl border border-[#E5E7EB] p-3.5 text-start hover:border-[#00A046] transition-colors cursor-pointer"
+                className="bg-white rounded-xl border border-[#E5E7EB] p-3 text-start hover:border-[#00A046] transition-colors cursor-pointer flex flex-col justify-between"
               >
-                <div className="text-[11px] font-bold text-[#797878] mb-1">
-                  {t.adminKpiUsedCredit}
+                <div className="flex items-center justify-between gap-1.5 mb-1">
+                  <span className="text-[11px] font-bold text-[#797878] truncate">
+                    {t.adminKpiUsedCredit}
+                  </span>
+                  <CreditCard className="w-3.5 h-3.5 text-[#00A046] shrink-0" />
                 </div>
-                <div className="text-sm sm:text-base font-black text-[#221F1F] truncate">
+                <div className="text-sm sm:text-base font-black text-[#221F1F] truncate leading-tight">
                   {formatCurrency(kpis.totalUsedCreditIQD, currency, language)}
                 </div>
+                <div className="text-[10px] font-semibold text-[#797878] truncate mt-0.5">
+                  {isAr ? 'الرصيد القائم' : 'Active exposure'}
+                </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => handleNavigate('credit_limits')}
-                className="bg-white rounded-xl border border-[#E5E7EB] p-3.5 text-start hover:border-[#00A046] transition-colors cursor-pointer"
+                className="bg-white rounded-xl border border-[#E5E7EB] p-3 text-start hover:border-[#00A046] transition-colors cursor-pointer flex flex-col justify-between"
               >
-                <div className="text-[11px] font-bold text-[#797878] mb-1">
-                  {t.adminKpiOverdueDebt}
+                <div className="flex items-center justify-between gap-1.5 mb-1">
+                  <span className="text-[11px] font-bold text-[#797878] truncate">
+                    {t.adminKpiOverdueDebt}
+                  </span>
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
                 </div>
                 <div
-                  className={`text-sm sm:text-base font-black truncate ${
+                  className={`text-sm sm:text-base font-black truncate leading-tight ${
                     kpis.totalOverdueDebtIQD > 0 ? 'text-red-600' : 'text-[#221F1F]'
                   }`}
                 >
                   {formatCurrency(kpis.totalOverdueDebtIQD, currency, language)}
+                </div>
+                <div className="text-[10px] font-semibold text-[#797878] truncate mt-0.5">
+                  {isAr ? 'تتطلب متابعة' : 'Over 30 days'}
                 </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => handleNavigate('credit_upgrades')}
-                className="bg-white rounded-xl border border-[#E5E7EB] p-3.5 text-start hover:border-[#00A046] transition-colors cursor-pointer"
+                className="bg-white rounded-xl border border-[#E5E7EB] p-3 text-start hover:border-[#00A046] transition-colors cursor-pointer flex flex-col justify-between"
               >
-                <div className="text-[11px] font-bold text-[#797878] mb-1">
-                  {t.adminKpiCreditUpgrades}
+                <div className="flex items-center justify-between gap-1.5 mb-1">
+                  <span className="text-[11px] font-bold text-[#797878] truncate">
+                    {t.adminKpiCreditUpgrades}
+                  </span>
+                  <TrendingUp className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                 </div>
                 <div
-                  className={`text-lg font-black ${
+                  className={`text-base sm:text-lg font-black leading-tight ${
                     kpis.pendingCreditUpgradesCount > 0 ? 'text-amber-600' : 'text-[#221F1F]'
                   }`}
                 >
                   {kpis.pendingCreditUpgradesCount}
+                </div>
+                <div className="text-[10px] font-semibold text-[#797878] truncate mt-0.5">
+                  {isAr ? 'قيد المراجعة' : 'Pending review'}
                 </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => handleNavigate('offers')}
-                className="bg-white rounded-xl border border-[#E5E7EB] p-3.5 text-start hover:border-[#00A046] transition-colors cursor-pointer"
+                className="bg-white rounded-xl border border-[#E5E7EB] p-3 text-start hover:border-[#00A046] transition-colors cursor-pointer flex flex-col justify-between"
               >
-                <div className="text-[11px] font-bold text-[#797878] mb-1">
-                  {t.adminKpiLowStock}
+                <div className="flex items-center justify-between gap-1.5 mb-1">
+                  <span className="text-[11px] font-bold text-[#797878] truncate">
+                    {t.adminKpiLowStock}
+                  </span>
+                  <Package className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                 </div>
                 <div
-                  className={`text-lg font-black ${
+                  className={`text-base sm:text-lg font-black leading-tight ${
                     kpis.lowStockOffersCount > 0 ? 'text-amber-600' : 'text-[#221F1F]'
                   }`}
                 >
                   {kpis.lowStockOffersCount}
+                </div>
+                <div className="text-[10px] font-semibold text-[#797878] truncate mt-0.5">
+                  {isAr ? 'عروض ≤ 20' : 'Stock ≤ 20'}
                 </div>
               </button>
             </div>
@@ -1235,7 +1329,14 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => handleNavigate(item.targetSection)}
+                      onClick={() =>
+                        handleNavigate(
+                          item.targetSection,
+                          item.type === 'pending_supplier' || item.type === 'pending_store'
+                            ? { statusTab: 'pending', selectedId: item.entityId }
+                            : undefined
+                        )
+                      }
                       className={`p-3.5 rounded-xl border text-start transition-all hover:shadow-sm cursor-pointer flex items-start justify-between gap-3 ${
                         item.severity === 'high'
                           ? 'bg-red-50/50 border-red-200 hover:border-red-300'
@@ -1959,7 +2060,7 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
 
   return (
     <div
-      className="min-h-[calc(100vh-140px)] bg-[#F7F8FA] rounded-2xl border border-[#E5E7EB] overflow-hidden flex flex-col lg:flex-row font-brand"
+      className="min-h-screen w-full bg-[#F7F8FA] flex flex-col lg:flex-row font-brand"
       dir={isAr ? 'rtl' : 'ltr'}
     >
       {/* Desktop Persistent Sidebar */}
@@ -1983,7 +2084,7 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
       {/* Main Operations Content Area */}
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Console Top Bar */}
-        <header className="bg-white border-b border-[#E5E7EB] px-3 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+        <header className="sticky top-0 z-30 bg-white border-b border-[#E5E7EB] px-2.5 sm:px-5 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2.5 sm:gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <button
               type="button"
@@ -2073,7 +2174,16 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                                 <button
                                   key={`${group.key}_${hit.id}`}
                                   type="button"
-                                  onClick={() => handleNavigate(hit.targetSection)}
+                                  onClick={() =>
+                                    handleNavigate(
+                                      hit.targetSection,
+                                      hit.targetSection === 'suppliers' ||
+                                        hit.targetSection === 'stores' ||
+                                        hit.targetSection === 'drivers'
+                                        ? { selectedId: hit.id }
+                                        : undefined
+                                    )
+                                  }
                                   className="w-full text-start px-2.5 py-1.5 rounded-lg hover:bg-emerald-50/70 transition-colors cursor-pointer"
                                 >
                                   <div className="text-xs font-bold text-[#221F1F] truncate">
@@ -2173,12 +2283,29 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
         </header>
 
         {/* Active Section Body */}
-        <div className="p-3 sm:p-5 flex-1">
+        <div className="px-2.5 py-3 sm:p-5 flex-1">
           {activeSection === 'overview' && renderOverview()}
+          {(activeSection === 'suppliers' ||
+            activeSection === 'stores' ||
+            activeSection === 'drivers' ||
+            activeSection === 'store_staff') && (
+            <AccountsView
+              mode={activeSection as AccountSectionMode}
+              language={language}
+              currency={currency}
+              initialStatusTab={accountDeepLink.statusTab}
+              initialSelectedId={accountDeepLink.selectedId}
+              onDataChanged={() => fetchOverview(range)}
+            />
+          )}
           {activeSection === 'audit_log' && renderAuditLog()}
           {activeSection === 'roles_permissions' && renderRolesAndPermissions()}
           {activeSection === 'api_docs' && <ApiDocsView />}
           {activeSection !== 'overview' &&
+            activeSection !== 'suppliers' &&
+            activeSection !== 'stores' &&
+            activeSection !== 'drivers' &&
+            activeSection !== 'store_staff' &&
             activeSection !== 'audit_log' &&
             activeSection !== 'roles_permissions' &&
             activeSection !== 'api_docs' &&

@@ -884,6 +884,17 @@ export const initialSuppliers: SupplierProfile[] = [
     isVerified: true,
     businessType: 'wholesaler',
     verificationStatus: 'verified_business',
+    accountStatus: 'active',
+    kyc: {
+      licenseNo: 'BGD-10482',
+      taxId: 'TX-901245',
+      checklist: [
+        { key: 'commercial_license', status: 'approved' },
+        { key: 'owner_id', status: 'approved' },
+        { key: 'address_proof', status: 'approved' },
+        { key: 'phone_verified', status: 'approved' }
+      ]
+    },
     serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_najaf_center', 'zone_najaf_kufa', 'zone_karbala_center'],
     orderRules: {
       minOrderValueIQD: 150000
@@ -904,6 +915,17 @@ export const initialSuppliers: SupplierProfile[] = [
     isVerified: true,
     businessType: 'warehouse',
     verificationStatus: 'verified',
+    accountStatus: 'active',
+    kyc: {
+      licenseNo: 'BGD-22319',
+      taxId: 'TX-774512',
+      checklist: [
+        { key: 'commercial_license', status: 'approved' },
+        { key: 'owner_id', status: 'approved' },
+        { key: 'address_proof', status: 'approved' },
+        { key: 'phone_verified', status: 'approved' }
+      ]
+    },
     serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_babil_hilla', 'zone_babil_musayyib', 'zone_karbala_center', 'zone_karbala_hindiya'],
     orderRules: {
       minOrderValueIQD: 120000
@@ -924,11 +946,53 @@ export const initialSuppliers: SupplierProfile[] = [
     isVerified: true,
     businessType: 'authorized_distributor',
     verificationStatus: 'authorized_distributor',
+    accountStatus: 'active',
+    kyc: {
+      licenseNo: 'EBL-55901',
+      taxId: 'TX-662018',
+      checklist: [
+        { key: 'commercial_license', status: 'approved' },
+        { key: 'owner_id', status: 'approved' },
+        { key: 'address_proof', status: 'approved' },
+        { key: 'phone_verified', status: 'approved' }
+      ]
+    },
     serviceZoneIds: ['zone_baghdad_rusafa', 'zone_najaf_center', 'zone_babil_hilla'],
     orderRules: {
       minOrderValueIQD: 100000
     },
     createdAt: '2023-06-10'
+  },
+  {
+    id: 'supp_furat_pending',
+    companyName: 'مؤسسة الفرات الأوسط للتجارة والتوزيع',
+    contactPerson: 'علي حسين الكعبي',
+    phone: '+964 780 555 7711',
+    city: 'النجف',
+    address: 'حي السعد - المنطقة التجارية الثانية',
+    categories: ['أرز وحبوب', 'معلبات ومخللات'],
+    rating: 4.5,
+    totalVans: 2,
+    activeCreditLinesCount: 0,
+    isVerified: false,
+    businessType: 'wholesaler',
+    verificationStatus: 'pending',
+    accountStatus: 'active',
+    kyc: {
+      licenseNo: 'NJF-44192',
+      taxId: 'TX-883210',
+      checklist: [
+        { key: 'commercial_license', status: 'pending' },
+        { key: 'owner_id', status: 'approved' },
+        { key: 'address_proof', status: 'pending' },
+        { key: 'phone_verified', status: 'approved' }
+      ]
+    },
+    serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_najaf_center', 'zone_najaf_kufa'],
+    orderRules: {
+      minOrderValueIQD: 100000
+    },
+    createdAt: '2026-11-24'
   }
 ];
 
@@ -960,6 +1024,19 @@ export const initialOffers: SupplierOffer[] = [
     availableStock: 220,
     deliveryDays: 1,
     paymentTerms: { allowsCredit: true, maxCreditDays: 30, allowsCash: true }
+  },
+  {
+    id: 'off_rice_furat_pending',
+    barcode: '6281007000123',
+    supplierId: 'supp_furat_pending',
+    supplierName: 'مؤسسة الفرات الأوسط للتجارة والتوزيع',
+    supplierCity: 'النجف',
+    priceIQD: 28200,
+    priceUSD: 18.4,
+    minOrderQuantity: 3,
+    availableStock: 300,
+    deliveryDays: 1,
+    paymentTerms: { allowsCredit: false, maxCreditDays: 0, allowsCash: true }
   },
   // Product 2: زيت دوار الشمس (6210001234567)
   {
@@ -1392,6 +1469,18 @@ export const initialStores: StoreProfile[] = [
     storeType: 'supermarket',
     walletBalanceIQD: 1850000,
     isVerified: true,
+    verificationStatus: 'verified',
+    accountStatus: 'active',
+    kyc: {
+      licenseNo: 'STR-BGD-9012',
+      taxId: 'STX-44102',
+      checklist: [
+        { key: 'commercial_license', status: 'approved' },
+        { key: 'owner_id', status: 'approved' },
+        { key: 'address_proof', status: 'approved' },
+        { key: 'phone_verified', status: 'approved' }
+      ]
+    },
     customDomainSlug: 'almansoor-market',
     qrScanCount: 428,
     createdAt: '2023-04-10'
@@ -1407,6 +1496,18 @@ export const initialStores: StoreProfile[] = [
     storeType: 'grocery',
     walletBalanceIQD: 640000,
     isVerified: true,
+    verificationStatus: 'verified',
+    accountStatus: 'active',
+    kyc: {
+      licenseNo: 'STR-BGD-7721',
+      taxId: 'STX-31094',
+      checklist: [
+        { key: 'commercial_license', status: 'approved' },
+        { key: 'owner_id', status: 'approved' },
+        { key: 'address_proof', status: 'approved' },
+        { key: 'phone_verified', status: 'approved' }
+      ]
+    },
     customDomainSlug: 'dijla-karrada',
     qrScanCount: 215,
     createdAt: '2023-07-19'
@@ -1422,9 +1523,48 @@ export const initialStores: StoreProfile[] = [
     storeType: 'supermarket',
     walletBalanceIQD: 3200000,
     isVerified: true,
+    verificationStatus: 'verified',
+    accountStatus: 'active',
+    kyc: {
+      licenseNo: 'STR-BSR-5510',
+      taxId: 'STX-88211',
+      checklist: [
+        { key: 'commercial_license', status: 'approved' },
+        { key: 'owner_id', status: 'approved' },
+        { key: 'address_proof', status: 'approved' },
+        { key: 'phone_verified', status: 'approved' }
+      ]
+    },
     customDomainSlug: 'ashar-basra',
     qrScanCount: 680,
     createdAt: '2023-02-05'
+  },
+  {
+    id: 'store_najaf_pending',
+    name: 'أسواق الغدير للتجارة الحديثة',
+    ownerName: 'مهدي عبد الأمير',
+    phone: '+964 781 666 3344',
+    city: 'النجف',
+    district: 'حي الأمير',
+    address: 'الشارع الحولي، قرب تقاطع الجامعة',
+    storeType: 'grocery',
+    walletBalanceIQD: 0,
+    isVerified: false,
+    verificationStatus: 'pending',
+    accountStatus: 'active',
+    kyc: {
+      licenseNo: 'STR-NJF-1129',
+      taxId: 'STX-55209',
+      checklist: [
+        { key: 'commercial_license', status: 'pending' },
+        { key: 'owner_id', status: 'approved' },
+        { key: 'address_proof', status: 'pending' },
+        { key: 'phone_verified', status: 'approved' }
+      ]
+    },
+    customDomainSlug: 'ghadeer-najaf',
+    qrScanCount: 0,
+    createdAt: '2026-11-24'
   }
 ];
 
@@ -1440,6 +1580,16 @@ export const initialDrivers: DriverProfile[] = [
     vanWarehouseName: 'فان رقم 1 - قاطع الكرخ والمنصور',
     currentCashCollectedIQD: 1450000,
     isActiveShift: true,
+    accountStatus: 'active',
+    kyc: {
+      licenseNo: 'DRV-BGD-9182',
+      checklist: [
+        { key: 'commercial_license', status: 'approved' },
+        { key: 'owner_id', status: 'approved' },
+        { key: 'address_proof', status: 'approved' },
+        { key: 'phone_verified', status: 'approved' }
+      ]
+    },
     shiftStartTime: '2026-11-17T07:30:00Z',
     dailyTargetIQD: 2500000,
     commissionRatePercent: 1.5,
@@ -1471,6 +1621,16 @@ export const initialDrivers: DriverProfile[] = [
     vanWarehouseName: 'فان رقم 2 - قاطع الكرادة والجادرية',
     currentCashCollectedIQD: 820000,
     isActiveShift: true,
+    accountStatus: 'active',
+    kyc: {
+      licenseNo: 'DRV-BGD-7731',
+      checklist: [
+        { key: 'commercial_license', status: 'approved' },
+        { key: 'owner_id', status: 'approved' },
+        { key: 'address_proof', status: 'approved' },
+        { key: 'phone_verified', status: 'approved' }
+      ]
+    },
     shiftStartTime: '2026-11-17T07:45:00Z',
     dailyTargetIQD: 2000000,
     commissionRatePercent: 1.5,
@@ -1489,6 +1649,16 @@ export const initialDrivers: DriverProfile[] = [
     vanWarehouseName: 'فان رقم 3 - قاطع الرصافة والكرادة',
     currentCashCollectedIQD: 980000,
     isActiveShift: true,
+    accountStatus: 'active',
+    kyc: {
+      licenseNo: 'DRV-BGD-5540',
+      checklist: [
+        { key: 'commercial_license', status: 'approved' },
+        { key: 'owner_id', status: 'approved' },
+        { key: 'address_proof', status: 'approved' },
+        { key: 'phone_verified', status: 'approved' }
+      ]
+    },
     shiftStartTime: '2026-11-17T08:00:00Z',
     dailyTargetIQD: 2200000,
     commissionRatePercent: 1.25,

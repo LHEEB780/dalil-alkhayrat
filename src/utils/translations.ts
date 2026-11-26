@@ -294,6 +294,35 @@ export interface TranslationDictionary {
   adminConfirmReasonLabel: string;
   adminConfirmReasonPlaceholder: string;
   adminConfirmReasonRequired: string;
+  adminAccTabAll: string;
+  adminAccTabPending: string;
+  adminAccTabActive: string;
+  adminAccTabSuspended: string;
+  adminAccTabRejectedArchived: string;
+  adminAccSearchPlaceholder: string;
+  adminAccCityAll: string;
+  adminAccSortNewest: string;
+  adminAccSortName: string;
+  adminAccSortMetric: string;
+  adminAccAddSupplier: string;
+  adminAccAddStore: string;
+  adminAccEmpty: string;
+  adminAccStatusPending: string;
+  adminAccStatusActive: string;
+  adminAccStatusSuspended: string;
+  adminAccStatusRejected: string;
+  adminAccStatusArchived: string;
+  adminAccActionApprove: string;
+  adminAccActionReject: string;
+  adminAccActionSuspend: string;
+  adminAccActionReactivate: string;
+  adminAccActionArchive: string;
+  adminAccDetailOverview: string;
+  adminAccDetailKyc: string;
+  adminAccDetailActivity: string;
+  adminAccDetailCredit: string;
+  adminAccDetailNotes: string;
+  adminAccDetailAudit: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -592,7 +621,36 @@ export const translations: Record<Language, TranslationDictionary> = {
     adminSensitiveBadge: 'حسّاس',
     adminConfirmReasonLabel: 'سبب الإجراء (إلزامي للتوثيق في سجل التدقيق)',
     adminConfirmReasonPlaceholder: 'اكتب السبب الإداري الواضح قبل التأكيد...',
-    adminConfirmReasonRequired: 'يرجى إدخال سبب واضح لا يقل عن 3 أحرف للمتابعة'
+    adminConfirmReasonRequired: 'يرجى إدخال سبب واضح لا يقل عن 5 أحرف للمتابعة',
+    adminAccTabAll: 'الكل',
+    adminAccTabPending: 'بانتظار الموافقة',
+    adminAccTabActive: 'نشط',
+    adminAccTabSuspended: 'موقوف',
+    adminAccTabRejectedArchived: 'مرفوض / مؤرشف',
+    adminAccSearchPlaceholder: 'ابحث بالاسم، الهاتف، المعرّف، المدينة أو رقم اللوحة...',
+    adminAccCityAll: 'جميع المدن',
+    adminAccSortNewest: 'الأحدث تسجيلاً',
+    adminAccSortName: 'الاسم (أ-ي)',
+    adminAccSortMetric: 'الأعلى نشاطاً / مبيعات',
+    adminAccAddSupplier: 'إضافة مورد',
+    adminAccAddStore: 'إضافة متجر',
+    adminAccEmpty: 'لا توجد حسابات مطابقة لمعايير التصفية الحالية',
+    adminAccStatusPending: 'بانتظار التوثيق',
+    adminAccStatusActive: 'نشط',
+    adminAccStatusSuspended: 'موقوف',
+    adminAccStatusRejected: 'مرفوض',
+    adminAccStatusArchived: 'مؤرشف',
+    adminAccActionApprove: 'اعتماد وتوثيق',
+    adminAccActionReject: 'رفض',
+    adminAccActionSuspend: 'إيقاف الحساب',
+    adminAccActionReactivate: 'إعادة تفعيل',
+    adminAccActionArchive: 'أرشفة',
+    adminAccDetailOverview: 'نظرة عامة',
+    adminAccDetailKyc: 'التوثيق (KYC)',
+    adminAccDetailActivity: 'النشاط',
+    adminAccDetailCredit: 'الائتمان',
+    adminAccDetailNotes: 'الملاحظات',
+    adminAccDetailAudit: 'السجل'
   },
   en: {
     // Brand & General
@@ -889,7 +947,36 @@ export const translations: Record<Language, TranslationDictionary> = {
     adminSensitiveBadge: 'Sensitive',
     adminConfirmReasonLabel: 'Action Reason (mandatory for Audit Log)',
     adminConfirmReasonPlaceholder: 'Enter a clear administrative reason before confirming...',
-    adminConfirmReasonRequired: 'Please enter a clear reason (at least 3 characters) to proceed'
+    adminConfirmReasonRequired: 'Please enter a clear reason (at least 5 characters) to proceed',
+    adminAccTabAll: 'All',
+    adminAccTabPending: 'Pending Approval',
+    adminAccTabActive: 'Active',
+    adminAccTabSuspended: 'Suspended',
+    adminAccTabRejectedArchived: 'Rejected / Archived',
+    adminAccSearchPlaceholder: 'Search by name, phone, ID, city, or plate...',
+    adminAccCityAll: 'All Cities',
+    adminAccSortNewest: 'Newest First',
+    adminAccSortName: 'Name (A-Z)',
+    adminAccSortMetric: 'Highest Volume / Activity',
+    adminAccAddSupplier: 'Add Supplier',
+    adminAccAddStore: 'Add Store',
+    adminAccEmpty: 'No accounts match the current filters',
+    adminAccStatusPending: 'Pending Verification',
+    adminAccStatusActive: 'Active',
+    adminAccStatusSuspended: 'Suspended',
+    adminAccStatusRejected: 'Rejected',
+    adminAccStatusArchived: 'Archived',
+    adminAccActionApprove: 'Approve & Verify',
+    adminAccActionReject: 'Reject',
+    adminAccActionSuspend: 'Suspend',
+    adminAccActionReactivate: 'Reactivate',
+    adminAccActionArchive: 'Archive',
+    adminAccDetailOverview: 'Overview',
+    adminAccDetailKyc: 'KYC Docs',
+    adminAccDetailActivity: 'Activity',
+    adminAccDetailCredit: 'Credit',
+    adminAccDetailNotes: 'Notes',
+    adminAccDetailAudit: 'Audit Log'
   }
 };
 

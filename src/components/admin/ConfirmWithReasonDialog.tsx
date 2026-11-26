@@ -10,6 +10,9 @@ export interface ConfirmWithReasonDialogProps {
   confirmLabel?: string;
   danger?: boolean;
   loading?: boolean;
+  minReasonLength?: number;
+  serverError?: string | null;
+  extraContent?: React.ReactNode;
   language: Language;
   onConfirm: (reason: string) => void | Promise<void>;
   onCancel: () => void;
@@ -22,6 +25,9 @@ export const ConfirmWithReasonDialog: React.FC<ConfirmWithReasonDialogProps> = (
   confirmLabel,
   danger = true,
   loading = false,
+  minReasonLength = 5,
+  serverError = null,
+  extraContent,
   language,
   onConfirm,
   onCancel
@@ -43,7 +49,7 @@ export const ConfirmWithReasonDialog: React.FC<ConfirmWithReasonDialogProps> = (
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = reason.trim();
-    if (trimmed.length < 3) {
+    if (trimmed.length < minReasonLength) {
       setValidationError(t.adminConfirmReasonRequired);
       return;
     }
@@ -95,6 +101,8 @@ export const ConfirmWithReasonDialog: React.FC<ConfirmWithReasonDialogProps> = (
             </p>
           )}
 
+          {extraContent}
+
           <div>
             <label
               htmlFor="admin-confirm-reason-input"
@@ -108,7 +116,7 @@ export const ConfirmWithReasonDialog: React.FC<ConfirmWithReasonDialogProps> = (
               value={reason}
               onChange={(e) => {
                 setReason(e.target.value);
-                if (validationError && e.target.value.trim().length >= 3) {
+                if (validationError && e.target.value.trim().length >= minReasonLength) {
                   setValidationError(null);
                 }
               }}
@@ -116,8 +124,8 @@ export const ConfirmWithReasonDialog: React.FC<ConfirmWithReasonDialogProps> = (
               disabled={loading}
               className="w-full rounded-xl border border-[#D1D5DB] px-3 py-2.5 text-xs sm:text-sm text-[#221F1F] focus:outline-none focus:ring-2 focus:ring-[#00A046]/30 focus:border-[#00A046] resize-none"
             />
-            {validationError && (
-              <p className="mt-1.5 text-xs font-bold text-red-600">{validationError}</p>
+            {(validationError || serverError) && (
+              <p className="mt-1.5 text-xs font-bold text-red-600">{validationError || serverError}</p>
             )}
           </div>
 

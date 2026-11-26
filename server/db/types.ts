@@ -10,6 +10,35 @@ export type UserRole = 'store' | 'cashier' | 'accountant' | 'supplier' | 'driver
 
 export type StoreStaffRole = 'cashier' | 'accountant';
 
+export type AccountStatus = 'active' | 'suspended' | 'rejected' | 'archived';
+
+export interface AdminInternalNote {
+  id: string;
+  at: string;
+  author: string;
+  text: string;
+}
+
+export type KycChecklistKey =
+  | 'commercial_license'
+  | 'owner_id'
+  | 'address_proof'
+  | 'phone_verified';
+
+export type KycChecklistItemStatus = 'pending' | 'approved' | 'rejected';
+
+export interface KycChecklistItem {
+  key: KycChecklistKey;
+  status: KycChecklistItemStatus;
+  note?: string;
+}
+
+export interface AccountKycInfo {
+  licenseNo?: string;
+  taxId?: string;
+  checklist: KycChecklistItem[];
+}
+
 export interface StoreStaffAccount {
   id: string;
   storeId: string;
@@ -21,6 +50,12 @@ export interface StoreStaffAccount {
   branchName: string;
   isActive: boolean;
   passwordHash: string;
+  accountStatus?: AccountStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
+  adminNotes?: AdminInternalNote[];
+  kyc?: AccountKycInfo;
   createdAt: string;
   lastLoginAt?: string;
 }
@@ -115,6 +150,13 @@ export interface StoreProfile {
   storeType: 'supermarket' | 'grocery' | 'wholesale_sub';
   walletBalanceIQD: number;
   isVerified: boolean;
+  verificationStatus?: 'pending' | 'verified';
+  accountStatus?: AccountStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
+  adminNotes?: AdminInternalNote[];
+  kyc?: AccountKycInfo;
   customDomainSlug: string; // for public B2C storefront e.g., "almansoor-market"
   qrScanCount: number;
   createdAt: string;
@@ -188,6 +230,12 @@ export interface SupplierProfile {
   isVerified: boolean;
   businessType: SellerBusinessType;
   verificationStatus: VerificationStatus;
+  accountStatus?: AccountStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
+  adminNotes?: AdminInternalNote[];
+  kyc?: AccountKycInfo;
   serviceZoneIds: string[];
   orderRules?: SupplierOrderRules;
   createdAt: string;
@@ -204,6 +252,12 @@ export interface DriverProfile {
   vanWarehouseName: string;
   currentCashCollectedIQD: number;
   isActiveShift: boolean;
+  accountStatus?: AccountStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
+  adminNotes?: AdminInternalNote[];
+  kyc?: AccountKycInfo;
   shiftStartTime?: string;
   dailyTargetIQD?: number;
   commissionRatePercent?: number;

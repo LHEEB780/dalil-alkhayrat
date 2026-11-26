@@ -5,6 +5,35 @@ export type Role = 'store' | 'cashier' | 'accountant' | 'supplier' | 'driver' | 
 
 export type StoreStaffRole = 'cashier' | 'accountant';
 
+export type AccountStatus = 'active' | 'suspended' | 'rejected' | 'archived';
+
+export interface AdminInternalNote {
+  id: string;
+  at: string;
+  author: string;
+  text: string;
+}
+
+export type KycChecklistKey =
+  | 'commercial_license'
+  | 'owner_id'
+  | 'address_proof'
+  | 'phone_verified';
+
+export type KycChecklistItemStatus = 'pending' | 'approved' | 'rejected';
+
+export interface KycChecklistItem {
+  key: KycChecklistKey;
+  status: KycChecklistItemStatus;
+  note?: string;
+}
+
+export interface AccountKycInfo {
+  licenseNo?: string;
+  taxId?: string;
+  checklist: KycChecklistItem[];
+}
+
 export interface StoreStaffMember {
   id: string;
   storeId: string;
@@ -15,6 +44,12 @@ export interface StoreStaffMember {
   branchId: string;
   branchName: string;
   isActive: boolean;
+  accountStatus?: AccountStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
+  adminNotes?: AdminInternalNote[];
+  kyc?: AccountKycInfo;
   createdAt: string;
   lastLoginAt?: string;
 }
@@ -49,6 +84,12 @@ export interface SupplierProfile {
   isVerified: boolean;
   businessType: SellerBusinessType;
   verificationStatus: VerificationStatus;
+  accountStatus?: AccountStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
+  adminNotes?: AdminInternalNote[];
+  kyc?: AccountKycInfo;
   serviceZoneIds: string[];
   orderRules?: SupplierOrderRules;
   createdAt: string;

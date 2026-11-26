@@ -319,11 +319,14 @@ apiRouter.patch('/orders/:id/status', (req: Request, res: Response) => {
     }
 
     if (driverId) {
-      const driver = db.drivers.find(d => d.id === driverId);
-      if (driver) {
-        order.assignedDriverId = driver.id;
-        order.assignedDriverName = driver.name;
-      }
+      const driver = db.assertDriverOperable(driverId);
+      order.assignedDriverId = driver.id;
+      order.assignedDriverName = driver.name;
+    } else if (
+      (status === 'assigned_driver' || status === 'out_for_delivery') &&
+      order.assignedDriverId
+    ) {
+      db.assertDriverOperable(order.assignedDriverId);
     }
 
     if (status) {

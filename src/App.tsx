@@ -707,8 +707,12 @@ export default function App() {
         </div>
       )}
       
-      {/* Main Header with User Profile (hidden on full-screen category views & isolated B2C consumer storefront) */}
-      {activeTab !== 'all_categories' && activeTab !== 'category_branches' && activeTab !== 'b2c' && (
+      {/* Main Header with User Profile (hidden on full-screen category views, isolated B2C storefront, & admin console) */}
+      {userSession?.role !== 'admin' &&
+        activeTab !== 'all_categories' &&
+        activeTab !== 'category_branches' &&
+        activeTab !== 'b2c' &&
+        activeTab !== 'admin_console' && (
         <Header
           userSession={userSession}
           onLogout={handleLogout}
@@ -736,7 +740,7 @@ export default function App() {
       )}
 
       {/* Category Bar when in Marketplace view (hidden inside a single supplier store page) */}
-      {activeTab === 'marketplace' && !selectedSupplierStore && (
+      {userSession?.role !== 'admin' && activeTab === 'marketplace' && !selectedSupplierStore && (
         <CategoryBar
           categories={categories}
           selectedCategory={selectedCategory}
@@ -773,11 +777,15 @@ export default function App() {
 
       {/* Main Content Area - Isolated by role and active tab */}
       <main
-        className={`flex-1 max-w-7xl w-full mx-auto ${
-          activeTab === 'all_categories' || activeTab === 'category_branches'
-            ? 'px-0 sm:px-6 lg:px-8 py-0 sm:py-5 pb-4 sm:pb-8'
-            : `px-4 sm:px-6 lg:px-8 py-4 sm:py-6 ${isCashierUser ? 'pb-8' : 'pb-24'}`
-        }`}
+        className={
+          userSession?.role === 'admin' || activeTab === 'admin_console'
+            ? 'flex-1 w-full max-w-full p-0 flex flex-col'
+            : `flex-1 max-w-7xl w-full mx-auto ${
+                activeTab === 'all_categories' || activeTab === 'category_branches'
+                  ? 'px-0 sm:px-6 lg:px-8 py-0 sm:py-5 pb-4 sm:pb-8'
+                  : `px-4 sm:px-6 lg:px-8 py-4 sm:py-6 ${isCashierUser ? 'pb-8' : 'pb-24'}`
+              }`
+        }
       >
         
         {activeTab === 'marketplace' && selectedSupplierStore && (
@@ -1154,8 +1162,12 @@ export default function App() {
 
       </main>
 
-      {/* Footer (hidden on full-screen category views & isolated B2C storefront preview) */}
-      {activeTab !== 'all_categories' && activeTab !== 'category_branches' && activeTab !== 'b2c' && (
+      {/* Footer (hidden on full-screen category views, isolated B2C storefront preview & admin console) */}
+      {userSession?.role !== 'admin' &&
+        activeTab !== 'all_categories' &&
+        activeTab !== 'category_branches' &&
+        activeTab !== 'b2c' &&
+        activeTab !== 'admin_console' && (
         <footer className="bg-white border-t border-[#E9E9E9] py-6 text-xs text-[#797878] font-brand">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -1339,7 +1351,7 @@ export default function App() {
           vehiclePlate={vanSummary.vehiclePlate}
           vanWarehouseName={vanSummary.vanWarehouseName}
         />
-      ) : !isRestrictedStaff && (
+      ) : !isRestrictedStaff && userSession?.role !== 'admin' && (
         <RetailerSidebarDrawer
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
