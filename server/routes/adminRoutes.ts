@@ -271,6 +271,29 @@ adminRouter.get('/:type/:id', requireAccountViewPermission, (req: Request, res: 
   }
 });
 
+// Add internal admin note
+adminRouter.post('/:type/:id/notes', requireAccountActionPermission, (req: Request, res: Response) => {
+  try {
+    const type = parseAccountType(req.params.type)!;
+    const actor = req.adminActor!;
+    const text = typeof req.body?.text === 'string' ? req.body.text : '';
+    const detail = db.addAdminAccountNote({
+      type,
+      id: req.params.id,
+      text,
+      actor: { actorId: actor.actorId, actorName: actor.actorName }
+    });
+    res.status(201).json({
+      success: true,
+      message: 'تمت إضافة الملاحظة الداخلية',
+      data: detail
+    });
+  } catch (error: any) {
+    const statusCode = error?.statusCode === 404 ? 404 : 400;
+    res.status(statusCode).json({ success: false, message: error.message });
+  }
+});
+
 // Status transitions: approve | reject | suspend | reactivate | archive (Reason mandatory >= 5 chars)
 adminRouter.post('/:type/:id/:action', requireAccountActionPermission, (req: Request, res: Response) => {
   try {
@@ -322,29 +345,6 @@ adminRouter.patch('/:type/:id', requireAccountActionPermission, (req: Request, r
     res.json({
       success: true,
       message: 'تم تحديث بيانات الحساب بنجاح',
-      data: detail
-    });
-  } catch (error: any) {
-    const statusCode = error?.statusCode === 404 ? 404 : 400;
-    res.status(statusCode).json({ success: false, message: error.message });
-  }
-});
-
-// Add internal admin note
-adminRouter.post('/:type/:id/notes', requireAccountActionPermission, (req: Request, res: Response) => {
-  try {
-    const type = parseAccountType(req.params.type)!;
-    const actor = req.adminActor!;
-    const text = typeof req.body?.text === 'string' ? req.body.text : '';
-    const detail = db.addAdminAccountNote({
-      type,
-      id: req.params.id,
-      text,
-      actor: { actorId: actor.actorId, actorName: actor.actorName }
-    });
-    res.status(201).json({
-      success: true,
-      message: 'تمت إضافة الملاحظة الداخلية',
       data: detail
     });
   } catch (error: any) {

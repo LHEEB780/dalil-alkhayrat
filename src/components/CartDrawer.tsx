@@ -13,7 +13,7 @@ import {
   Truck,
   ArrowRight
 } from 'lucide-react';
-import { CartItem, Currency, Language } from '../types/index.ts';
+import { CartItem, CreditAccountItem, Currency, Language } from '../types/index.ts';
 import { StoreDistrict, resolveWholesaleSupplierByOffer } from '../data/nearbySuppliers.ts';
 import { formatCurrency } from '../utils/format.ts';
 import { translations } from '../utils/translations.ts';
@@ -57,6 +57,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const isAr = language === 'ar';
   const t = translations[language];
   const [paymentMethod, setPaymentMethod] = useState<'cod' | 'credit' | 'wallet' | 'online'>('credit');
+  const [hasManualPaymentSelection, setHasManualPaymentSelection] = useState(false);
+  const [creditAccounts, setCreditAccounts] = useState<CreditAccountItem[]>([]);
+  const [creditLoaded, setCreditLoaded] = useState(false);
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -64,6 +67,34 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   useEffect(() => {
     setErrorMessage(null);
   }, [isOpen, cartItems, paymentMethod]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setHasManualPaymentSelection(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCreditLoaded(false);
+
+    fetch(`/api/credit/accounts?storeId=${encodeURIComponent(storeId)}`)
+      .then(async (res) => {
+        const json = await res.json().catch(() => null);
+        if (!cancelled && res.ok && json?.success && Array.isArray(json.data)) {
+          setCreditAccounts(json.data);
+          setCreditLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCreditLoaded(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, storeId]);
 
   // Group items automatically by supplier! (Core B2B requirement)
   const supplierGroups = useMemo(() => {
@@ -158,6 +189,35 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     [supplierGroups, supplierOrderValidations]
   );
 
+  const creditAccountSupplierIds = useMemo(
+    () => new Set(creditAccounts.map((acc) => acc.supplierId)),
+    [creditAccounts]
+  );
+
+  const missingCreditSupplierIds = useMemo(() => {
+    if (!creditLoaded) return new Set<string>();
+    return new Set(
+      supplierGroups
+        .filter((g) => !creditAccountSupplierIds.has(g.supplierId))
+        .map((g) => g.supplierId)
+    );
+  }, [creditLoaded, supplierGroups, creditAccountSupplierIds]);
+
+  const hasAnyCreditAccountInCart = useMemo(
+    () => creditLoaded && supplierGroups.some((g) => creditAccountSupplierIds.has(g.supplierId)),
+    [creditLoaded, supplierGroups, creditAccountSupplierIds]
+  );
+
+  const hasMissingCreditAccount =
+    paymentMethod === 'credit' && creditLoaded && missingCreditSupplierIds.size > 0;
+
+  useEffect(() => {
+    if (!isOpen || !creditLoaded || supplierGroups.length === 0 || hasManualPaymentSelection) {
+      return;
+    }
+    setPaymentMethod(hasAnyCreditAccountInCart ? 'credit' : 'cod');
+  }, [isOpen, creditLoaded, supplierGroups.length, hasManualPaymentSelection, hasAnyCreditAccountInCart]);
+
   if (!isOpen) return null;
 
   const formatFailedRuleAlert = (rule: FailedSupplierOrderRule): string => {
@@ -195,6 +255,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     }
     if (hasUnmetOrderRules) {
       setErrorMessage(t.orderRulesCartBlockedNotice);
+      return;
+    }
+    if (hasMissingCreditAccount) {
+      setErrorMessage(
+        isAr
+          ? 'لا يوجد حساب ائتماني لديك مع أحد الموردين في السلة. اختر الدفع عند الاستلام أو أزل منتجات المورد.'
+          : 'A supplier in your cart has no credit account with your store. Choose cash on delivery or remove that supplier’s items.'
+      );
       return;
     }
 
@@ -314,9 +382,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               {/* Grouped Supplier Orders */}
               {supplierGroups.map((group) => {
                 const isUnsupported = unsupportedSupplierIds.has(group.supplierId);
+                const isMissingCredit =
+                  paymentMethod === 'credit' &&
+                  creditLoaded &&
+                  missingCreditSupplierIds.has(group.supplierId);
                 const orderValidation = supplierOrderValidations[group.supplierId];
                 const hasFailedOrderRules = orderValidation && !orderValidation.isValid;
-                const hasSupplierIssue = isUnsupported || hasFailedOrderRules;
+                const hasSupplierIssue = isUnsupported || hasFailedOrderRules || isMissingCredit;
                 return (
                 <div key={group.supplierId} className={`border rounded-xl overflow-hidden bg-white shadow-xs ${hasSupplierIssue ? 'border-red-300' : 'border-[#E5E7EB]'}`}>
                   
@@ -344,6 +416,38 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       >
                         {t.geoRemoveSupplierItems}
                       </button>
+                    </div>
+                  )}
+
+                  {isMissingCredit && (
+                    <div className="px-3.5 py-2.5 bg-red-50 border-b border-red-200 text-red-700 text-xs space-y-2">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[#B91C1C]" />
+                        <span>
+                          {isAr
+                            ? 'لا يوجد حساب ائتماني لديك مع هذا المورد. اختر الدفع عند الاستلام أو اطلب فتح حساب'
+                            : 'You do not have a credit account with this supplier. Choose cash on delivery or request an account.'}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHasManualPaymentSelection(true);
+                            setPaymentMethod('cod');
+                          }}
+                          className="shrink-0 px-2.5 py-1 rounded-lg bg-white border border-red-200 text-red-700 font-bold text-[11px] hover:bg-red-100 transition cursor-pointer"
+                        >
+                          {isAr ? 'الدفع عند الاستلام' : 'Cash on Delivery'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSupplierItems(group.supplierId)}
+                          className="shrink-0 px-2.5 py-1 rounded-lg bg-white border border-red-200 text-red-700 font-bold text-[11px] hover:bg-red-100 transition cursor-pointer"
+                        >
+                          {isAr ? 'إزالة منتجات هذا المورد' : "Remove this supplier's items"}
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -444,7 +548,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   {/* Credit */}
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod('credit')}
+                    onClick={() => {
+                      setHasManualPaymentSelection(true);
+                      setPaymentMethod('credit');
+                    }}
                     className={`p-3 rounded-lg border text-right transition flex items-start gap-2 ${
                       paymentMethod === 'credit'
                         ? 'border-[#00A046] bg-emerald-50/40 text-[#00A046] font-bold shadow-xs'
@@ -461,7 +568,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   {/* COD */}
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod('cod')}
+                    onClick={() => {
+                      setHasManualPaymentSelection(true);
+                      setPaymentMethod('cod');
+                    }}
                     className={`p-3 rounded-lg border text-right transition flex items-start gap-2 ${
                       paymentMethod === 'cod'
                         ? 'border-[#00A046] bg-emerald-50/40 text-[#00A046] font-bold shadow-xs'
@@ -478,7 +588,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   {/* Wallet */}
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod('wallet')}
+                    onClick={() => {
+                      setHasManualPaymentSelection(true);
+                      setPaymentMethod('wallet');
+                    }}
                     className={`p-3 rounded-lg border text-right transition flex items-start gap-2 ${
                       paymentMethod === 'wallet'
                         ? 'border-[#00A046] bg-emerald-50/40 text-[#00A046] font-bold shadow-xs'
@@ -495,7 +608,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   {/* Online / Cards */}
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod('online')}
+                    onClick={() => {
+                      setHasManualPaymentSelection(true);
+                      setPaymentMethod('online');
+                    }}
                     className={`p-3 rounded-lg border text-right transition flex items-start gap-2 ${
                       paymentMethod === 'online'
                         ? 'border-[#00A046] bg-emerald-50/40 text-[#00A046] font-bold shadow-xs'
@@ -557,6 +673,17 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
               </div>
             )}
 
+            {hasMissingCreditAccount && (
+              <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[#B91C1C]" />
+                <span>
+                  {isAr
+                    ? 'تم تعطيل إتمام الطلب: يوجد مورد في السلة لا يوجد حساب ائتماني لديك معه للدفع الآجل.'
+                    : 'Checkout disabled: at least one supplier in your cart has no credit account for credit payment.'}
+                </span>
+              </div>
+            )}
+
             {errorMessage && (
               <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[#B91C1C]" />
@@ -570,7 +697,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
             <button
               type="button"
               onClick={handleCheckout}
-              disabled={isSubmitting || hasUnsupportedSuppliers || hasUnmetOrderRules}
+              disabled={isSubmitting || hasUnsupportedSuppliers || hasUnmetOrderRules || hasMissingCreditAccount}
               className="w-full py-3 px-4 rounded-xl bg-[#00A046] text-white font-bold text-sm hover:bg-[#008a3c] disabled:bg-gray-400 disabled:cursor-not-allowed transition shadow-sm flex items-center justify-center gap-2 cursor-pointer"
             >
               {isSubmitting ? (
