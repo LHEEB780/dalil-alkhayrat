@@ -71,6 +71,7 @@ import { CatalogView } from './CatalogView.tsx';
 import { OrdersView } from './OrdersView.tsx';
 import { DisputesView } from './DisputesView.tsx';
 import { LogisticsView } from './LogisticsView.tsx';
+import { DeliveryNetworkView } from './DeliveryNetworkView.tsx';
 
 export type AdminSectionId =
   | 'overview'
@@ -84,6 +85,7 @@ export type AdminSectionId =
   | 'orders'
   | 'disputes'
   | 'fleet'
+  | 'delivery_network'
   | 'credit_limits'
   | 'credit_upgrades'
   | 'ledger'
@@ -239,6 +241,22 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         descAr: 'متابعة خطوط السير، حمولة الفانات، ومؤشرات الالتزام بالزيارات الميدانية.',
         descEn: 'Oversee delivery routes, mobile van inventory, and field visit compliance.',
         icon: Activity,
+        implemented: true
+      }
+    ]
+  },
+  {
+    groupId: 'delivery',
+    labelAr: 'شبكة التوصيل',
+    labelEn: 'Delivery Network',
+    items: [
+      {
+        id: 'delivery_network',
+        labelAr: 'شبكة توصيل المنصة',
+        labelEn: 'Platform Delivery Network',
+        descAr: 'شركاء التوصيل، المركبات، سائقو المنصة، بطاقة الأسعار، إعدادات الموردين ومحاكي الرسوم.',
+        descEn: 'Delivery partners, vehicles, platform drivers, rate cards, supplier delivery settings, and fee simulator.',
+        icon: Truck,
         implemented: true
       }
     ]
@@ -403,6 +421,8 @@ interface AdminOverviewData {
     catalogLowQualityCount?: number;
     productsWithoutOffersCount?: number;
     priceAnomalyOffersCount?: number;
+    pendingDeliveryPartnersCount?: number;
+    expiringVehicleDocsCount?: number;
   };
   dailySeries: Array<{
     date: string;
@@ -435,7 +455,10 @@ interface AdminOverviewData {
       | 'disputed_order'
       | 'blocked_credit'
       | 'catalog_no_offers'
-      | 'catalog_price_anomaly';
+      | 'catalog_price_anomaly'
+      | 'pending_delivery_partner'
+      | 'expiring_vehicle_doc'
+      | 'supplier_no_delivery_option';
     severity: 'high' | 'medium';
     titleAr: string;
     titleEn: string;
@@ -524,6 +547,10 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
     filterPreset?: string | null;
   }>({});
   const [disputesDeepLink, setDisputesDeepLink] = useState<{
+    selectedId?: string | null;
+    filterPreset?: string | null;
+  }>({});
+  const [deliveryDeepLink, setDeliveryDeepLink] = useState<{
     selectedId?: string | null;
     filterPreset?: string | null;
   }>({});
@@ -702,6 +729,11 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
     );
     setDisputesDeepLink(
       section === 'disputes'
+        ? { selectedId: options?.selectedId, filterPreset: options?.filterPreset }
+        : {}
+    );
+    setDeliveryDeepLink(
+      section === 'delivery_network'
         ? { selectedId: options?.selectedId, filterPreset: options?.filterPreset }
         : {}
     );
@@ -900,6 +932,18 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                             {overview?.kpis.openDisputesCount}
                           </span>
                         )}
+                        {item.id === 'delivery_network' &&
+                          (overview?.kpis.pendingDeliveryPartnersCount || 0) > 0 && (
+                            <span
+                              className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                                isActive
+                                  ? 'bg-white/20 text-white'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {overview?.kpis.pendingDeliveryPartnersCount}
+                            </span>
+                          )}
                       </>
                     )}
                   </button>
@@ -2364,6 +2408,12 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                                 ? { selectedId: item.entityId }
                                 : item.type === 'pending_supplier' || item.type === 'pending_store'
                                 ? { statusTab: 'pending', selectedId: item.entityId }
+                                : item.type === 'pending_delivery_partner'
+                                ? { filterPreset: 'partners_pending', selectedId: item.entityId }
+                                : item.type === 'expiring_vehicle_doc'
+                                ? { filterPreset: 'vehicles_expiring', selectedId: item.entityId }
+                                : item.type === 'supplier_no_delivery_option'
+                                ? { filterPreset: 'supplier_delivery', selectedId: item.entityId }
                                 : undefined
                             )
                           }
@@ -2458,6 +2508,14 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
               onOpenOrder={(orderId) => handleNavigate('orders', { selectedId: orderId })}
             />
           )}
+          {activeSection === 'delivery_network' && (
+            <DeliveryNetworkView
+              language={language}
+              currency={currency}
+              initialDeepLink={deliveryDeepLink}
+              onDataChanged={() => fetchOverview(range)}
+            />
+          )}
           {activeSection === 'audit_log' && renderAuditLog()}
           {activeSection === 'roles_permissions' && renderRolesAndPermissions()}
           {activeSection === 'api_docs' && <ApiDocsView />}
@@ -2472,6 +2530,7 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
             activeSection !== 'orders' &&
             activeSection !== 'disputes' &&
             activeSection !== 'fleet' &&
+            activeSection !== 'delivery_network' &&
             activeSection !== 'audit_log' &&
             activeSection !== 'roles_permissions' &&
             activeSection !== 'api_docs' &&

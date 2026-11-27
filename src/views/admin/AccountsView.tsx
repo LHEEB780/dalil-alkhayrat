@@ -107,7 +107,11 @@ const KYC_ITEM_LABELS: Record<KycChecklistKey, { ar: string; en: string }> = {
   commercial_license: { ar: 'إجازة ممارسة المهنة / السجل التجاري', en: 'Commercial License / Registration' },
   owner_id: { ar: 'هوية الأحوال / البطاقة الوطنية للمالك', en: 'Owner National ID' },
   address_proof: { ar: 'إثبات عنوان المخزن أو المتجر', en: 'Address / Premises Proof' },
-  phone_verified: { ar: 'تأكيد رقم الهاتف التشغيلي', en: 'Verified Operational Phone' }
+  phone_verified: { ar: 'تأكيد رقم الهاتف التشغيلي', en: 'Verified Operational Phone' },
+  driver_license: { ar: 'إجازة سوق نافذة', en: 'Valid Driver License' },
+  vehicle_registration: { ar: 'سنوية / تسجيل المركبة', en: 'Vehicle Registration' },
+  insurance: { ar: 'تأمين المركبة', en: 'Vehicle Insurance' },
+  vehicle_inspection: { ar: 'فحص سلامة وصلاحية المركبة', en: 'Vehicle Safety Inspection' }
 };
 
 export const AccountsView: React.FC<AccountsViewProps> = ({

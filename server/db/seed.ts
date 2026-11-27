@@ -22,7 +22,12 @@ import {
   VanExpenseRecord,
   VanReturnRecord,
   ShiftCloseReport,
-  Dispute
+  Dispute,
+  DeliveryPartner,
+  DeliveryVehicle,
+  DeliveryDriver,
+  DeliveryRateRule,
+  DeliveryPlatformSettings
 } from './types.ts';
 import { buildBranchProductsAndOffers } from './branchProductsSeed.ts';
 
@@ -900,6 +905,11 @@ export const initialSuppliers: SupplierProfile[] = [
     orderRules: {
       minOrderValueIQD: 150000
     },
+    deliverySettings: {
+      hasOwnFleet: true,
+      allowPlatformDelivery: false,
+      allowStorePickup: true
+    },
     createdAt: '2023-01-15'
   },
   {
@@ -930,6 +940,11 @@ export const initialSuppliers: SupplierProfile[] = [
     serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_babil_hilla', 'zone_babil_musayyib', 'zone_karbala_center', 'zone_karbala_hindiya'],
     orderRules: {
       minOrderValueIQD: 120000
+    },
+    deliverySettings: {
+      hasOwnFleet: true,
+      allowPlatformDelivery: false,
+      allowStorePickup: true
     },
     createdAt: '2023-03-20'
   },
@@ -962,6 +977,12 @@ export const initialSuppliers: SupplierProfile[] = [
     orderRules: {
       minOrderValueIQD: 100000
     },
+    deliverySettings: {
+      hasOwnFleet: false,
+      allowPlatformDelivery: true,
+      allowStorePickup: true,
+      notes: 'توصيل عبر شبكة المنصة (بيانات تجريبية)'
+    },
     createdAt: '2023-06-10'
   },
   {
@@ -992,6 +1013,11 @@ export const initialSuppliers: SupplierProfile[] = [
     serviceZoneIds: ['zone_baghdad_karkh', 'zone_baghdad_rusafa', 'zone_najaf_center', 'zone_najaf_kufa'],
     orderRules: {
       minOrderValueIQD: 100000
+    },
+    deliverySettings: {
+      hasOwnFleet: true,
+      allowPlatformDelivery: false,
+      allowStorePickup: true
     },
     createdAt: '2026-11-24'
   }
@@ -2694,5 +2720,568 @@ export const initialShiftReports: ShiftCloseReport[] = [
     settledAt: '2026-11-23T18:45:00Z'
   }
 ];
+
+// ================= PLATFORM DELIVERY NETWORK SEED (DEMO DATA — PHASE D1) =================
+
+const demoDateDaysFromNow = (days: number): string =>
+  new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+export const initialDeliveryPartners: DeliveryPartner[] = [
+  {
+    id: 'dp_furat_logistics',
+    registrationCode: 'DP-100101',
+    type: 'company',
+    name: 'شركة الفرات اللوجستية للنقل المبرد (تجريبي)',
+    phone: '+964 780 100 2001',
+    city: 'النجف الأشرف',
+    governorateId: 'gov_najaf',
+    serviceZoneIds: ['zone_najaf_center', 'zone_najaf_kufa', 'zone_karbala_center'],
+    accountStatus: 'active',
+    statusReason: 'شريك معتمد للتشغيل التجريبي في الفرات الأوسط',
+    statusChangedAt: '2026-11-10T09:00:00Z',
+    statusChangedBy: 'admin_platform',
+    kyc: {
+      licenseNo: 'LOG-NJF-2026',
+      checklist: [
+        { key: 'driver_license', status: 'approved' },
+        { key: 'vehicle_registration', status: 'approved' },
+        { key: 'insurance', status: 'approved' },
+        { key: 'vehicle_inspection', status: 'approved' }
+      ]
+    },
+    payoutAccount: {
+      method: 'bank',
+      accountRef: 'IQ-DEMO-BANK-101'
+    },
+    acceptedTermsAt: '2026-11-10T08:30:00Z',
+    termsVersion: 'draft-v1-needs-legal-review',
+    createdAt: '2026-11-10T08:30:00Z'
+  },
+  {
+    id: 'dp_haider_individual',
+    registrationCode: 'DP-100102',
+    type: 'individual',
+    name: 'حيدر عبد الله الخفاجي (سائق شريك تجريبي)',
+    phone: '+964 781 200 3002',
+    city: 'كربلاء المقدسة',
+    governorateId: 'gov_karbala',
+    serviceZoneIds: ['zone_karbala_center', 'zone_karbala_hindiya'],
+    accountStatus: 'active',
+    statusReason: 'موافقة تشغيلية بعد فحص وثائق البيك أب',
+    statusChangedAt: '2026-11-14T10:15:00Z',
+    statusChangedBy: 'admin_platform',
+    kyc: {
+      licenseNo: 'DRV-KRB-3302',
+      checklist: [
+        { key: 'driver_license', status: 'approved' },
+        { key: 'vehicle_registration', status: 'approved' },
+        { key: 'insurance', status: 'approved' },
+        { key: 'vehicle_inspection', status: 'approved' }
+      ]
+    },
+    payoutAccount: {
+      method: 'zaincash',
+      accountRef: 'ZC-DEMO-07812003002'
+    },
+    acceptedTermsAt: '2026-11-14T09:00:00Z',
+    termsVersion: 'draft-v1-needs-legal-review',
+    createdAt: '2026-11-14T09:00:00Z'
+  },
+  {
+    id: 'dp_babil_pending',
+    registrationCode: 'DP-100103',
+    type: 'individual',
+    name: 'مهند طارق الجبوري (طلب معلق تجريبي)',
+    phone: '+964 772 300 4003',
+    city: 'الحلة - بابل',
+    governorateId: 'gov_babil',
+    serviceZoneIds: ['zone_babil_hilla', 'zone_babil_musayyib'],
+    accountStatus: 'pending',
+    kyc: {
+      licenseNo: 'DRV-BBL-9910',
+      checklist: [
+        { key: 'driver_license', status: 'pending' },
+        { key: 'vehicle_registration', status: 'pending' },
+        { key: 'insurance', status: 'pending' },
+        { key: 'vehicle_inspection', status: 'pending' }
+      ]
+    },
+    payoutAccount: {
+      method: 'cash'
+    },
+    acceptedTermsAt: '2026-11-26T11:20:00Z',
+    termsVersion: 'draft-v1-needs-legal-review',
+    createdAt: '2026-11-26T11:20:00Z'
+  }
+];
+
+export const initialDeliveryVehicles: DeliveryVehicle[] = [
+  {
+    id: 'dveh_platform_ref_1',
+    ownerType: 'platform',
+    plateNumber: 'NJF-9010-PL (تجريبي)',
+    vehicleClass: 'refrigerated_truck',
+    makeModel: 'إيسوزو NPR مبرد (أسطول المنصة)',
+    year: 2024,
+    capacityUnits: 250,
+    temperatureSupport: ['ambient', 'chilled', 'frozen'],
+    status: 'active',
+    statusReason: 'مركبة تبريد مركزية تابعة للمنصة',
+    statusChangedAt: '2026-11-01T08:00:00Z',
+    statusChangedBy: 'admin_platform',
+    docsExpiry: {
+      registrationExpiry: demoDateDaysFromNow(220),
+      insuranceExpiry: demoDateDaysFromNow(180),
+      inspectionExpiry: demoDateDaysFromNow(12) // Expiring within 30 days to trigger alert!
+    },
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'dveh_furat_small_1',
+    ownerType: 'partner',
+    partnerId: 'dp_furat_logistics',
+    plateNumber: 'NJF-4421-PT (تجريبي)',
+    vehicleClass: 'small_truck',
+    makeModel: 'كيا بونغو 3 صندوق مغلق',
+    year: 2022,
+    capacityUnits: 90,
+    temperatureSupport: ['ambient'],
+    status: 'active',
+    statusReason: 'مركبة معتمدة للتشغيل في النجف وكربلاء',
+    statusChangedAt: '2026-11-10T09:00:00Z',
+    statusChangedBy: 'admin_platform',
+    docsExpiry: {
+      registrationExpiry: demoDateDaysFromNow(200),
+      insuranceExpiry: demoDateDaysFromNow(190),
+      inspectionExpiry: demoDateDaysFromNow(150)
+    },
+    createdAt: '2026-11-10T08:30:00Z'
+  },
+  {
+    id: 'dveh_haider_pickup_1',
+    ownerType: 'partner',
+    partnerId: 'dp_haider_individual',
+    plateNumber: 'KRB-3180-PT (تجريبي)',
+    vehicleClass: 'pickup',
+    makeModel: 'تويوتا هايلوكس بيك أب',
+    year: 2021,
+    capacityUnits: 35,
+    temperatureSupport: ['ambient'],
+    status: 'active',
+    statusReason: 'مركبة شريك فردي معتمدة في كربلاء',
+    statusChangedAt: '2026-11-14T10:15:00Z',
+    statusChangedBy: 'admin_platform',
+    docsExpiry: {
+      registrationExpiry: demoDateDaysFromNow(18), // Also within 30 days
+      insuranceExpiry: demoDateDaysFromNow(120),
+      inspectionExpiry: demoDateDaysFromNow(90)
+    },
+    createdAt: '2026-11-14T09:00:00Z'
+  },
+  {
+    id: 'dveh_babil_pending_1',
+    ownerType: 'partner',
+    partnerId: 'dp_babil_pending',
+    plateNumber: 'BBL-7712-PT (تجريبي)',
+    vehicleClass: 'pickup',
+    makeModel: 'ميتسوبيشي L200',
+    year: 2020,
+    capacityUnits: 35,
+    temperatureSupport: ['ambient'],
+    status: 'pending',
+    docsExpiry: {
+      registrationExpiry: demoDateDaysFromNow(240),
+      insuranceExpiry: demoDateDaysFromNow(240)
+    },
+    createdAt: '2026-11-26T11:20:00Z'
+  }
+];
+
+export const initialDeliveryDrivers: DeliveryDriver[] = [
+  {
+    id: 'ddrv_platform_najaf_1',
+    providerType: 'platform',
+    name: 'عباس فاضل الموسوي (سائق منصة)',
+    phone: '+964 780 911 0001',
+    licenseNo: 'PLT-NJF-1101',
+    licenseExpiry: demoDateDaysFromNow(300),
+    assignedVehicleId: 'dveh_platform_ref_1',
+    governorateId: 'gov_najaf',
+    serviceZoneIds: ['zone_najaf_center', 'zone_najaf_kufa', 'zone_karbala_center'],
+    accountStatus: 'active',
+    isAvailable: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'ddrv_platform_babil_2',
+    providerType: 'platform',
+    name: 'زيدون حسين المعموري (سائق منصة)',
+    phone: '+964 780 911 0002',
+    licenseNo: 'PLT-BBL-1102',
+    licenseExpiry: demoDateDaysFromNow(280),
+    governorateId: 'gov_babil',
+    serviceZoneIds: ['zone_babil_hilla', 'zone_babil_musayyib'],
+    accountStatus: 'active',
+    isAvailable: true,
+    createdAt: '2026-11-05T08:00:00Z'
+  },
+  {
+    id: 'ddrv_partner_furat_1',
+    providerType: 'partner',
+    partnerId: 'dp_furat_logistics',
+    name: 'سجاد كريم الحسناوي (سائق شريك)',
+    phone: '+964 780 100 2099',
+    licenseNo: 'PRT-NJF-2099',
+    licenseExpiry: demoDateDaysFromNow(210),
+    assignedVehicleId: 'dveh_furat_small_1',
+    governorateId: 'gov_najaf',
+    serviceZoneIds: ['zone_najaf_center', 'zone_najaf_kufa'],
+    accountStatus: 'active',
+    isAvailable: true,
+    createdAt: '2026-11-10T09:00:00Z'
+  },
+  {
+    id: 'ddrv_partner_haider_1',
+    providerType: 'partner',
+    partnerId: 'dp_haider_individual',
+    name: 'حيدر عبد الله الخفاجي (سائق شريك تجريبي)',
+    phone: '+964 781 200 3002',
+    licenseNo: 'DRV-KRB-3302',
+    licenseExpiry: demoDateDaysFromNow(180),
+    assignedVehicleId: 'dveh_haider_pickup_1',
+    governorateId: 'gov_karbala',
+    serviceZoneIds: ['zone_karbala_center', 'zone_karbala_hindiya'],
+    accountStatus: 'active',
+    isAvailable: true,
+    createdAt: '2026-11-14T10:15:00Z'
+  }
+];
+
+export const initialDeliveryPlatformSettings: DeliveryPlatformSettings = {
+  freeDeliveryThresholdIQD: 250000, // قيمة تجريبية للعرض — قابلة للتعديل من الإدارة
+  partnerCommissionPercent: 0,
+  codAllowedForPartners: false,
+  vehicleClassDefaults: [
+    {
+      vehicleClass: 'motorcycle',
+      labelAr: 'دراجة نارية / ستوتة',
+      labelEn: 'Motorcycle / Cargo Bike',
+      capacityUnits: 12,
+      temperatureSupport: ['ambient']
+    },
+    {
+      vehicleClass: 'pickup',
+      labelAr: 'بيك أب',
+      labelEn: 'Pickup Truck',
+      capacityUnits: 35,
+      temperatureSupport: ['ambient']
+    },
+    {
+      vehicleClass: 'small_truck',
+      labelAr: 'شاحنة صغيرة (كيا / بونغو)',
+      labelEn: 'Small Truck',
+      capacityUnits: 90,
+      temperatureSupport: ['ambient']
+    },
+    {
+      vehicleClass: 'medium_truck',
+      labelAr: 'شاحنة متوسطة',
+      labelEn: 'Medium Truck',
+      capacityUnits: 300,
+      temperatureSupport: ['ambient']
+    },
+    {
+      vehicleClass: 'refrigerated_truck',
+      labelAr: 'شاحنة مبردة',
+      labelEn: 'Refrigerated Truck',
+      capacityUnits: 250,
+      temperatureSupport: ['ambient', 'chilled', 'frozen']
+    }
+  ],
+  updatedAt: '2026-11-01T08:00:00Z',
+  updatedBy: 'admin_platform'
+};
+
+export const initialDeliveryRateRules: DeliveryRateRule[] = [
+  // Najaf Zone Override (example showing Zone > Governorate specificity)
+  {
+    id: 'rate_najaf_center_moto',
+    nameAr: 'تعرفة النجف المركز - دراجة (قيمة تجريبية)',
+    nameEn: 'Najaf Center - Motorcycle (Demo)',
+    scope: { governorateId: 'gov_najaf', deliveryZoneId: 'zone_najaf_center' },
+    vehicleClass: 'motorcycle',
+    baseFeeIQD: 3000,
+    perUnitFeeIQD: 250,
+    minFeeIQD: 4000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  // Governorate Rules: Najaf
+  {
+    id: 'rate_gov_najaf_moto',
+    nameAr: 'تعرفة محافظة النجف - دراجة (تجريبي)',
+    nameEn: 'Najaf Gov - Motorcycle (Demo)',
+    scope: { governorateId: 'gov_najaf' },
+    vehicleClass: 'motorcycle',
+    baseFeeIQD: 3500,
+    perUnitFeeIQD: 300,
+    minFeeIQD: 5000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_gov_najaf_pickup',
+    nameAr: 'تعرفة محافظة النجف - بيك أب (تجريبي)',
+    nameEn: 'Najaf Gov - Pickup (Demo)',
+    scope: { governorateId: 'gov_najaf' },
+    vehicleClass: 'pickup',
+    baseFeeIQD: 7000,
+    perUnitFeeIQD: 350,
+    minFeeIQD: 8000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_gov_najaf_small',
+    nameAr: 'تعرفة محافظة النجف - شاحنة صغيرة (تجريبي)',
+    nameEn: 'Najaf Gov - Small Truck (Demo)',
+    scope: { governorateId: 'gov_najaf' },
+    vehicleClass: 'small_truck',
+    baseFeeIQD: 12000,
+    perUnitFeeIQD: 300,
+    minFeeIQD: 15000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_gov_najaf_medium',
+    nameAr: 'تعرفة محافظة النجف - شاحنة متوسطة (تجريبي)',
+    nameEn: 'Najaf Gov - Medium Truck (Demo)',
+    scope: { governorateId: 'gov_najaf' },
+    vehicleClass: 'medium_truck',
+    baseFeeIQD: 20000,
+    perUnitFeeIQD: 250,
+    minFeeIQD: 25000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_gov_najaf_ref',
+    nameAr: 'تعرفة محافظة النجف - شاحنة مبردة (تجريبي)',
+    nameEn: 'Najaf Gov - Refrigerated Truck (Demo)',
+    scope: { governorateId: 'gov_najaf' },
+    vehicleClass: 'refrigerated_truck',
+    baseFeeIQD: 16000,
+    perUnitFeeIQD: 400,
+    minFeeIQD: 20000,
+    refrigeratedSurchargeIQD: 6000,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  // Governorate Rules: Karbala
+  {
+    id: 'rate_gov_karbala_moto',
+    nameAr: 'تعرفة محافظة كربلاء - دراجة (تجريبي)',
+    nameEn: 'Karbala Gov - Motorcycle (Demo)',
+    scope: { governorateId: 'gov_karbala' },
+    vehicleClass: 'motorcycle',
+    baseFeeIQD: 3500,
+    perUnitFeeIQD: 300,
+    minFeeIQD: 5000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_gov_karbala_pickup',
+    nameAr: 'تعرفة محافظة كربلاء - بيك أب (تجريبي)',
+    nameEn: 'Karbala Gov - Pickup (Demo)',
+    scope: { governorateId: 'gov_karbala' },
+    vehicleClass: 'pickup',
+    baseFeeIQD: 7500,
+    perUnitFeeIQD: 350,
+    minFeeIQD: 8500,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_gov_karbala_small',
+    nameAr: 'تعرفة محافظة كربلاء - شاحنة صغيرة (تجريبي)',
+    nameEn: 'Karbala Gov - Small Truck (Demo)',
+    scope: { governorateId: 'gov_karbala' },
+    vehicleClass: 'small_truck',
+    baseFeeIQD: 12500,
+    perUnitFeeIQD: 300,
+    minFeeIQD: 15000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_gov_karbala_medium',
+    nameAr: 'تعرفة محافظة كربلاء - شاحنة متوسطة (تجريبي)',
+    nameEn: 'Karbala Gov - Medium Truck (Demo)',
+    scope: { governorateId: 'gov_karbala' },
+    vehicleClass: 'medium_truck',
+    baseFeeIQD: 21000,
+    perUnitFeeIQD: 250,
+    minFeeIQD: 25000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_gov_karbala_ref',
+    nameAr: 'تعرفة محافظة كربلاء - شاحنة مبردة (تجريبي)',
+    nameEn: 'Karbala Gov - Refrigerated Truck (Demo)',
+    scope: { governorateId: 'gov_karbala' },
+    vehicleClass: 'refrigerated_truck',
+    baseFeeIQD: 17000,
+    perUnitFeeIQD: 400,
+    minFeeIQD: 20000,
+    refrigeratedSurchargeIQD: 6500,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  // Governorate Rules: Babil
+  {
+    id: 'rate_gov_babil_moto',
+    nameAr: 'تعرفة محافظة بابل - دراجة (تجريبي)',
+    nameEn: 'Babil Gov - Motorcycle (Demo)',
+    scope: { governorateId: 'gov_babil' },
+    vehicleClass: 'motorcycle',
+    baseFeeIQD: 4000,
+    perUnitFeeIQD: 300,
+    minFeeIQD: 5000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_gov_babil_pickup',
+    nameAr: 'تعرفة محافظة بابل - بيك أب (تجريبي)',
+    nameEn: 'Babil Gov - Pickup (Demo)',
+    scope: { governorateId: 'gov_babil' },
+    vehicleClass: 'pickup',
+    baseFeeIQD: 8000,
+    perUnitFeeIQD: 350,
+    minFeeIQD: 9000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_gov_babil_small',
+    nameAr: 'تعرفة محافظة بابل - شاحنة صغيرة (تجريبي)',
+    nameEn: 'Babil Gov - Small Truck (Demo)',
+    scope: { governorateId: 'gov_babil' },
+    vehicleClass: 'small_truck',
+    baseFeeIQD: 13000,
+    perUnitFeeIQD: 300,
+    minFeeIQD: 16000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_gov_babil_medium',
+    nameAr: 'تعرفة محافظة بابل - شاحنة متوسطة (تجريبي)',
+    nameEn: 'Babil Gov - Medium Truck (Demo)',
+    scope: { governorateId: 'gov_babil' },
+    vehicleClass: 'medium_truck',
+    baseFeeIQD: 22000,
+    perUnitFeeIQD: 250,
+    minFeeIQD: 26000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_gov_babil_ref',
+    nameAr: 'تعرفة محافظة بابل - شاحنة مبردة (تجريبي)',
+    nameEn: 'Babil Gov - Refrigerated Truck (Demo)',
+    scope: { governorateId: 'gov_babil' },
+    vehicleClass: 'refrigerated_truck',
+    baseFeeIQD: 17500,
+    perUnitFeeIQD: 400,
+    minFeeIQD: 21000,
+    refrigeratedSurchargeIQD: 6500,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  // Global Fallback Rules (for Baghdad or any other zone)
+  {
+    id: 'rate_default_moto',
+    nameAr: 'التعرفة العامة الافتراضية - دراجة (تجريبي)',
+    nameEn: 'Global Default - Motorcycle (Demo)',
+    scope: {},
+    vehicleClass: 'motorcycle',
+    baseFeeIQD: 4000,
+    perUnitFeeIQD: 300,
+    minFeeIQD: 5000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_default_pickup',
+    nameAr: 'التعرفة العامة الافتراضية - بيك أب (تجريبي)',
+    nameEn: 'Global Default - Pickup (Demo)',
+    scope: {},
+    vehicleClass: 'pickup',
+    baseFeeIQD: 8000,
+    perUnitFeeIQD: 400,
+    minFeeIQD: 10000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_default_small',
+    nameAr: 'التعرفة العامة الافتراضية - شاحنة صغيرة (تجريبي)',
+    nameEn: 'Global Default - Small Truck (Demo)',
+    scope: {},
+    vehicleClass: 'small_truck',
+    baseFeeIQD: 14000,
+    perUnitFeeIQD: 350,
+    minFeeIQD: 17000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_default_medium',
+    nameAr: 'التعرفة العامة الافتراضية - شاحنة متوسطة (تجريبي)',
+    nameEn: 'Global Default - Medium Truck (Demo)',
+    scope: {},
+    vehicleClass: 'medium_truck',
+    baseFeeIQD: 24000,
+    perUnitFeeIQD: 300,
+    minFeeIQD: 28000,
+    refrigeratedSurchargeIQD: 0,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  },
+  {
+    id: 'rate_default_ref',
+    nameAr: 'التعرفة العامة الافتراضية - شاحنة مبردة (تجريبي)',
+    nameEn: 'Global Default - Refrigerated Truck (Demo)',
+    scope: {},
+    vehicleClass: 'refrigerated_truck',
+    baseFeeIQD: 18000,
+    perUnitFeeIQD: 450,
+    minFeeIQD: 22000,
+    refrigeratedSurchargeIQD: 7000,
+    isActive: true,
+    createdAt: '2026-11-01T08:00:00Z'
+  }
+];
+
 
 

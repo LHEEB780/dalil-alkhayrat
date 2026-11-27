@@ -24,7 +24,11 @@ export type AdminPermissionCode =
   | 'settings.manage'
   | 'roles.manage'
   | 'audit.view'
-  | 'apidocs.view';
+  | 'apidocs.view'
+  | 'delivery.view'
+  | 'delivery.partners.manage'
+  | 'delivery.vehicles.manage'
+  | 'delivery.rates.manage';
 
 export type AdminRoleId = 'super_admin' | 'operations' | 'finance' | 'support' | 'content';
 
@@ -124,6 +128,17 @@ export const ADMIN_PERMISSION_GROUPS: AdminPermissionGroup[] = [
       { code: 'audit.view', labelAr: 'عرض سجل التدقيق', labelEn: 'View audit log' },
       { code: 'apidocs.view', labelAr: 'عرض توثيق الـ API', labelEn: 'View API documentation' }
     ]
+  },
+  {
+    groupId: 'delivery',
+    labelAr: 'شبكة التوصيل',
+    labelEn: 'Delivery Network',
+    permissions: [
+      { code: 'delivery.view', labelAr: 'عرض شبكة التوصيل والمركبات والأسعار', labelEn: 'View delivery network, fleet & rates' },
+      { code: 'delivery.partners.manage', labelAr: 'إدارة شركاء وسائقي شبكة التوصيل', labelEn: 'Manage delivery partners & platform drivers', sensitive: true },
+      { code: 'delivery.vehicles.manage', labelAr: 'إدارة واعتماد مركبات شبكة التوصيل', labelEn: 'Manage & approve delivery vehicles', sensitive: true },
+      { code: 'delivery.rates.manage', labelAr: 'تعديل بطاقة الأسعار وإعدادات التوصيل', labelEn: 'Manage rate card & delivery settings', sensitive: true }
+    ]
   }
 ];
 
@@ -173,6 +188,10 @@ export const ADMIN_ROLES: AdminRoleDefinition[] = [
       'orders.override_status',
       'disputes.manage',
       'geo.manage',
+      'delivery.view',
+      'delivery.partners.manage',
+      'delivery.vehicles.manage',
+      'delivery.rates.manage',
       'audit.view'
     ]
   },

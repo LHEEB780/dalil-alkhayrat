@@ -11,6 +11,8 @@ import {
   adminDisputesRouter,
   adminLogisticsRouter
 } from './server/routes/adminOrdersRoutes.ts';
+import { adminDeliveryRouter } from './server/routes/adminDeliveryRoutes.ts';
+import { deliveryRouter } from './server/routes/deliveryRoutes.ts';
 
 dotenv.config();
 
@@ -30,7 +32,9 @@ async function startServer() {
   app.use('/api/admin/orders', adminOrdersRouter);
   app.use('/api/admin/disputes', adminDisputesRouter);
   app.use('/api/admin/logistics', adminLogisticsRouter);
+  app.use('/api/admin/delivery', adminDeliveryRouter);
   app.use('/api/admin', adminRouter);
+  app.use('/api/delivery', deliveryRouter);
   app.use('/api', apiRouter);
 
   // Health check

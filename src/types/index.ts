@@ -1,4 +1,24 @@
 import type { SupplierOrderRules } from '../../shared/orderRules.ts';
+import type {
+  DeliveryPartnerType,
+  DeliveryPlatformSettings,
+  DeliveryProviderType,
+  DeliveryRateRule,
+  DeliveryVehicleClass,
+  DeliveryVehicleStatus,
+  SupplierDeliverySettings,
+  VehicleTemperatureType
+} from '../../shared/deliveryRules.ts';
+export type {
+  DeliveryPartnerType,
+  DeliveryPlatformSettings,
+  DeliveryProviderType,
+  DeliveryRateRule,
+  DeliveryVehicleClass,
+  DeliveryVehicleStatus,
+  SupplierDeliverySettings,
+  VehicleTemperatureType
+};
 export type { SupplierOrderRules };
 
 export type Role = 'store' | 'cashier' | 'accountant' | 'supplier' | 'driver' | 'admin' | 'customer';
@@ -6,6 +26,7 @@ export type Role = 'store' | 'cashier' | 'accountant' | 'supplier' | 'driver' | 
 export type StoreStaffRole = 'cashier' | 'accountant';
 
 export type AccountStatus = 'active' | 'suspended' | 'rejected' | 'archived';
+export type DeliveryAccountStatus = 'pending' | AccountStatus;
 
 export interface AdminInternalNote {
   id: string;
@@ -18,7 +39,11 @@ export type KycChecklistKey =
   | 'commercial_license'
   | 'owner_id'
   | 'address_proof'
-  | 'phone_verified';
+  | 'phone_verified'
+  | 'driver_license'
+  | 'vehicle_registration'
+  | 'insurance'
+  | 'vehicle_inspection';
 
 export type KycChecklistItemStatus = 'pending' | 'approved' | 'rejected';
 
@@ -92,6 +117,7 @@ export interface SupplierProfile {
   kyc?: AccountKycInfo;
   serviceZoneIds: string[];
   orderRules?: SupplierOrderRules;
+  deliverySettings?: SupplierDeliverySettings;
   createdAt: string;
 }
 
@@ -261,6 +287,72 @@ export interface CreditUpgradeRequestItem {
   platformResponseAr: string;
   createdAt: string;
   resolvedAt?: string;
+}
+
+export interface DeliveryPartner {
+  id: string;
+  registrationCode: string;
+  type: DeliveryPartnerType;
+  name: string;
+  phone: string;
+  city: string;
+  governorateId: string;
+  serviceZoneIds: string[];
+  accountStatus: DeliveryAccountStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
+  kyc?: AccountKycInfo;
+  adminNotes?: AdminInternalNote[];
+  payoutAccount?: {
+    method: 'cash' | 'bank' | 'zaincash';
+    accountRef?: string;
+  };
+  acceptedTermsAt?: string;
+  termsVersion?: string;
+  createdAt: string;
+}
+
+export interface DeliveryVehicle {
+  id: string;
+  ownerType: DeliveryProviderType;
+  partnerId?: string;
+  plateNumber: string;
+  vehicleClass: DeliveryVehicleClass;
+  makeModel: string;
+  year?: number;
+  capacityUnits: number;
+  temperatureSupport: VehicleTemperatureType[];
+  status: DeliveryVehicleStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
+  docsExpiry?: {
+    registrationExpiry?: string;
+    insuranceExpiry?: string;
+    inspectionExpiry?: string;
+  };
+  createdAt: string;
+}
+
+export interface DeliveryDriver {
+  id: string;
+  providerType: DeliveryProviderType;
+  partnerId?: string;
+  name: string;
+  phone: string;
+  licenseNo?: string;
+  licenseExpiry?: string;
+  assignedVehicleId?: string;
+  governorateId: string;
+  serviceZoneIds: string[];
+  accountStatus: DeliveryAccountStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
+  isAvailable: boolean;
+  adminNotes?: AdminInternalNote[];
+  createdAt: string;
 }
 
 export interface LedgerEntryItem {

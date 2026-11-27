@@ -29,7 +29,8 @@ import {
   UserCheck
 } from 'lucide-react';
 import { Role, Language, SellerBusinessType } from '../types/index.ts';
-import { SELLER_BUSINESS_TYPES, getSellerBusinessTypeLabel } from '../utils/translations.ts';
+import { SELLER_BUSINESS_TYPES, getSellerBusinessTypeLabel, translations } from '../utils/translations.ts';
+import { PartnerRegistrationView } from './PartnerRegistrationView.tsx';
 
 interface WelcomeAuthViewProps {
   onLoginAsRole: (role: Role, userProfile: UserSession, authToken?: string) => void;
@@ -56,9 +57,11 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
   onLanguageChange
 }) => {
   const isAr = language === 'ar';
+  const t = translations[language];
   const ArrowIcon = isAr ? ArrowLeft : ArrowRight;
   
   // Custom form state (optional for user)
+  const [showPartnerRegistration, setShowPartnerRegistration] = useState(false);
   const [showCustomAuth, setShowCustomAuth] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [selectedRole, setSelectedRole] = useState<Role>('store');
@@ -414,6 +417,16 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
     }
   };
 
+  if (showPartnerRegistration) {
+    return (
+      <PartnerRegistrationView
+        language={language}
+        onLanguageChange={onLanguageChange}
+        onBack={() => setShowPartnerRegistration(false)}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F7F8FA] flex flex-col justify-between py-6 px-4 sm:px-6 lg:px-8 font-brand">
       
@@ -458,6 +471,18 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
               ? 'المنظومة الوطنية لتجارة المواد الغذائية بالجملة والتجزئة. انقر على أي حساب أدناه للدخول الفوري ومباشرة العمل بنقرة واحدة:'
               : 'The National B2B Marketplace & Food Wholesale Supply Platform in Iraq. Click any role below to log in immediately:'}
           </p>
+
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => setShowPartnerRegistration(true)}
+              data-testid="open-partner-registration-link"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0B5D32] hover:text-[#00A046] underline underline-offset-4 decoration-[#00A046]/40 transition-colors cursor-pointer"
+            >
+              <Truck className="w-3.5 h-3.5 text-[#00A046]" />
+              <span>{t.partnerRegLinkLabel}</span>
+            </button>
+          </div>
 
         </div>
 

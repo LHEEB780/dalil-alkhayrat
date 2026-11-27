@@ -396,6 +396,22 @@ export interface TranslationDictionary {
   adminLogDriversTab: string;
   adminLogRequestsTab: string;
   adminLogEmpty: string;
+  // Platform Delivery Network (Phase D1)
+  adminDelTitle: string;
+  adminDelSubtitle: string;
+  adminDelTabOverview: string;
+  adminDelTabPartners: string;
+  adminDelTabVehicles: string;
+  adminDelTabDrivers: string;
+  adminDelTabRates: string;
+  adminDelTabSupplierDelivery: string;
+  adminDelTabSimulator: string;
+  partnerRegLinkLabel: string;
+  partnerRegTitle: string;
+  partnerRegSubtitle: string;
+  partnerRegTabApply: string;
+  partnerRegTabStatus: string;
+  partnerRegBackBtn: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -796,7 +812,22 @@ export const translations: Record<Language, TranslationDictionary> = {
     adminLogAlertLowStockTitle: 'تنبيه مخزون الفان: مركبات نشطة بمخزون منخفض (≤ 20 وحدة)',
     adminLogDriversTab: 'أسطول السائقين',
     adminLogRequestsTab: 'طلبات تحميل الفان',
-    adminLogEmpty: 'لا توجد بيانات لوجستية للعرض'
+    adminLogEmpty: 'لا توجد بيانات لوجستية للعرض',
+    adminDelTitle: 'شبكة التوصيل التابعة للمنصة',
+    adminDelSubtitle: 'إدارة شركاء التوصيل والمركبات وسائقي المنصة وبطاقة الأسعار وإعدادات الموردين ومحاكي الرسوم',
+    adminDelTabOverview: 'نظرة عامة',
+    adminDelTabPartners: 'الشركاء',
+    adminDelTabVehicles: 'المركبات',
+    adminDelTabDrivers: 'سائقو المنصة',
+    adminDelTabRates: 'الأسعار والإعدادات',
+    adminDelTabSupplierDelivery: 'توصيل الموردين',
+    adminDelTabSimulator: 'محاكي الرسوم',
+    partnerRegLinkLabel: 'سجّل كشريك توصيل',
+    partnerRegTitle: 'بوابة التسجيل لشركاء التوصيل',
+    partnerRegSubtitle: 'انضم إلى شبكة توصيل دليل الخيرات العراق كشريك فردي أو شركة لوجستية وتابع حالة طلبك مباشرة',
+    partnerRegTabApply: 'التسجيل كشريك توصيل',
+    partnerRegTabStatus: 'استعلام عن حالة الطلب',
+    partnerRegBackBtn: 'رجوع للبوابة الرئيسية'
   },
   en: {
     // Brand & General
@@ -1195,7 +1226,22 @@ export const translations: Record<Language, TranslationDictionary> = {
     adminLogAlertLowStockTitle: 'Low Van Stock Alert: Active drivers with <= 20 remaining units',
     adminLogDriversTab: 'Fleet Drivers',
     adminLogRequestsTab: 'Van Load Requests',
-    adminLogEmpty: 'No logistics records found'
+    adminLogEmpty: 'No logistics records found',
+    adminDelTitle: 'Platform Delivery Network',
+    adminDelSubtitle: 'Manage delivery partners, vehicles, platform drivers, rate cards, supplier delivery rules, and fee simulator',
+    adminDelTabOverview: 'Overview',
+    adminDelTabPartners: 'Partners',
+    adminDelTabVehicles: 'Vehicles',
+    adminDelTabDrivers: 'Platform Drivers',
+    adminDelTabRates: 'Rates & Settings',
+    adminDelTabSupplierDelivery: 'Supplier Delivery',
+    adminDelTabSimulator: 'Fee Simulator',
+    partnerRegLinkLabel: 'Register as Delivery Partner',
+    partnerRegTitle: 'Delivery Partner Onboarding Portal',
+    partnerRegSubtitle: 'Join Dalil Al-Khairat Iraq Delivery Network as an individual carrier or logistics company and track application status',
+    partnerRegTabApply: 'Register as Delivery Partner',
+    partnerRegTabStatus: 'Check Application Status',
+    partnerRegBackBtn: 'Back to Portal'
   }
 };
 

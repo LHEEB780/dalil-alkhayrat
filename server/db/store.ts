@@ -55,7 +55,19 @@ import {
   DisputeOpenedBy,
   DisputeReasonCode,
   DisputeStatus,
-  DisputeResolutionType
+  DisputeResolutionType,
+  DeliveryPartner,
+  DeliveryPartnerType,
+  DeliveryVehicle,
+  DeliveryVehicleClass,
+  DeliveryVehicleStatus,
+  DeliveryDriver,
+  DeliveryAccountStatus,
+  DeliveryProviderType,
+  DeliveryRateRule,
+  DeliveryPlatformSettings,
+  SupplierDeliverySettings,
+  VehicleTemperatureType
 } from './types.ts';
 import {
   validateBarcode,
@@ -72,6 +84,14 @@ import {
   FailedSupplierOrderRule,
   SupplierOrderRuleItem
 } from '../../shared/orderRules.ts';
+import {
+  calculateDeliveryFee,
+  getDeliveryOptionsForSupplier,
+  getRequiredTemperatureForStorageTypes,
+  isVehicleSuitable,
+  ProductStorageKind,
+  VEHICLE_CLASS_LABELS
+} from '../../shared/deliveryRules.ts';
 import {
   initialProducts,
   initialSuppliers,
@@ -97,7 +117,12 @@ import {
   initialSupplierInventoryBatches,
   initialVanExpenses,
   initialVanReturns,
-  initialShiftReports
+  initialShiftReports,
+  initialDeliveryPartners,
+  initialDeliveryVehicles,
+  initialDeliveryDrivers,
+  initialDeliveryPlatformSettings,
+  initialDeliveryRateRules
 } from './seed.ts';
 import {
   applyProductFilters,
@@ -165,6 +190,14 @@ class AppDataStore {
   creditUpgradeRequests: CreditUpgradeRequest[] = [];
   storeStaff: StoreStaffAccount[] = [];
   supplierInventoryBatches: SupplierInventoryBatch[] = [...initialSupplierInventoryBatches];
+  deliveryPartners: DeliveryPartner[] = JSON.parse(JSON.stringify(initialDeliveryPartners));
+  deliveryVehicles: DeliveryVehicle[] = JSON.parse(JSON.stringify(initialDeliveryVehicles));
+  deliveryDrivers: DeliveryDriver[] = JSON.parse(JSON.stringify(initialDeliveryDrivers));
+  deliveryRateRules: DeliveryRateRule[] = JSON.parse(JSON.stringify(initialDeliveryRateRules));
+  deliveryPlatformSettings: DeliveryPlatformSettings = JSON.parse(
+    JSON.stringify(initialDeliveryPlatformSettings)
+  );
+  private partnerRegistrationRateMap: Map<string, number[]> = new Map();
 
   constructor() {
     this.storeStaff = [
@@ -217,6 +250,7 @@ class AppDataStore {
     ];
     this.ensureProductBrandLinks();
     this.ensureSubOrderHistories();
+    this.ensureSupplierDeliveryDefaults();
   }
   auditLogs: AdminAuditLog[] = [
     {
@@ -3161,7 +3195,10 @@ class AppDataStore {
         | 'disputed_order'
         | 'blocked_credit'
         | 'catalog_no_offers'
-        | 'catalog_price_anomaly';
+        | 'catalog_price_anomaly'
+        | 'pending_delivery_partner'
+        | 'expiring_vehicle_doc'
+        | 'supplier_no_delivery_option';
       severity: 'high' | 'medium';
       titleAr: string;
       titleEn: string;
@@ -3307,6 +3344,56 @@ class AppDataStore {
       });
     }
 
+    // Platform Delivery Network Attention Queue (Phase D1)
+    const pendingPartnersList = this.deliveryPartners.filter((p) => p.accountStatus === 'pending');
+    for (const dp of pendingPartnersList) {
+      needsAttention.push({
+        id: `att_dp_${dp.id}`,
+        type: 'pending_delivery_partner',
+        severity: 'medium',
+        titleAr: `شريك توصيل بانتظار المراجعة: ${dp.name}`,
+        titleEn: `Delivery partner pending review: ${dp.name}`,
+        subtitleAr: `${dp.city} • ${dp.registrationCode}`,
+        subtitleEn: `${dp.city} • ${dp.registrationCode}`,
+        targetSection: 'delivery_network',
+        entityId: dp.id
+      });
+    }
+
+    const expiringVehiclesList = this.getExpiringVehicleDocsSummary(30);
+    if (expiringVehiclesList.length > 0) {
+      needsAttention.push({
+        id: 'att_veh_expiring',
+        type: 'expiring_vehicle_doc',
+        severity: expiringVehiclesList.some((v) => v.hasExpired) ? 'high' : 'medium',
+        titleAr: `${expiringVehiclesList.length} مركبة توصيل تنتهي وثائقها خلال 30 يوماً`,
+        titleEn: `${expiringVehiclesList.length} delivery vehicle(s) with documents expiring within 30 days`,
+        subtitleAr: expiringVehiclesList.map((v) => v.plateNumber).slice(0, 3).join(' • '),
+        subtitleEn: expiringVehiclesList.map((v) => v.plateNumber).slice(0, 3).join(' • '),
+        targetSection: 'delivery_network',
+        entityId: expiringVehiclesList[0].id
+      });
+    }
+
+    const suppliersWithoutDeliveryOption = this.suppliers.filter((s) => {
+      const ds = s.deliverySettings;
+      if (!ds) return false;
+      return !ds.hasOwnFleet && !ds.allowPlatformDelivery && !ds.allowStorePickup;
+    });
+    if (suppliersWithoutDeliveryOption.length > 0) {
+      needsAttention.push({
+        id: 'att_supp_no_delivery',
+        type: 'supplier_no_delivery_option',
+        severity: 'high',
+        titleAr: `${suppliersWithoutDeliveryOption.length} مورد بدون أي خيار توصيل مفعّل`,
+        titleEn: `${suppliersWithoutDeliveryOption.length} supplier(s) have no delivery option enabled`,
+        subtitleAr: suppliersWithoutDeliveryOption.map((s) => s.companyName).slice(0, 2).join(' • '),
+        subtitleEn: suppliersWithoutDeliveryOption.map((s) => s.companyName).slice(0, 2).join(' • '),
+        targetSection: 'delivery_network',
+        entityId: suppliersWithoutDeliveryOption[0].id
+      });
+    }
+
     return {
       range,
       kpis: {
@@ -3332,7 +3419,9 @@ class AppDataStore {
         catalogQualityPercent: qualitySummary.averageScore,
         catalogLowQualityCount: qualitySummary.below60Count,
         productsWithoutOffersCount: qualitySummary.withoutOffersCount,
-        priceAnomalyOffersCount: anomalyOffers.length
+        priceAnomalyOffersCount: anomalyOffers.length,
+        pendingDeliveryPartnersCount: pendingPartnersList.length,
+        expiringVehicleDocsCount: expiringVehiclesList.length
       },
       dailySeries,
       statusDistribution,
@@ -6666,6 +6755,2072 @@ class AppDataStore {
       }
     };
   }
+
+  // ================= PLATFORM DELIVERY NETWORK (PHASE D1) =================
+
+  private normalizeDeliveryPhone(phone: string): string {
+    let digits = String(phone || '').replace(/\D/g, '');
+    if (digits.startsWith('00964')) digits = digits.slice(5);
+    else if (digits.startsWith('964')) digits = digits.slice(3);
+    if (digits.length === 10 && digits.startsWith('7')) {
+      digits = `0${digits}`;
+    }
+    return digits;
+  }
+
+  private normalizePlateKey(plate: string): string {
+    return String(plate || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toUpperCase();
+  }
+
+  private requireDeliveryReason(reason: unknown): string {
+    const clean = typeof reason === 'string' ? reason.trim() : '';
+    if (clean.length < 5) {
+      const err: any = new Error('يجب إدخال سبب واضح لا يقل عن 5 أحرف');
+      err.statusCode = 400;
+      throw err;
+    }
+    return clean;
+  }
+
+  private ensureSupplierDeliveryDefaults() {
+    for (const s of this.suppliers) {
+      if (!s.deliverySettings) {
+        s.deliverySettings = {
+          hasOwnFleet: true,
+          allowPlatformDelivery: false,
+          allowStorePickup: true
+        };
+      } else if (
+        !s.deliverySettings.hasOwnFleet &&
+        !s.deliverySettings.allowPlatformDelivery &&
+        !s.deliverySettings.allowStorePickup
+      ) {
+        s.deliverySettings.allowPlatformDelivery = true;
+      }
+    }
+  }
+
+  assertDeliveryPartnerOperable(partnerId: string): DeliveryPartner {
+    const partner = this.deliveryPartners.find((p) => p.id === partnerId);
+    if (!partner) {
+      const err: any = new Error('شريك التوصيل غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (partner.accountStatus !== 'active') {
+      const err: any = new Error(
+        `لا يمكن تنفيذ الإجراء: حالة شريك التوصيل (${partner.name}) هي ${partner.accountStatus} وليست نشطة`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+    return partner;
+  }
+
+  assertDeliveryVehicleOperable(vehicleId: string): DeliveryVehicle {
+    const vehicle = this.deliveryVehicles.find((v) => v.id === vehicleId);
+    if (!vehicle) {
+      const err: any = new Error('المركبة غير موجودة');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (vehicle.status !== 'active') {
+      const err: any = new Error(
+        `لا يمكن تنفيذ الإجراء: حالة المركبة (${vehicle.plateNumber}) هي ${vehicle.status} وليست نشطة`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+    if (vehicle.ownerType === 'partner' && vehicle.partnerId) {
+      this.assertDeliveryPartnerOperable(vehicle.partnerId);
+    }
+    return vehicle;
+  }
+
+  assertDeliveryDriverOperable(driverId: string): DeliveryDriver {
+    const driver = this.deliveryDrivers.find((d) => d.id === driverId);
+    if (!driver) {
+      const err: any = new Error('سائق المنصة غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (driver.accountStatus !== 'active') {
+      const err: any = new Error(
+        `لا يمكن تنفيذ الإجراء: حالة السائق (${driver.name}) هي ${driver.accountStatus} وليست نشطة`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+    if (driver.providerType === 'partner' && driver.partnerId) {
+      this.assertDeliveryPartnerOperable(driver.partnerId);
+    }
+    return driver;
+  }
+
+  getExpiringVehicleDocsSummary(daysWindow = 30) {
+    const nowMs = Date.now();
+    const horizonMs = nowMs + daysWindow * 24 * 60 * 60 * 1000;
+    const result: Array<{
+      id: string;
+      plateNumber: string;
+      makeModel: string;
+      ownerType: DeliveryProviderType;
+      partnerId?: string;
+      status: DeliveryVehicleStatus;
+      hasExpired: boolean;
+      expiringDocs: Array<{
+        field: 'registrationExpiry' | 'insuranceExpiry' | 'inspectionExpiry';
+        date: string;
+        daysRemaining: number;
+      }>;
+    }> = [];
+
+    for (const v of this.deliveryVehicles) {
+      if (v.status === 'rejected') continue;
+      const docs = v.docsExpiry;
+      if (!docs) continue;
+      const fields: Array<'registrationExpiry' | 'insuranceExpiry' | 'inspectionExpiry'> = [
+        'registrationExpiry',
+        'insuranceExpiry',
+        'inspectionExpiry'
+      ];
+      const expiringDocs: Array<{
+        field: 'registrationExpiry' | 'insuranceExpiry' | 'inspectionExpiry';
+        date: string;
+        daysRemaining: number;
+      }> = [];
+      let hasExpired = false;
+
+      for (const f of fields) {
+        const val = docs[f];
+        if (!val) continue;
+        const ms = Date.parse(val);
+        if (Number.isNaN(ms)) continue;
+        if (ms <= horizonMs) {
+          const daysRemaining = Math.ceil((ms - nowMs) / (24 * 60 * 60 * 1000));
+          if (daysRemaining <= 0) hasExpired = true;
+          expiringDocs.push({ field: f, date: val, daysRemaining });
+        }
+      }
+
+      if (expiringDocs.length > 0) {
+        result.push({
+          id: v.id,
+          plateNumber: v.plateNumber,
+          makeModel: v.makeModel,
+          ownerType: v.ownerType,
+          partnerId: v.partnerId,
+          status: v.status,
+          hasExpired,
+          expiringDocs
+        });
+      }
+    }
+
+    return result;
+  }
+
+  private hasActivePlatformCoverageForZone(governorateId: string, deliveryZoneId?: string): boolean {
+    const activePartnerIds = new Set(
+      this.deliveryPartners.filter((p) => p.accountStatus === 'active').map((p) => p.id)
+    );
+    const activeVehicles = this.deliveryVehicles.filter((v) => {
+      if (v.status !== 'active') return false;
+      if (v.ownerType === 'partner') {
+        return Boolean(v.partnerId && activePartnerIds.has(v.partnerId));
+      }
+      return true;
+    });
+    if (activeVehicles.length === 0) return false;
+
+    const matchingDrivers = this.deliveryDrivers.filter((d) => {
+      if (d.accountStatus !== 'active') return false;
+      if (d.providerType === 'partner' && (!d.partnerId || !activePartnerIds.has(d.partnerId))) {
+        return false;
+      }
+      if (deliveryZoneId && d.serviceZoneIds.includes(deliveryZoneId)) return true;
+      if (governorateId && d.governorateId === governorateId) return true;
+      return false;
+    });
+
+    const matchingPartners = this.deliveryPartners.filter((p) => {
+      if (p.accountStatus !== 'active') return false;
+      const hasVehicle = activeVehicles.some((v) => v.partnerId === p.id);
+      if (!hasVehicle) return false;
+      if (deliveryZoneId && p.serviceZoneIds.includes(deliveryZoneId)) return true;
+      if (governorateId && p.governorateId === governorateId) return true;
+      return false;
+    });
+
+    return matchingDrivers.length > 0 || matchingPartners.length > 0;
+  }
+
+  private generateUniquePartnerRegistrationCode(): string {
+    for (let i = 0; i < 20; i++) {
+      const code = `DP-${Math.floor(100000 + Math.random() * 900000)}`;
+      if (!this.deliveryPartners.some((p) => p.registrationCode === code)) {
+        return code;
+      }
+    }
+    return `DP-${Date.now().toString().slice(-6)}`;
+  }
+
+  // ---- Public Delivery Network Endpoints ----
+
+  registerPublicDeliveryPartner(
+    payload: {
+      type: DeliveryPartnerType;
+      name: string;
+      phone: string;
+      city?: string;
+      governorateId: string;
+      serviceZoneIds: string[];
+      vehicles: Array<{
+        vehicleClass: DeliveryVehicleClass;
+        plateNumber: string;
+        makeModel: string;
+        year?: number;
+        capacityUnits: number;
+        temperatureSupport: VehicleTemperatureType[];
+        docsExpiry?: DeliveryVehicle['docsExpiry'];
+      }>;
+      docDeclarations?: {
+        driver_license?: boolean;
+        vehicle_registration?: boolean;
+        insurance?: boolean;
+        vehicle_inspection?: boolean;
+      };
+      payoutAccount?: {
+        method: 'cash' | 'bank' | 'zaincash';
+        accountRef?: string;
+      };
+      acceptedTerms: boolean;
+    },
+    clientIp: string
+  ) {
+    // 1. In-memory IP hourly rate limiting (max 5 requests / hour / IP)
+    const ipKey = String(clientIp || 'unknown').trim();
+    const nowMs = Date.now();
+    const oneHourAgo = nowMs - 60 * 60 * 1000;
+    const recentTimestamps = (this.partnerRegistrationRateMap.get(ipKey) || []).filter(
+      (ts) => ts >= oneHourAgo
+    );
+    if (recentTimestamps.length >= 5) {
+      const err: any = new Error(
+        'تم تجاوز الحد المسموح به لطلبات التسجيل من هذا العنوان خلال الساعة الحالية. حاول لاحقاً.'
+      );
+      err.statusCode = 429;
+      throw err;
+    }
+
+    // 2. Validate required inputs
+    const partnerType: DeliveryPartnerType =
+      payload.type === 'company' ? 'company' : payload.type === 'individual' ? 'individual' : (null as any);
+    if (!partnerType) {
+      const err: any = new Error('نوع الشريك غير صالح (individual أو company)');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const cleanName = String(payload.name || '').trim();
+    if (cleanName.length < 2) {
+      const err: any = new Error('يجب إدخال اسم الشريك أو السائق (حرفان على الأقل)');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const rawPhone = String(payload.phone || '').trim();
+    const normalizedPhone = this.normalizeDeliveryPhone(rawPhone);
+    if (normalizedPhone.length < 7) {
+      const err: any = new Error('رقم الهاتف غير صالح');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (
+      this.deliveryPartners.some((p) => this.normalizeDeliveryPhone(p.phone) === normalizedPhone)
+    ) {
+      const err: any = new Error('يوجد طلب أو شريك توصيل مسجل مسبقاً بنفس رقم الهاتف');
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const gov = this.governorates.find((g) => g.id === payload.governorateId);
+    if (!gov) {
+      const err: any = new Error('المحافظة المختارة غير موجودة');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const validZones = Array.isArray(payload.serviceZoneIds)
+      ? Array.from(
+          new Set(
+            payload.serviceZoneIds.filter((zid) =>
+              this.deliveryZones.some((z) => z.id === zid)
+            )
+          )
+        )
+      : [];
+    if (validZones.length === 0) {
+      const err: any = new Error('يجب اختيار منطقة توصيل واحدة على الأقل');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (payload.acceptedTerms !== true) {
+      const err: any = new Error('يجب الموافقة على مسودة الشروط والأحكام لإتمام التسجيل');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (!Array.isArray(payload.vehicles) || payload.vehicles.length === 0) {
+      const err: any = new Error('يجب إضافة مركبة واحدة على الأقل');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const validClasses: DeliveryVehicleClass[] = [
+      'motorcycle',
+      'pickup',
+      'small_truck',
+      'medium_truck',
+      'refrigerated_truck'
+    ];
+    const validTemps: VehicleTemperatureType[] = ['ambient', 'chilled', 'frozen'];
+    const submittedPlates = new Set<string>();
+
+    const normalizedVehicles = payload.vehicles.map((v, idx) => {
+      if (!validClasses.includes(v.vehicleClass)) {
+        const err: any = new Error(`فئة المركبة رقم ${idx + 1} غير صالحة`);
+        err.statusCode = 400;
+        throw err;
+      }
+      const plate = String(v.plateNumber || '').trim();
+      const plateKey = this.normalizePlateKey(plate);
+      if (!plate || plate.length < 3) {
+        const err: any = new Error(`رقم لوحة المركبة رقم ${idx + 1} مطلوب`);
+        err.statusCode = 400;
+        throw err;
+      }
+      if (submittedPlates.has(plateKey)) {
+        const err: any = new Error(`رقم اللوحة (${plate}) مكرر في نفس الطلب`);
+        err.statusCode = 400;
+        throw err;
+      }
+      submittedPlates.add(plateKey);
+
+      if (
+        this.deliveryVehicles.some((ev) => this.normalizePlateKey(ev.plateNumber) === plateKey)
+      ) {
+        const err: any = new Error(`رقم اللوحة (${plate}) مسجل مسبقاً في النظام`);
+        err.statusCode = 409;
+        throw err;
+      }
+
+      const makeModel = String(v.makeModel || '').trim();
+      if (!makeModel) {
+        const err: any = new Error(`موديل المركبة رقم ${idx + 1} مطلوب`);
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const capacityUnits = Math.round(Number(v.capacityUnits) || 0);
+      if (capacityUnits <= 0) {
+        const err: any = new Error(`سعة المركبة بالوحدات للمركبة رقم ${idx + 1} غير صالحة`);
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const temps = Array.isArray(v.temperatureSupport)
+        ? Array.from(new Set(v.temperatureSupport.filter((t) => validTemps.includes(t))))
+        : [];
+      if (temps.length === 0) {
+        temps.push('ambient');
+      }
+
+      return {
+        plateNumber: plate,
+        vehicleClass: v.vehicleClass,
+        makeModel,
+        year: v.year ? Number(v.year) : undefined,
+        capacityUnits,
+        temperatureSupport: temps,
+        docsExpiry: v.docsExpiry
+      };
+    });
+
+    const nowIso = new Date().toISOString();
+    const partnerId = `dp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const registrationCode = this.generateUniquePartnerRegistrationCode();
+
+    const decl = payload.docDeclarations || {};
+    const checklistKeys: KycChecklistKey[] = [
+      'driver_license',
+      'vehicle_registration',
+      'insurance',
+      'vehicle_inspection'
+    ];
+    const checklist: KycChecklistItem[] = checklistKeys.map((k) => ({
+      key: k,
+      status: 'pending',
+      note: (decl as any)[k] ? 'أفاد مقدم الطلب بتوفر الوثيقة (بانتظار مطابقة الإدارة)' : undefined
+    }));
+
+    const payoutMethod =
+      payload.payoutAccount?.method === 'bank' || payload.payoutAccount?.method === 'zaincash'
+        ? payload.payoutAccount.method
+        : 'cash';
+
+    const newPartner: DeliveryPartner = {
+      id: partnerId,
+      registrationCode,
+      type: partnerType,
+      name: cleanName,
+      phone: rawPhone,
+      city: String(payload.city || gov.nameAr).trim() || gov.nameAr,
+      governorateId: gov.id,
+      serviceZoneIds: validZones,
+      accountStatus: 'pending',
+      kyc: { checklist },
+      payoutAccount: {
+        method: payoutMethod,
+        accountRef: payload.payoutAccount?.accountRef?.trim() || undefined
+      },
+      acceptedTermsAt: nowIso,
+      termsVersion: 'draft-v1-needs-legal-review',
+      createdAt: nowIso
+    };
+
+    const createdVehicles: DeliveryVehicle[] = normalizedVehicles.map((nv, idx) => ({
+      id: `dveh_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 5)}`,
+      ownerType: 'partner',
+      partnerId,
+      plateNumber: nv.plateNumber,
+      vehicleClass: nv.vehicleClass,
+      makeModel: nv.makeModel,
+      year: nv.year,
+      capacityUnits: nv.capacityUnits,
+      temperatureSupport: nv.temperatureSupport,
+      status: 'pending',
+      docsExpiry: nv.docsExpiry,
+      createdAt: nowIso
+    }));
+
+    this.deliveryPartners.unshift(newPartner);
+    for (const v of createdVehicles) {
+      this.deliveryVehicles.unshift(v);
+    }
+
+    recentTimestamps.push(nowMs);
+    this.partnerRegistrationRateMap.set(ipKey, recentTimestamps);
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: 'public_registration',
+      actorName: cleanName,
+      action: 'delivery_partner.register_public',
+      entityType: 'delivery_partner',
+      entityId: partnerId,
+      summaryAr: `تقديم طلب تسجيل شريك توصيل جديد: ${cleanName} (${registrationCode})`,
+      summaryEn: `Submitted public delivery partner application: ${cleanName} (${registrationCode})`,
+      before: null,
+      after: {
+        id: partnerId,
+        registrationCode,
+        type: partnerType,
+        governorateId: gov.id,
+        serviceZoneIds: validZones,
+        vehiclesCount: createdVehicles.length,
+        accountStatus: 'pending'
+      },
+      reason: 'طلب تسجيل عام عبر بوابة شركاء التوصيل'
+    });
+
+    return {
+      partnerId,
+      registrationCode,
+      status: newPartner.accountStatus,
+      vehiclesCount: createdVehicles.length,
+      createdAt: nowIso
+    };
+  }
+
+  getPublicDeliveryPartnerStatus(phone: string, registrationCode: string) {
+    const normPhone = this.normalizeDeliveryPhone(phone);
+    const normCode = String(registrationCode || '').trim().toUpperCase();
+    if (!normPhone || !normCode) {
+      const err: any = new Error('رقم الهاتف ورمز الطلب مطلوبان للاستعلام');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const partner = this.deliveryPartners.find(
+      (p) =>
+        this.normalizeDeliveryPhone(p.phone) === normPhone &&
+        p.registrationCode.toUpperCase() === normCode
+    );
+    if (!partner) {
+      const err: any = new Error('لم يتم العثور على طلب مطابق لرقم الهاتف ورمز المتابعة');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    // Minimal least-data response — never leak notes, KYC notes, vehicles, or payout details
+    return {
+      registrationCode: partner.registrationCode,
+      type: partner.type,
+      status: partner.accountStatus,
+      statusReason:
+        partner.accountStatus === 'rejected' || partner.accountStatus === 'suspended'
+          ? partner.statusReason
+          : undefined,
+      createdAt: partner.createdAt,
+      statusChangedAt: partner.statusChangedAt
+    };
+  }
+
+  getPublicDeliveryQuote(payload: {
+    supplierId: string;
+    deliveryZoneId: string;
+    items?: Array<{ barcode?: string; quantity: number; storageType?: ProductStorageKind }>;
+    units?: number;
+    requiredTemperature?: VehicleTemperatureType;
+    orderValueIQD?: number;
+  }) {
+    const supplier = this.suppliers.find((s) => s.id === payload.supplierId);
+    if (!supplier) {
+      const err: any = new Error('المورد المطلوب غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const zone = this.deliveryZones.find((z) => z.id === payload.deliveryZoneId);
+    if (!zone) {
+      const err: any = new Error('منطقة التوصيل غير موجودة');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    let totalUnits = Math.max(0, Math.round(Number(payload.units) || 0));
+    let computedValueIQD = 0;
+    const storageTypes: Array<ProductStorageKind | undefined> = [];
+
+    if (Array.isArray(payload.items) && payload.items.length > 0) {
+      totalUnits = 0;
+      for (const item of payload.items) {
+        const qty = Math.max(1, Math.round(Number(item.quantity) || 1));
+        totalUnits += qty;
+        const product = item.barcode
+          ? this.products.find((p) => p.barcode === item.barcode)
+          : undefined;
+        const st = item.storageType || product?.storageType || 'ambient';
+        storageTypes.push(st);
+        const offer = item.barcode
+          ? this.offers.find(
+              (o) => o.barcode === item.barcode && o.supplierId === supplier.id
+            ) || this.offers.find((o) => o.barcode === item.barcode)
+          : undefined;
+        if (offer) {
+          computedValueIQD += offer.priceIQD * qty;
+        }
+      }
+    }
+
+    if (totalUnits <= 0) totalUnits = 1;
+
+    const requiredTemperature: VehicleTemperatureType = payload.requiredTemperature
+      ? payload.requiredTemperature
+      : getRequiredTemperatureForStorageTypes(storageTypes);
+
+    const orderValueIQD =
+      payload.orderValueIQD !== undefined && payload.orderValueIQD !== null
+        ? Math.max(0, Math.round(Number(payload.orderValueIQD) || 0))
+        : computedValueIQD;
+
+    const hasActiveCoverage = this.hasActivePlatformCoverageForZone(zone.governorateId, zone.id);
+
+    const evaluated = getDeliveryOptionsForSupplier({
+      supplier,
+      zone: { governorateId: zone.governorateId, deliveryZoneId: zone.id },
+      units: totalUnits,
+      requiredTemperature,
+      orderValueIQD,
+      rules: this.deliveryRateRules,
+      settings: this.deliveryPlatformSettings,
+      hasActivePlatformCoverage: hasActiveCoverage
+    });
+
+    const suggestedVehicleClass = evaluated.platformQuote?.vehicleClass;
+    const matchingVehicles = suggestedVehicleClass
+      ? this.deliveryVehicles
+          .filter((v) =>
+            isVehicleSuitable(v, {
+              units: totalUnits,
+              requiredTemperature,
+              requireActiveStatus: true
+            })
+          )
+          .slice(0, 5)
+          .map((v) => ({
+            id: v.id,
+            vehicleClass: v.vehicleClass,
+            makeModel: v.makeModel,
+            capacityUnits: v.capacityUnits,
+            temperatureSupport: v.temperatureSupport
+          }))
+      : [];
+
+    const governorate = this.governorates.find((g) => g.id === zone.governorateId);
+
+    return {
+      supplierId: supplier.id,
+      supplierName: supplier.companyName,
+      governorateId: zone.governorateId,
+      governorateNameAr: governorate?.nameAr || zone.governorateId,
+      governorateNameEn: governorate?.nameEn || zone.governorateId,
+      deliveryZoneId: zone.id,
+      deliveryZoneNameAr: zone.nameAr,
+      deliveryZoneNameEn: zone.nameEn,
+      units: totalUnits,
+      requiredTemperature,
+      orderValueIQD,
+      hasActivePlatformCoverage: hasActiveCoverage,
+      availableOptions: evaluated.availableOptions,
+      options: evaluated.options,
+      platformQuote: evaluated.platformQuote,
+      matchingActiveVehicles: matchingVehicles
+    };
+  }
+
+  // ---- Admin Delivery Network Overview & Operations ----
+
+  getAdminDeliveryOverview() {
+    const partnersByStatus = {
+      pending: this.deliveryPartners.filter((p) => p.accountStatus === 'pending').length,
+      active: this.deliveryPartners.filter((p) => p.accountStatus === 'active').length,
+      suspended: this.deliveryPartners.filter((p) => p.accountStatus === 'suspended').length,
+      rejected: this.deliveryPartners.filter((p) => p.accountStatus === 'rejected').length,
+      archived: this.deliveryPartners.filter((p) => p.accountStatus === 'archived').length,
+      total: this.deliveryPartners.length
+    };
+
+    const expiringVehicles = this.getExpiringVehicleDocsSummary(30);
+    const vehiclesByStatus = {
+      pending: this.deliveryVehicles.filter((v) => v.status === 'pending').length,
+      active: this.deliveryVehicles.filter((v) => v.status === 'active').length,
+      maintenance: this.deliveryVehicles.filter((v) => v.status === 'maintenance').length,
+      suspended: this.deliveryVehicles.filter((v) => v.status === 'suspended').length,
+      rejected: this.deliveryVehicles.filter((v) => v.status === 'rejected').length,
+      platformOwned: this.deliveryVehicles.filter((v) => v.ownerType === 'platform').length,
+      partnerOwned: this.deliveryVehicles.filter((v) => v.ownerType === 'partner').length,
+      expiringDocsCount: expiringVehicles.length,
+      total: this.deliveryVehicles.length
+    };
+
+    const driversByStatus = {
+      platformActive: this.deliveryDrivers.filter(
+        (d) => d.providerType === 'platform' && d.accountStatus === 'active'
+      ).length,
+      partnerActive: this.deliveryDrivers.filter(
+        (d) => d.providerType === 'partner' && d.accountStatus === 'active'
+      ).length,
+      pending: this.deliveryDrivers.filter((d) => d.accountStatus === 'pending').length,
+      suspended: this.deliveryDrivers.filter((d) => d.accountStatus === 'suspended').length,
+      total: this.deliveryDrivers.length
+    };
+
+    const activeRateRulesCount = this.deliveryRateRules.filter((r) => r.isActive).length;
+    const platformEnabledSuppliersCount = this.suppliers.filter(
+      (s) => s.deliverySettings?.allowPlatformDelivery
+    ).length;
+    const ownFleetSuppliersCount = this.suppliers.filter(
+      (s) => s.deliverySettings?.hasOwnFleet
+    ).length;
+    const suppliersWithNoOptionCount = this.suppliers.filter((s) => {
+      const ds = s.deliverySettings;
+      if (!ds) return false;
+      return !ds.hasOwnFleet && !ds.allowPlatformDelivery && !ds.allowStorePickup;
+    }).length;
+
+    return {
+      partners: partnersByStatus,
+      vehicles: vehiclesByStatus,
+      drivers: driversByStatus,
+      rates: {
+        activeRulesCount: activeRateRulesCount,
+        totalRulesCount: this.deliveryRateRules.length,
+        freeDeliveryThresholdIQD: this.deliveryPlatformSettings.freeDeliveryThresholdIQD
+      },
+      suppliers: {
+        total: this.suppliers.length,
+        ownFleetCount: ownFleetSuppliersCount,
+        platformEnabledCount: platformEnabledSuppliersCount,
+        noOptionCount: suppliersWithNoOptionCount
+      },
+      expiringVehicles
+    };
+  }
+
+  private enrichDeliveryPartner(p: DeliveryPartner) {
+    const gov = this.governorates.find((g) => g.id === p.governorateId);
+    const zoneObjects = p.serviceZoneIds
+      .map((zid) => this.deliveryZones.find((z) => z.id === zid))
+      .filter((z): z is DeliveryZone => Boolean(z));
+    const vehicles = this.deliveryVehicles.filter((v) => v.partnerId === p.id);
+    const drivers = this.deliveryDrivers.filter((d) => d.partnerId === p.id);
+    return {
+      ...p,
+      governorateNameAr: gov?.nameAr || p.governorateId,
+      governorateNameEn: gov?.nameEn || p.governorateId,
+      serviceZones: zoneObjects.map((z) => ({ id: z.id, nameAr: z.nameAr, nameEn: z.nameEn })),
+      vehiclesCount: vehicles.length,
+      activeVehiclesCount: vehicles.filter((v) => v.status === 'active').length,
+      driversCount: drivers.length,
+      activeDriversCount: drivers.filter((d) => d.accountStatus === 'active').length
+    };
+  }
+
+  getAdminDeliveryPartners(params?: {
+    statusTab?: string;
+    type?: string;
+    governorateId?: string;
+    search?: string;
+  }) {
+    const all = this.deliveryPartners.map((p) => this.enrichDeliveryPartner(p));
+    const statusCounts = {
+      all: all.length,
+      pending: all.filter((p) => p.accountStatus === 'pending').length,
+      active: all.filter((p) => p.accountStatus === 'active').length,
+      suspended: all.filter((p) => p.accountStatus === 'suspended').length,
+      rejected_archived: all.filter(
+        (p) => p.accountStatus === 'rejected' || p.accountStatus === 'archived'
+      ).length
+    };
+
+    let filtered = [...all];
+    if (params?.statusTab && params.statusTab !== 'all') {
+      if (params.statusTab === 'rejected_archived') {
+        filtered = filtered.filter(
+          (p) => p.accountStatus === 'rejected' || p.accountStatus === 'archived'
+        );
+      } else {
+        filtered = filtered.filter((p) => p.accountStatus === params.statusTab);
+      }
+    }
+    if (params?.type && params.type !== 'all') {
+      filtered = filtered.filter((p) => p.type === params.type);
+    }
+    if (params?.governorateId && params.governorateId !== 'all') {
+      filtered = filtered.filter((p) => p.governorateId === params.governorateId);
+    }
+    if (params?.search && params.search.trim()) {
+      const q = params.search.trim().toLowerCase();
+      filtered = filtered.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.phone.toLowerCase().includes(q) ||
+          p.registrationCode.toLowerCase().includes(q) ||
+          p.city.toLowerCase().includes(q)
+      );
+    }
+
+    filtered.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+    return {
+      items: filtered,
+      total: filtered.length,
+      statusCounts
+    };
+  }
+
+  getAdminDeliveryPartnerDetail(id: string) {
+    const partner = this.deliveryPartners.find((p) => p.id === id);
+    if (!partner) {
+      const err: any = new Error('شريك التوصيل غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    const enriched = this.enrichDeliveryPartner(partner);
+    const vehicles = this.deliveryVehicles
+      .filter((v) => v.partnerId === partner.id)
+      .map((v) => this.enrichDeliveryVehicle(v));
+    const drivers = this.deliveryDrivers
+      .filter((d) => d.partnerId === partner.id)
+      .map((d) => this.enrichDeliveryDriver(d));
+    const vehicleIds = new Set(vehicles.map((v) => v.id));
+    const driverIds = new Set(drivers.map((d) => d.id));
+    const auditLogs = this.auditLogs
+      .filter(
+        (l) =>
+          (l.entityType === 'delivery_partner' && l.entityId === partner.id) ||
+          (l.entityType === 'delivery_vehicle' && vehicleIds.has(l.entityId)) ||
+          (l.entityType === 'delivery_driver' && driverIds.has(l.entityId))
+      )
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+      .slice(0, 50);
+
+    return {
+      partner: enriched,
+      vehicles,
+      drivers,
+      auditLogs
+    };
+  }
+
+  transitionAdminDeliveryPartner(params: {
+    id: string;
+    action: 'approve' | 'reject' | 'suspend' | 'reactivate' | 'archive';
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const partner = this.deliveryPartners.find((p) => p.id === params.id);
+    if (!partner) {
+      const err: any = new Error('شريك التوصيل غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const current = partner.accountStatus;
+    const allowedTransitions: Record<DeliveryAccountStatus, Array<typeof params.action>> = {
+      pending: ['approve', 'reject', 'archive'],
+      active: ['suspend', 'archive'],
+      suspended: ['reactivate', 'archive'],
+      rejected: ['approve', 'archive'],
+      archived: ['reactivate']
+    };
+
+    const allowed = allowedTransitions[current] || [];
+    if (!allowed.includes(params.action)) {
+      const err: any = new Error(
+        `لا يمكن تنفيذ إجراء (${params.action}) عندما تكون حالة الشريك (${current})`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const nextStatusMap: Record<typeof params.action, DeliveryAccountStatus> = {
+      approve: 'active',
+      reject: 'rejected',
+      suspend: 'suspended',
+      reactivate: 'active',
+      archive: 'archived'
+    };
+    const nextStatus = nextStatusMap[params.action];
+    const nowIso = new Date().toISOString();
+
+    const before = {
+      accountStatus: partner.accountStatus,
+      statusReason: partner.statusReason
+    };
+
+    partner.accountStatus = nextStatus;
+    partner.statusReason = cleanReason;
+    partner.statusChangedAt = nowIso;
+    partner.statusChangedBy = params.actor.actorId;
+
+    let autoCreatedDriverId: string | undefined;
+
+    // On approval of an individual partner, auto-create DeliveryDriver if missing
+    if (params.action === 'approve' && partner.type === 'individual') {
+      const existingDriver = this.deliveryDrivers.find((d) => d.partnerId === partner.id);
+      if (!existingDriver) {
+        const partnerVehicle =
+          this.deliveryVehicles.find(
+            (v) => v.partnerId === partner.id && v.status === 'active'
+          ) || this.deliveryVehicles.find((v) => v.partnerId === partner.id && v.status === 'pending');
+
+        const newDriverId = `ddrv_part_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const newDriver: DeliveryDriver = {
+          id: newDriverId,
+          providerType: 'partner',
+          partnerId: partner.id,
+          name: partner.name,
+          phone: partner.phone,
+          licenseNo: partner.kyc?.licenseNo,
+          assignedVehicleId:
+            partnerVehicle && partnerVehicle.status === 'active' ? partnerVehicle.id : undefined,
+          governorateId: partner.governorateId,
+          serviceZoneIds: [...partner.serviceZoneIds],
+          accountStatus: 'active',
+          statusReason: `إنشاء تلقائي عند اعتماد الشريك الفردي: ${cleanReason}`,
+          statusChangedAt: nowIso,
+          statusChangedBy: params.actor.actorId,
+          isAvailable: true,
+          createdAt: nowIso
+        };
+        this.deliveryDrivers.unshift(newDriver);
+        autoCreatedDriverId = newDriverId;
+      } else if (existingDriver.accountStatus === 'pending') {
+        existingDriver.accountStatus = 'active';
+        existingDriver.statusReason = cleanReason;
+        existingDriver.statusChangedAt = nowIso;
+        existingDriver.statusChangedBy = params.actor.actorId;
+      }
+    }
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: `delivery_partner.${params.action}`,
+      entityType: 'delivery_partner',
+      entityId: partner.id,
+      summaryAr: `${params.action === 'approve' ? 'اعتماد' : params.action === 'reject' ? 'رفض' : params.action === 'suspend' ? 'إيقاف' : params.action === 'reactivate' ? 'إعادة تفعيل' : 'أرشفة'} شريك التوصيل: ${partner.name}`,
+      summaryEn: `Delivery partner ${params.action}: ${partner.name}`,
+      before,
+      after: {
+        accountStatus: partner.accountStatus,
+        statusReason: partner.statusReason,
+        autoCreatedDriverId: autoCreatedDriverId || null
+      },
+      reason: cleanReason
+    });
+
+    return this.getAdminDeliveryPartnerDetail(partner.id);
+  }
+
+  updateAdminDeliveryPartner(params: {
+    id: string;
+    name?: string;
+    city?: string;
+    governorateId?: string;
+    serviceZoneIds?: string[];
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const partner = this.deliveryPartners.find((p) => p.id === params.id);
+    if (!partner) {
+      const err: any = new Error('شريك التوصيل غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const before = {
+      name: partner.name,
+      city: partner.city,
+      governorateId: partner.governorateId,
+      serviceZoneIds: [...partner.serviceZoneIds]
+    };
+
+    if (typeof params.name === 'string' && params.name.trim().length >= 2) {
+      partner.name = params.name.trim();
+    }
+    if (typeof params.city === 'string' && params.city.trim()) {
+      partner.city = params.city.trim();
+    }
+    if (params.governorateId && this.governorates.some((g) => g.id === params.governorateId)) {
+      partner.governorateId = params.governorateId;
+    }
+    if (Array.isArray(params.serviceZoneIds)) {
+      const valid = Array.from(
+        new Set(params.serviceZoneIds.filter((zid) => this.deliveryZones.some((z) => z.id === zid)))
+      );
+      if (valid.length === 0) {
+        const err: any = new Error('يجب اختيار منطقة توصيل واحدة على الأقل');
+        err.statusCode = 400;
+        throw err;
+      }
+      partner.serviceZoneIds = valid;
+    }
+
+    this.recordAudit({
+      at: new Date().toISOString(),
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'delivery_partner.update',
+      entityType: 'delivery_partner',
+      entityId: partner.id,
+      summaryAr: `تحديث بيانات شريك التوصيل: ${partner.name}`,
+      summaryEn: `Updated delivery partner profile: ${partner.name}`,
+      before,
+      after: {
+        name: partner.name,
+        city: partner.city,
+        governorateId: partner.governorateId,
+        serviceZoneIds: partner.serviceZoneIds
+      },
+      reason: cleanReason
+    });
+
+    return this.getAdminDeliveryPartnerDetail(partner.id);
+  }
+
+  updateAdminDeliveryPartnerKyc(params: {
+    id: string;
+    licenseNo?: string;
+    checklist?: KycChecklistItem[];
+    actor: { actorId: string; actorName: string };
+  }) {
+    const partner = this.deliveryPartners.find((p) => p.id === params.id);
+    if (!partner) {
+      const err: any = new Error('شريك التوصيل غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    const prevKyc: AccountKycInfo = partner.kyc || { checklist: [] };
+    const before = JSON.parse(JSON.stringify(prevKyc));
+
+    const validKeys: KycChecklistKey[] = [
+      'driver_license',
+      'vehicle_registration',
+      'insurance',
+      'vehicle_inspection',
+      'commercial_license',
+      'owner_id',
+      'phone_verified'
+    ];
+    const nextChecklist: KycChecklistItem[] = Array.isArray(params.checklist)
+      ? params.checklist
+          .filter((item) => validKeys.includes(item.key))
+          .map((item) => ({
+            key: item.key,
+            status:
+              item.status === 'approved' || item.status === 'rejected' ? item.status : 'pending',
+            note: typeof item.note === 'string' && item.note.trim() ? item.note.trim() : undefined
+          }))
+      : prevKyc.checklist;
+
+    partner.kyc = {
+      licenseNo:
+        params.licenseNo !== undefined ? params.licenseNo.trim() || undefined : prevKyc.licenseNo,
+      checklist: nextChecklist
+    };
+
+    this.recordAudit({
+      at: new Date().toISOString(),
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'delivery_partner.update_kyc',
+      entityType: 'delivery_partner',
+      entityId: partner.id,
+      summaryAr: `تحديث وثائق التحقق لشريك التوصيل: ${partner.name}`,
+      summaryEn: `Updated delivery partner KYC: ${partner.name}`,
+      before,
+      after: partner.kyc,
+      reason: 'مراجعة وتحديث قائمة التحقق للوثائق'
+    });
+
+    return this.getAdminDeliveryPartnerDetail(partner.id);
+  }
+
+  addAdminDeliveryPartnerNote(params: {
+    id: string;
+    text: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const partner = this.deliveryPartners.find((p) => p.id === params.id);
+    if (!partner) {
+      const err: any = new Error('شريك التوصيل غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    const clean = String(params.text || '').trim();
+    if (clean.length < 3) {
+      const err: any = new Error('نص الملاحظة قصير جداً');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!partner.adminNotes) partner.adminNotes = [];
+    const nowIso = new Date().toISOString();
+    const note: AdminInternalNote = {
+      id: `dpnote_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      at: nowIso,
+      author: params.actor.actorName,
+      text: clean
+    };
+    partner.adminNotes.unshift(note);
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'delivery_partner.add_note',
+      entityType: 'delivery_partner',
+      entityId: partner.id,
+      summaryAr: `إضافة ملاحظة داخلية لشريك التوصيل: ${partner.name}`,
+      summaryEn: `Added internal note to delivery partner: ${partner.name}`,
+      before: null,
+      after: { noteText: clean },
+      reason: clean
+    });
+
+    return note;
+  }
+
+  // ---- Admin Delivery Vehicles ----
+
+  private enrichDeliveryVehicle(v: DeliveryVehicle) {
+    const partner = v.partnerId
+      ? this.deliveryPartners.find((p) => p.id === v.partnerId)
+      : undefined;
+    const assignedDrivers = this.deliveryDrivers.filter((d) => d.assignedVehicleId === v.id);
+    const expiringSummary = this.getExpiringVehicleDocsSummary(30).find((e) => e.id === v.id);
+    return {
+      ...v,
+      partnerName: partner?.name,
+      partnerStatus: partner?.accountStatus,
+      assignedDrivers: assignedDrivers.map((d) => ({ id: d.id, name: d.name, accountStatus: d.accountStatus })),
+      hasExpiringDocs: Boolean(expiringSummary),
+      hasExpiredDocs: Boolean(expiringSummary?.hasExpired),
+      expiringDocs: expiringSummary?.expiringDocs || []
+    };
+  }
+
+  getAdminDeliveryVehicles(params?: {
+    ownerType?: string;
+    status?: string;
+    vehicleClass?: string;
+    expiringOnly?: boolean;
+    search?: string;
+  }) {
+    const all = this.deliveryVehicles.map((v) => this.enrichDeliveryVehicle(v));
+    let filtered = [...all];
+    if (params?.ownerType && params.ownerType !== 'all') {
+      filtered = filtered.filter((v) => v.ownerType === params.ownerType);
+    }
+    if (params?.status && params.status !== 'all') {
+      filtered = filtered.filter((v) => v.status === params.status);
+    }
+    if (params?.vehicleClass && params.vehicleClass !== 'all') {
+      filtered = filtered.filter((v) => v.vehicleClass === params.vehicleClass);
+    }
+    if (params?.expiringOnly) {
+      filtered = filtered.filter((v) => v.hasExpiringDocs);
+    }
+    if (params?.search && params.search.trim()) {
+      const q = params.search.trim().toLowerCase();
+      filtered = filtered.filter(
+        (v) =>
+          v.plateNumber.toLowerCase().includes(q) ||
+          v.makeModel.toLowerCase().includes(q) ||
+          (v.partnerName || '').toLowerCase().includes(q)
+      );
+    }
+    filtered.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+    return {
+      items: filtered,
+      total: filtered.length,
+      counts: {
+        all: all.length,
+        pending: all.filter((v) => v.status === 'pending').length,
+        active: all.filter((v) => v.status === 'active').length,
+        maintenance: all.filter((v) => v.status === 'maintenance').length,
+        suspended: all.filter((v) => v.status === 'suspended').length,
+        expiring: all.filter((v) => v.hasExpiringDocs).length
+      }
+    };
+  }
+
+  createAdminDeliveryVehicle(params: {
+    ownerType: DeliveryProviderType;
+    partnerId?: string;
+    plateNumber: string;
+    vehicleClass: DeliveryVehicleClass;
+    makeModel: string;
+    year?: number;
+    capacityUnits: number;
+    temperatureSupport: VehicleTemperatureType[];
+    status?: DeliveryVehicleStatus;
+    docsExpiry?: DeliveryVehicle['docsExpiry'];
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const ownerType: DeliveryProviderType =
+      params.ownerType === 'partner' ? 'partner' : 'platform';
+    if (ownerType === 'partner') {
+      if (!params.partnerId || !this.deliveryPartners.some((p) => p.id === params.partnerId)) {
+        const err: any = new Error('يجب تحديد شريك توصيل صالح لمركبة الشريك');
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    const plate = String(params.plateNumber || '').trim();
+    const plateKey = this.normalizePlateKey(plate);
+    if (plate.length < 3) {
+      const err: any = new Error('رقم اللوحة مطلوب');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (this.deliveryVehicles.some((v) => this.normalizePlateKey(v.plateNumber) === plateKey)) {
+      const err: any = new Error(`رقم اللوحة (${plate}) مسجل مسبقاً`);
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const makeModel = String(params.makeModel || '').trim();
+    if (!makeModel) {
+      const err: any = new Error('نوع/موديل المركبة مطلوب');
+      err.statusCode = 400;
+      throw err;
+    }
+    const capacityUnits = Math.round(Number(params.capacityUnits) || 0);
+    if (capacityUnits <= 0) {
+      const err: any = new Error('سعة المركبة يجب أن تكون أكبر من صفر');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const temps: VehicleTemperatureType[] =
+      Array.isArray(params.temperatureSupport) && params.temperatureSupport.length > 0
+        ? Array.from(new Set(params.temperatureSupport))
+        : ['ambient'];
+
+    const nowIso = new Date().toISOString();
+    const initialStatus: DeliveryVehicleStatus =
+      params.status || (ownerType === 'platform' ? 'active' : 'pending');
+
+    const newVehicle: DeliveryVehicle = {
+      id: `dveh_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      ownerType,
+      partnerId: ownerType === 'partner' ? params.partnerId : undefined,
+      plateNumber: plate,
+      vehicleClass: params.vehicleClass,
+      makeModel,
+      year: params.year ? Number(params.year) : undefined,
+      capacityUnits,
+      temperatureSupport: temps,
+      status: initialStatus,
+      statusReason: cleanReason,
+      statusChangedAt: nowIso,
+      statusChangedBy: params.actor.actorId,
+      docsExpiry: params.docsExpiry,
+      createdAt: nowIso
+    };
+
+    this.deliveryVehicles.unshift(newVehicle);
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'delivery_vehicle.create',
+      entityType: 'delivery_vehicle',
+      entityId: newVehicle.id,
+      summaryAr: `إضافة مركبة توصيل جديدة (${plate} — ${VEHICLE_CLASS_LABELS[params.vehicleClass].ar})`,
+      summaryEn: `Created delivery vehicle ${plate} (${params.vehicleClass})`,
+      before: null,
+      after: newVehicle,
+      reason: cleanReason
+    });
+
+    return this.enrichDeliveryVehicle(newVehicle);
+  }
+
+  updateAdminDeliveryVehicleDocs(params: {
+    id: string;
+    docsExpiry: DeliveryVehicle['docsExpiry'];
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const vehicle = this.deliveryVehicles.find((v) => v.id === params.id);
+    if (!vehicle) {
+      const err: any = new Error('المركبة غير موجودة');
+      err.statusCode = 404;
+      throw err;
+    }
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const before = vehicle.docsExpiry ? { ...vehicle.docsExpiry } : null;
+    vehicle.docsExpiry = {
+      registrationExpiry: params.docsExpiry?.registrationExpiry?.trim() || undefined,
+      insuranceExpiry: params.docsExpiry?.insuranceExpiry?.trim() || undefined,
+      inspectionExpiry: params.docsExpiry?.inspectionExpiry?.trim() || undefined
+    };
+
+    this.recordAudit({
+      at: new Date().toISOString(),
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'delivery_vehicle.update_docs',
+      entityType: 'delivery_vehicle',
+      entityId: vehicle.id,
+      summaryAr: `تحديث تواريخ وثائق المركبة ${vehicle.plateNumber}`,
+      summaryEn: `Updated document expiry dates for vehicle ${vehicle.plateNumber}`,
+      before,
+      after: vehicle.docsExpiry,
+      reason: cleanReason
+    });
+
+    return this.enrichDeliveryVehicle(vehicle);
+  }
+
+  transitionAdminDeliveryVehicle(params: {
+    id: string;
+    action: 'approve' | 'reject' | 'activate' | 'suspend' | 'maintenance';
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const vehicle = this.deliveryVehicles.find((v) => v.id === params.id);
+    if (!vehicle) {
+      const err: any = new Error('المركبة غير موجودة');
+      err.statusCode = 404;
+      throw err;
+    }
+    const cleanReason = this.requireDeliveryReason(params.reason);
+
+    const statusMap: Record<typeof params.action, DeliveryVehicleStatus> = {
+      approve: 'active',
+      activate: 'active',
+      reject: 'rejected',
+      suspend: 'suspended',
+      maintenance: 'maintenance'
+    };
+    const nextStatus = statusMap[params.action];
+    if (nextStatus === 'active' && vehicle.ownerType === 'partner' && vehicle.partnerId) {
+      const partner = this.deliveryPartners.find((p) => p.id === vehicle.partnerId);
+      if (partner && partner.accountStatus !== 'active') {
+        const err: any = new Error(
+          `لا يمكن تفعيل المركبة لأن حالة الشريك المالك (${partner.name}) هي ${partner.accountStatus}`
+        );
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    const before = { status: vehicle.status, statusReason: vehicle.statusReason };
+    const nowIso = new Date().toISOString();
+    vehicle.status = nextStatus;
+    vehicle.statusReason = cleanReason;
+    vehicle.statusChangedAt = nowIso;
+    vehicle.statusChangedBy = params.actor.actorId;
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: `delivery_vehicle.${params.action}`,
+      entityType: 'delivery_vehicle',
+      entityId: vehicle.id,
+      summaryAr: `تغيير حالة المركبة (${vehicle.plateNumber}) إلى ${nextStatus}`,
+      summaryEn: `Vehicle ${vehicle.plateNumber} -> ${nextStatus}`,
+      before,
+      after: { status: vehicle.status, statusReason: vehicle.statusReason },
+      reason: cleanReason
+    });
+
+    return this.enrichDeliveryVehicle(vehicle);
+  }
+
+  // ---- Admin Delivery Drivers (Platform & Partner Drivers, separate from Van DriverProfile) ----
+
+  private enrichDeliveryDriver(d: DeliveryDriver) {
+    const partner = d.partnerId
+      ? this.deliveryPartners.find((p) => p.id === d.partnerId)
+      : undefined;
+    const vehicle = d.assignedVehicleId
+      ? this.deliveryVehicles.find((v) => v.id === d.assignedVehicleId)
+      : undefined;
+    const gov = this.governorates.find((g) => g.id === d.governorateId);
+    return {
+      ...d,
+      partnerName: partner?.name,
+      vehiclePlate: vehicle?.plateNumber,
+      vehicleClass: vehicle?.vehicleClass,
+      vehicleMakeModel: vehicle?.makeModel,
+      governorateNameAr: gov?.nameAr || d.governorateId,
+      governorateNameEn: gov?.nameEn || d.governorateId
+    };
+  }
+
+  getAdminDeliveryDrivers(params?: {
+    providerType?: string;
+    status?: string;
+    governorateId?: string;
+    search?: string;
+  }) {
+    const all = this.deliveryDrivers.map((d) => this.enrichDeliveryDriver(d));
+    let filtered = [...all];
+    if (params?.providerType && params.providerType !== 'all') {
+      filtered = filtered.filter((d) => d.providerType === params.providerType);
+    }
+    if (params?.status && params.status !== 'all') {
+      filtered = filtered.filter((d) => d.accountStatus === params.status);
+    }
+    if (params?.governorateId && params.governorateId !== 'all') {
+      filtered = filtered.filter((d) => d.governorateId === params.governorateId);
+    }
+    if (params?.search && params.search.trim()) {
+      const q = params.search.trim().toLowerCase();
+      filtered = filtered.filter(
+        (d) =>
+          d.name.toLowerCase().includes(q) ||
+          d.phone.toLowerCase().includes(q) ||
+          (d.partnerName || '').toLowerCase().includes(q) ||
+          (d.vehiclePlate || '').toLowerCase().includes(q)
+      );
+    }
+    filtered.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+    return {
+      items: filtered,
+      total: filtered.length,
+      counts: {
+        all: all.length,
+        platform: all.filter((d) => d.providerType === 'platform').length,
+        partner: all.filter((d) => d.providerType === 'partner').length,
+        active: all.filter((d) => d.accountStatus === 'active').length,
+        pending: all.filter((d) => d.accountStatus === 'pending').length,
+        suspended: all.filter((d) => d.accountStatus === 'suspended').length
+      }
+    };
+  }
+
+  createAdminDeliveryDriver(params: {
+    providerType: DeliveryProviderType;
+    partnerId?: string;
+    name: string;
+    phone: string;
+    licenseNo?: string;
+    licenseExpiry?: string;
+    assignedVehicleId?: string;
+    governorateId: string;
+    serviceZoneIds: string[];
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const providerType: DeliveryProviderType =
+      params.providerType === 'partner' ? 'partner' : 'platform';
+    if (providerType === 'partner') {
+      this.assertDeliveryPartnerOperable(params.partnerId || '');
+    }
+
+    const name = String(params.name || '').trim();
+    if (name.length < 2) {
+      const err: any = new Error('اسم السائق مطلوب');
+      err.statusCode = 400;
+      throw err;
+    }
+    const phone = String(params.phone || '').trim();
+    const normPhone = this.normalizeDeliveryPhone(phone);
+    if (normPhone.length < 7) {
+      const err: any = new Error('رقم هاتف السائق غير صالح');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (
+      this.deliveryDrivers.some((d) => this.normalizeDeliveryPhone(d.phone) === normPhone)
+    ) {
+      const err: any = new Error('رقم هاتف السائق مسجل مسبقاً في سجل سائقي شبكة التوصيل');
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const gov = this.governorates.find((g) => g.id === params.governorateId);
+    if (!gov) {
+      const err: any = new Error('المحافظة المختارة غير صالحة');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const zones = Array.isArray(params.serviceZoneIds)
+      ? Array.from(
+          new Set(params.serviceZoneIds.filter((zid) => this.deliveryZones.some((z) => z.id === zid)))
+        )
+      : [];
+    if (zones.length === 0) {
+      const err: any = new Error('يجب تحديد منطقة عمل واحدة على الأقل للسائق');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    let assignedVehicleId: string | undefined;
+    if (params.assignedVehicleId) {
+      this.assertDeliveryVehicleOperable(params.assignedVehicleId);
+      assignedVehicleId = params.assignedVehicleId;
+    }
+
+    const nowIso = new Date().toISOString();
+    const newDriver: DeliveryDriver = {
+      id: `ddrv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      providerType,
+      partnerId: providerType === 'partner' ? params.partnerId : undefined,
+      name,
+      phone,
+      licenseNo: params.licenseNo?.trim() || undefined,
+      licenseExpiry: params.licenseExpiry?.trim() || undefined,
+      assignedVehicleId,
+      governorateId: gov.id,
+      serviceZoneIds: zones,
+      accountStatus: 'active',
+      statusReason: cleanReason,
+      statusChangedAt: nowIso,
+      statusChangedBy: params.actor.actorId,
+      isAvailable: true,
+      createdAt: nowIso
+    };
+
+    this.deliveryDrivers.unshift(newDriver);
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'delivery_driver.create',
+      entityType: 'delivery_driver',
+      entityId: newDriver.id,
+      summaryAr: `إضافة سائق شبكة التوصيل (${name}) — ${providerType === 'platform' ? 'تابع للمنصة' : 'تابع لشريك'}`,
+      summaryEn: `Created delivery driver ${name} (${providerType})`,
+      before: null,
+      after: newDriver,
+      reason: cleanReason
+    });
+
+    return this.enrichDeliveryDriver(newDriver);
+  }
+
+  updateAdminDeliveryDriver(params: {
+    id: string;
+    assignedVehicleId?: string | null;
+    serviceZoneIds?: string[];
+    isAvailable?: boolean;
+    licenseNo?: string;
+    licenseExpiry?: string;
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const driver = this.deliveryDrivers.find((d) => d.id === params.id);
+    if (!driver) {
+      const err: any = new Error('السائق غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const before = {
+      assignedVehicleId: driver.assignedVehicleId || null,
+      serviceZoneIds: [...driver.serviceZoneIds],
+      isAvailable: driver.isAvailable
+    };
+
+    if (params.assignedVehicleId !== undefined) {
+      if (params.assignedVehicleId === null || params.assignedVehicleId === '') {
+        driver.assignedVehicleId = undefined;
+      } else {
+        this.assertDeliveryVehicleOperable(params.assignedVehicleId);
+        driver.assignedVehicleId = params.assignedVehicleId;
+      }
+    }
+    if (Array.isArray(params.serviceZoneIds) && params.serviceZoneIds.length > 0) {
+      driver.serviceZoneIds = Array.from(
+        new Set(params.serviceZoneIds.filter((zid) => this.deliveryZones.some((z) => z.id === zid)))
+      );
+    }
+    if (typeof params.isAvailable === 'boolean') {
+      driver.isAvailable = params.isAvailable;
+    }
+    if (params.licenseNo !== undefined) driver.licenseNo = params.licenseNo.trim() || undefined;
+    if (params.licenseExpiry !== undefined) {
+      driver.licenseExpiry = params.licenseExpiry.trim() || undefined;
+    }
+
+    this.recordAudit({
+      at: new Date().toISOString(),
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'delivery_driver.update',
+      entityType: 'delivery_driver',
+      entityId: driver.id,
+      summaryAr: `تحديث ربط المركبة/مناطق السائق: ${driver.name}`,
+      summaryEn: `Updated delivery driver ${driver.name}`,
+      before,
+      after: {
+        assignedVehicleId: driver.assignedVehicleId || null,
+        serviceZoneIds: driver.serviceZoneIds,
+        isAvailable: driver.isAvailable
+      },
+      reason: cleanReason
+    });
+
+    return this.enrichDeliveryDriver(driver);
+  }
+
+  transitionAdminDeliveryDriver(params: {
+    id: string;
+    action: 'approve' | 'reject' | 'suspend' | 'reactivate' | 'archive';
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const driver = this.deliveryDrivers.find((d) => d.id === params.id);
+    if (!driver) {
+      const err: any = new Error('السائق غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const statusMap: Record<typeof params.action, DeliveryAccountStatus> = {
+      approve: 'active',
+      reactivate: 'active',
+      reject: 'rejected',
+      suspend: 'suspended',
+      archive: 'archived'
+    };
+    const nextStatus = statusMap[params.action];
+    const before = { accountStatus: driver.accountStatus, statusReason: driver.statusReason };
+    const nowIso = new Date().toISOString();
+
+    driver.accountStatus = nextStatus;
+    driver.statusReason = cleanReason;
+    driver.statusChangedAt = nowIso;
+    driver.statusChangedBy = params.actor.actorId;
+    if (nextStatus !== 'active') {
+      driver.isAvailable = false;
+    }
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: `delivery_driver.${params.action}`,
+      entityType: 'delivery_driver',
+      entityId: driver.id,
+      summaryAr: `تغيير حالة السائق (${driver.name}) إلى ${nextStatus}`,
+      summaryEn: `Delivery driver ${driver.name} -> ${nextStatus}`,
+      before,
+      after: { accountStatus: driver.accountStatus, statusReason: driver.statusReason },
+      reason: cleanReason
+    });
+
+    return this.enrichDeliveryDriver(driver);
+  }
+
+  // ---- Admin Rate Rules & Platform Delivery Settings ----
+
+  getAdminDeliveryRateRules() {
+    return this.deliveryRateRules.map((r) => {
+      const gov = r.scope.governorateId
+        ? this.governorates.find((g) => g.id === r.scope.governorateId)
+        : undefined;
+      const zone = r.scope.deliveryZoneId
+        ? this.deliveryZones.find((z) => z.id === r.scope.deliveryZoneId)
+        : undefined;
+      return {
+        ...r,
+        governorateNameAr: gov?.nameAr,
+        governorateNameEn: gov?.nameEn,
+        zoneNameAr: zone?.nameAr,
+        zoneNameEn: zone?.nameEn
+      };
+    });
+  }
+
+  createAdminDeliveryRateRule(params: {
+    nameAr: string;
+    nameEn?: string;
+    scope: { governorateId?: string; deliveryZoneId?: string };
+    vehicleClass: DeliveryVehicleClass;
+    baseFeeIQD: number;
+    perUnitFeeIQD: number;
+    minFeeIQD: number;
+    refrigeratedSurchargeIQD: number;
+    isActive?: boolean;
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const nameAr = String(params.nameAr || '').trim();
+    if (nameAr.length < 2) {
+      const err: any = new Error('اسم قاعدة التسعير مطلوب');
+      err.statusCode = 400;
+      throw err;
+    }
+    const baseFeeIQD = Math.max(0, Math.round(Number(params.baseFeeIQD) || 0));
+    const perUnitFeeIQD = Math.max(0, Math.round(Number(params.perUnitFeeIQD) || 0));
+    const minFeeIQD = Math.max(0, Math.round(Number(params.minFeeIQD) || 0));
+    const refrigeratedSurchargeIQD = Math.max(
+      0,
+      Math.round(Number(params.refrigeratedSurchargeIQD) || 0)
+    );
+
+    const nowIso = new Date().toISOString();
+    const rule: DeliveryRateRule = {
+      id: `rate_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      nameAr,
+      nameEn: String(params.nameEn || nameAr).trim(),
+      scope: {
+        governorateId: params.scope?.governorateId || undefined,
+        deliveryZoneId: params.scope?.deliveryZoneId || undefined
+      },
+      vehicleClass: params.vehicleClass,
+      baseFeeIQD,
+      perUnitFeeIQD,
+      minFeeIQD,
+      refrigeratedSurchargeIQD,
+      isActive: params.isActive !== false,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      updatedBy: params.actor.actorId
+    };
+
+    this.deliveryRateRules.unshift(rule);
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'delivery_rate.create',
+      entityType: 'delivery_rate_rule',
+      entityId: rule.id,
+      summaryAr: `إنشاء قاعدة تسعير توصيل جديدة: ${nameAr}`,
+      summaryEn: `Created delivery rate rule: ${rule.nameEn}`,
+      before: null,
+      after: rule,
+      reason: cleanReason
+    });
+
+    return rule;
+  }
+
+  updateAdminDeliveryRateRule(params: {
+    id: string;
+    nameAr?: string;
+    nameEn?: string;
+    scope?: { governorateId?: string; deliveryZoneId?: string };
+    vehicleClass?: DeliveryVehicleClass;
+    baseFeeIQD?: number;
+    perUnitFeeIQD?: number;
+    minFeeIQD?: number;
+    refrigeratedSurchargeIQD?: number;
+    isActive?: boolean;
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const rule = this.deliveryRateRules.find((r) => r.id === params.id);
+    if (!rule) {
+      const err: any = new Error('قاعدة التسعير غير موجودة');
+      err.statusCode = 404;
+      throw err;
+    }
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const before = JSON.parse(JSON.stringify(rule));
+    const nowIso = new Date().toISOString();
+
+    if (typeof params.nameAr === 'string' && params.nameAr.trim().length >= 2) {
+      rule.nameAr = params.nameAr.trim();
+    }
+    if (typeof params.nameEn === 'string' && params.nameEn.trim().length >= 2) {
+      rule.nameEn = params.nameEn.trim();
+    }
+    if (params.scope) {
+      rule.scope = {
+        governorateId: params.scope.governorateId || undefined,
+        deliveryZoneId: params.scope.deliveryZoneId || undefined
+      };
+    }
+    if (params.vehicleClass) rule.vehicleClass = params.vehicleClass;
+    if (params.baseFeeIQD !== undefined) {
+      rule.baseFeeIQD = Math.max(0, Math.round(Number(params.baseFeeIQD) || 0));
+    }
+    if (params.perUnitFeeIQD !== undefined) {
+      rule.perUnitFeeIQD = Math.max(0, Math.round(Number(params.perUnitFeeIQD) || 0));
+    }
+    if (params.minFeeIQD !== undefined) {
+      rule.minFeeIQD = Math.max(0, Math.round(Number(params.minFeeIQD) || 0));
+    }
+    if (params.refrigeratedSurchargeIQD !== undefined) {
+      rule.refrigeratedSurchargeIQD = Math.max(
+        0,
+        Math.round(Number(params.refrigeratedSurchargeIQD) || 0)
+      );
+    }
+    if (typeof params.isActive === 'boolean') {
+      rule.isActive = params.isActive;
+    }
+    rule.updatedAt = nowIso;
+    rule.updatedBy = params.actor.actorId;
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'delivery_rate.update',
+      entityType: 'delivery_rate_rule',
+      entityId: rule.id,
+      summaryAr: `تعديل قاعدة تسعير التوصيل: ${rule.nameAr}`,
+      summaryEn: `Updated delivery rate rule: ${rule.nameEn}`,
+      before,
+      after: rule,
+      reason: cleanReason
+    });
+
+    return rule;
+  }
+
+  deleteAdminDeliveryRateRule(params: {
+    id: string;
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const rule = this.deliveryRateRules.find((r) => r.id === params.id);
+    if (!rule) {
+      const err: any = new Error('قاعدة التسعير غير موجودة');
+      err.statusCode = 404;
+      throw err;
+    }
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const before = JSON.parse(JSON.stringify(rule));
+    const nowIso = new Date().toISOString();
+    rule.isActive = false;
+    rule.updatedAt = nowIso;
+    rule.updatedBy = params.actor.actorId;
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'delivery_rate.deactivate',
+      entityType: 'delivery_rate_rule',
+      entityId: rule.id,
+      summaryAr: `تعطيل قاعدة تسعير التوصيل: ${rule.nameAr}`,
+      summaryEn: `Deactivated delivery rate rule: ${rule.nameEn}`,
+      before,
+      after: rule,
+      reason: cleanReason
+    });
+
+    return rule;
+  }
+
+  getAdminDeliveryPlatformSettings(): DeliveryPlatformSettings {
+    return this.deliveryPlatformSettings;
+  }
+
+  updateAdminDeliveryPlatformSettings(params: {
+    freeDeliveryThresholdIQD?: number;
+    partnerCommissionPercent?: number;
+    codAllowedForPartners?: boolean;
+    vehicleClassDefaults?: DeliveryPlatformSettings['vehicleClassDefaults'];
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const before = JSON.parse(JSON.stringify(this.deliveryPlatformSettings));
+    const nowIso = new Date().toISOString();
+
+    if (params.freeDeliveryThresholdIQD !== undefined) {
+      this.deliveryPlatformSettings.freeDeliveryThresholdIQD = Math.max(
+        0,
+        Math.round(Number(params.freeDeliveryThresholdIQD) || 0)
+      );
+    }
+    if (params.partnerCommissionPercent !== undefined) {
+      this.deliveryPlatformSettings.partnerCommissionPercent = Math.max(
+        0,
+        Math.min(100, Number(params.partnerCommissionPercent) || 0)
+      );
+    }
+    if (typeof params.codAllowedForPartners === 'boolean') {
+      this.deliveryPlatformSettings.codAllowedForPartners = params.codAllowedForPartners;
+    }
+    if (Array.isArray(params.vehicleClassDefaults) && params.vehicleClassDefaults.length > 0) {
+      this.deliveryPlatformSettings.vehicleClassDefaults = params.vehicleClassDefaults;
+    }
+    this.deliveryPlatformSettings.updatedAt = nowIso;
+    this.deliveryPlatformSettings.updatedBy = params.actor.actorId;
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'delivery_settings.update',
+      entityType: 'delivery_platform_settings',
+      entityId: 'global',
+      summaryAr: `تحديث إعدادات شبكة التوصيل (العتبة المجانية: ${this.deliveryPlatformSettings.freeDeliveryThresholdIQD.toLocaleString('en-US')} د.ع)`,
+      summaryEn: 'Updated platform delivery settings',
+      before,
+      after: this.deliveryPlatformSettings,
+      reason: cleanReason
+    });
+
+    return this.deliveryPlatformSettings;
+  }
+
+  // ---- Admin Supplier Delivery Settings ----
+
+  getAdminSupplierDeliverySettingsList() {
+    return this.suppliers.map((s) => ({
+      supplierId: s.id,
+      companyName: s.companyName,
+      city: s.city,
+      accountStatus: this.getSupplierAccountStatus(s),
+      serviceZoneIds: s.serviceZoneIds,
+      totalVans: s.totalVans,
+      deliverySettings: s.deliverySettings || {
+        hasOwnFleet: true,
+        allowPlatformDelivery: false,
+        allowStorePickup: true
+      }
+    }));
+  }
+
+  updateAdminSupplierDeliverySettings(params: {
+    supplierId: string;
+    hasOwnFleet: boolean;
+    allowPlatformDelivery: boolean;
+    allowStorePickup: boolean;
+    freeDeliveryThresholdIQD?: number | null;
+    notes?: string;
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const supplier = this.suppliers.find((s) => s.id === params.supplierId);
+    if (!supplier) {
+      const err: any = new Error('المورد غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const hasOwnFleet = Boolean(params.hasOwnFleet);
+    const allowPlatformDelivery = Boolean(params.allowPlatformDelivery);
+    const allowStorePickup = Boolean(params.allowStorePickup);
+
+    if (!hasOwnFleet && !allowPlatformDelivery && !allowStorePickup) {
+      const err: any = new Error(
+        'يجب إبقاء خيار توصيل واحد على الأقل مفعلاً للمورد (أسطول خاص أو شبكة المنصة أو الاستلام من المستودع)'
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const before = supplier.deliverySettings
+      ? JSON.parse(JSON.stringify(supplier.deliverySettings))
+      : null;
+
+    const nextSettings: SupplierDeliverySettings = {
+      hasOwnFleet,
+      allowPlatformDelivery,
+      allowStorePickup,
+      freeDeliveryThresholdIQD:
+        params.freeDeliveryThresholdIQD === null || params.freeDeliveryThresholdIQD === undefined
+          ? undefined
+          : Math.max(0, Math.round(Number(params.freeDeliveryThresholdIQD) || 0)),
+      notes: typeof params.notes === 'string' && params.notes.trim() ? params.notes.trim() : undefined
+    };
+
+    supplier.deliverySettings = nextSettings;
+
+    this.recordAudit({
+      at: new Date().toISOString(),
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'supplier.update_delivery_settings',
+      entityType: 'supplier',
+      entityId: supplier.id,
+      summaryAr: `تحديث إعدادات توصيل المورد: ${supplier.companyName}`,
+      summaryEn: `Updated delivery settings for supplier: ${supplier.companyName}`,
+      before,
+      after: nextSettings,
+      reason: cleanReason
+    });
+
+    return {
+      supplierId: supplier.id,
+      companyName: supplier.companyName,
+      deliverySettings: supplier.deliverySettings
+    };
+  }
+
+  simulateAdminDeliveryFee(params: {
+    supplierId?: string;
+    governorateId?: string;
+    deliveryZoneId?: string;
+    items?: Array<{ barcode?: string; quantity: number; storageType?: ProductStorageKind }>;
+    storageType?: ProductStorageKind;
+    units?: number;
+    requiredTemperature?: VehicleTemperatureType;
+    orderValueIQD: number;
+  }) {
+    const requestedZone = params.deliveryZoneId
+      ? this.deliveryZones.find((z) => z.id === params.deliveryZoneId)
+      : undefined;
+
+    const resolvedGovId = params.governorateId || requestedZone?.governorateId;
+    const gov = this.governorates.find((g) => g.id === resolvedGovId);
+    if (!gov) {
+      const err: any = new Error('المحافظة المختارة غير موجودة');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const zone =
+      requestedZone || this.deliveryZones.find((z) => z.governorateId === gov.id);
+
+    const supplier = params.supplierId
+      ? this.suppliers.find((s) => s.id === params.supplierId)
+      : undefined;
+
+    let resolvedUnits = Math.max(0, Math.round(Number(params.units) || 0));
+    const storageTypes: Array<ProductStorageKind | undefined> = [];
+    if (params.storageType) storageTypes.push(params.storageType);
+
+    if (Array.isArray(params.items) && params.items.length > 0) {
+      let itemUnits = 0;
+      for (const item of params.items) {
+        const qty = Math.max(1, Math.round(Number(item.quantity) || 1));
+        itemUnits += qty;
+        const product = item.barcode
+          ? this.products.find((p) => p.barcode === item.barcode)
+          : undefined;
+        storageTypes.push(item.storageType || product?.storageType || 'ambient');
+      }
+      if (resolvedUnits <= 0) resolvedUnits = itemUnits;
+    }
+    if (resolvedUnits <= 0) resolvedUnits = 1;
+
+    const resolvedTemperature: VehicleTemperatureType = params.requiredTemperature
+      ? params.requiredTemperature
+      : getRequiredTemperatureForStorageTypes(storageTypes);
+
+    const supplierFreeThreshold = supplier?.deliverySettings?.freeDeliveryThresholdIQD;
+
+    const directQuote = calculateDeliveryFee({
+      zone: {
+        governorateId: gov.id,
+        deliveryZoneId: zone?.id
+      },
+      units: resolvedUnits,
+      requiredTemperature: resolvedTemperature,
+      orderValueIQD: params.orderValueIQD,
+      rules: this.deliveryRateRules,
+      settings: this.deliveryPlatformSettings,
+      supplierFreeThresholdIQD: supplierFreeThreshold
+    });
+
+    const hasActiveCoverage = this.hasActivePlatformCoverageForZone(gov.id, zone?.id);
+
+    const supplierEvaluation =
+      supplier && zone
+        ? getDeliveryOptionsForSupplier({
+            supplier,
+            zone: { governorateId: gov.id, deliveryZoneId: zone.id },
+            units: resolvedUnits,
+            requiredTemperature: resolvedTemperature,
+            orderValueIQD: params.orderValueIQD,
+            rules: this.deliveryRateRules,
+            settings: this.deliveryPlatformSettings,
+            hasActivePlatformCoverage: hasActiveCoverage
+          })
+        : null;
+
+    return {
+      governorateId: gov.id,
+      governorateNameAr: gov.nameAr,
+      governorateNameEn: gov.nameEn,
+      deliveryZoneId: zone?.id,
+      deliveryZoneNameAr: zone?.nameAr,
+      deliveryZoneNameEn: zone?.nameEn,
+      hasActivePlatformCoverage: hasActiveCoverage,
+      quote: directQuote,
+      supplierEvaluation
+    };
+  }
 }
 
 export const db = new AppDataStore();
+
