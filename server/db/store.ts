@@ -45,8 +45,21 @@ import {
   AdminInternalNote,
   AccountKycInfo,
   KycChecklistItem,
-  KycChecklistKey
+  KycChecklistKey,
+  CatalogProductStatus,
+  CatalogOfferStatus,
+  CatalogBrandStatus
 } from './types.ts';
+import {
+  validateBarcode,
+  computeProductQuality,
+  computeOfferPriceAnomalyMap,
+  QUALITY_FIELD_DEFINITIONS
+} from '../../shared/productQuality.ts';
+import {
+  SHARED_CATEGORY_TREE,
+  resolveSharedCategoryKey
+} from '../../shared/categoryTree.ts';
 import {
   validateSupplierOrderRules,
   FailedSupplierOrderRule,
@@ -179,6 +192,7 @@ class AppDataStore {
         lastLoginAt: '2026-11-23T16:40:00.000Z'
       }
     ];
+    this.ensureProductBrandLinks();
   }
   auditLogs: AdminAuditLog[] = [
     {
@@ -461,6 +475,71 @@ class AppDataStore {
     return staff.isActive === false ? 'suspended' : 'active';
   }
 
+  getProductStatus(p: UnifiedProduct): CatalogProductStatus {
+    return p.status || 'active';
+  }
+
+  isProductOperable(p: UnifiedProduct): boolean {
+    return this.getProductStatus(p) === 'active';
+  }
+
+  getOfferStatus(o: SupplierOffer): CatalogOfferStatus {
+    return o.status || 'active';
+  }
+
+  isOfferOperable(o: SupplierOffer): boolean {
+    if (this.getOfferStatus(o) !== 'active') return false;
+    const supplier = this.suppliers.find((s) => s.id === o.supplierId);
+    if (!supplier || !this.isSupplierOperable(supplier)) return false;
+    const product = this.products.find((p) => p.barcode === o.barcode);
+    if (!product || !this.isProductOperable(product)) return false;
+    return true;
+  }
+
+  getBrandStatus(b: Brand): CatalogBrandStatus {
+    return b.status || 'active';
+  }
+
+  isBrandVisible(b: Brand): boolean {
+    return this.getBrandStatus(b) === 'active';
+  }
+
+  getPublicBrands(): Brand[] {
+    return this.brands.filter((b) => this.isBrandVisible(b));
+  }
+
+  private ensureProductBrandLinks() {
+    let seq = 1;
+    for (const p of this.products) {
+      if (p.brandId && this.brands.some((b) => b.id === p.brandId)) {
+        continue;
+      }
+      const rawBrand = (p.brand || '').trim();
+      if (!rawBrand) continue;
+      const lower = rawBrand.toLowerCase();
+      let matched = this.brands.find(
+        (b) => b.nameAr.trim().toLowerCase() === lower || b.nameEn.trim().toLowerCase() === lower
+      );
+      if (!matched) {
+        const cleanSlug = rawBrand
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '_')
+          .replace(/^_|_$/g, '');
+        const id = p.brandId || (cleanSlug ? `brand_${cleanSlug}` : `brand_auto_${seq++}`);
+        const uniqueId = this.brands.some((b) => b.id === id) ? `${id}_${seq++}` : id;
+        matched = {
+          id: uniqueId,
+          nameAr: rawBrand,
+          nameEn: rawBrand,
+          status: 'active',
+          createdAt: '2026-10-01'
+        };
+        this.brands.push(matched);
+      }
+      p.brandId = matched.id;
+    }
+  }
+
   getSuppliers(params?: {
     deliveryZoneId?: string;
     businessType?: SellerBusinessType;
@@ -508,7 +587,7 @@ class AppDataStore {
     verifiedOnly?: boolean;
     sortBy?: ProductSortBy;
   }) {
-    let result = this.products;
+    let result = this.products.filter(p => this.isProductOperable(p));
 
     if (params?.barcode) {
       result = result.filter(p => p.barcode === params.barcode);
@@ -532,6 +611,7 @@ class AppDataStore {
 
     const offersByBarcode = new Map<string, SupplierOffer[]>();
     for (const o of this.offers) {
+      if (!this.isOfferOperable(o)) continue;
       if (!eligibleSupplierIds.has(o.supplierId)) continue;
       let list = offersByBarcode.get(o.barcode);
       if (!list) {
@@ -860,6 +940,14 @@ class AppDataStore {
       const product = this.products.find(p => p.barcode === reqItem.barcode);
       if (!offer || !product) {
         throw new Error(`Offer or product not found for barcode ${reqItem.barcode}`);
+      }
+
+      if (!this.isProductOperable(product)) {
+        throw new Error(`لا يمكن إتمام الطلب: المنتج (${product.nameAr}) مخفي أو مؤرشف حالياً`);
+      }
+
+      if (this.getOfferStatus(offer) !== 'active') {
+        throw new Error(`لا يمكن إتمام الطلب: عرض المورد (${offer.supplierName}) للمنتج (${product.nameAr}) موقوف حالياً`);
       }
 
       const supplier = this.suppliers.find(s => s.id === offer.supplierId);
@@ -3031,7 +3119,15 @@ class AppDataStore {
     // Needs attention queue (live platform snapshot)
     const needsAttention: Array<{
       id: string;
-      type: 'pending_supplier' | 'pending_store' | 'credit_upgrade' | 'stuck_order' | 'disputed_order' | 'blocked_credit';
+      type:
+        | 'pending_supplier'
+        | 'pending_store'
+        | 'credit_upgrade'
+        | 'stuck_order'
+        | 'disputed_order'
+        | 'blocked_credit'
+        | 'catalog_no_offers'
+        | 'catalog_price_anomaly';
       severity: 'high' | 'medium';
       titleAr: string;
       titleEn: string;
@@ -3130,6 +3226,41 @@ class AppDataStore {
       }
     }
 
+    // Catalog summary & anomaly alerts for Admin Overview
+    const qualitySummary = this.getAdminCatalogQualitySummary();
+    const anomalyMap = this.buildGlobalOfferAnomalyMap();
+    const anomalyOffers = this.offers.filter(
+      (o) => anomalyMap.get(o.id)?.isPriceAnomaly && this.getOfferStatus(o) === 'active'
+    );
+
+    if (qualitySummary.withoutOffersCount > 0) {
+      needsAttention.push({
+        id: 'att_cat_no_offers',
+        type: 'catalog_no_offers',
+        severity: 'medium',
+        titleAr: `${qualitySummary.withoutOffersCount} منتج في الكتالوج بلا عروض موردين فعالة`,
+        titleEn: `${qualitySummary.withoutOffersCount} catalog products have no active supplier offers`,
+        subtitleAr: 'راجع الكتالوج لإخفاء المنتجات غير النشطة أو استكمال عروض الموردين',
+        subtitleEn: 'Review catalog to hide inactive products or add supplier offers',
+        targetSection: 'products',
+        entityId: 'without_offers'
+      });
+    }
+
+    if (anomalyOffers.length > 0) {
+      needsAttention.push({
+        id: 'att_cat_price_anomaly',
+        type: 'catalog_price_anomaly',
+        severity: 'high',
+        titleAr: `رصد ${anomalyOffers.length} عرض بسعر شاذ (>40% عن الوسيط)`,
+        titleEn: `Detected ${anomalyOffers.length} offer(s) with price anomaly (>40% off median)`,
+        subtitleAr: 'راجع عروض الموردين للتحقق من الأسعار الشاذة وإيقاف غير المطابق',
+        subtitleEn: 'Review supplier offers to verify or suspend outlier pricing',
+        targetSection: 'offers',
+        entityId: 'price_anomaly'
+      });
+    }
+
     return {
       range,
       kpis: {
@@ -3146,7 +3277,11 @@ class AppDataStore {
         totalUsedCreditIQD,
         totalOverdueDebtIQD,
         pendingCreditUpgradesCount: pendingCreditUpgrades.length,
-        lowStockOffersCount
+        lowStockOffersCount,
+        catalogQualityPercent: qualitySummary.averageScore,
+        catalogLowQualityCount: qualitySummary.below60Count,
+        productsWithoutOffersCount: qualitySummary.withoutOffersCount,
+        priceAnomalyOffersCount: anomalyOffers.length
       },
       dailySeries,
       statusDistribution,
@@ -4134,6 +4269,1119 @@ class AppDataStore {
     });
 
     return this.getAdminAccountDetail('stores', id);
+  }
+
+  // ================= ADMIN PHASE 3: CATALOG MANAGEMENT =================
+  private validateSafeMediaUrl(url: unknown, fieldLabelAr: string): string | undefined {
+    if (url === undefined || url === null) return undefined;
+    const trimmed = String(url).trim();
+    if (!trimmed) return '';
+    if (
+      trimmed.startsWith('http://') ||
+      trimmed.startsWith('https://') ||
+      trimmed.startsWith('/assets/') ||
+      trimmed.startsWith('/')
+    ) {
+      if (trimmed.startsWith('//')) {
+        throw new Error(`رابط ${fieldLabelAr} غير صالح`);
+      }
+      return trimmed;
+    }
+    throw new Error(`رابط ${fieldLabelAr} غير صالح (يُسمح فقط بروابط http/https أو مسارات /assets/)`);
+  }
+
+  private buildGlobalOfferAnomalyMap() {
+    const byBarcode = new Map<string, SupplierOffer[]>();
+    for (const o of this.offers) {
+      const list = byBarcode.get(o.barcode) || [];
+      list.push(o);
+      byBarcode.set(o.barcode, list);
+    }
+    const merged = new Map<
+      string,
+      { isPriceAnomaly: boolean; medianPriceIQD: number | null; deviationPercent: number | null }
+    >();
+    for (const [, list] of byBarcode.entries()) {
+      const m = computeOfferPriceAnomalyMap(list);
+      for (const [id, info] of m.entries()) {
+        merged.set(id, info);
+      }
+    }
+    return merged;
+  }
+
+  private enrichAdminProductSummary(p: UnifiedProduct) {
+    const allOffers = this.offers.filter((o) => o.barcode === p.barcode);
+    const activeOffers = allOffers.filter((o) => this.getOfferStatus(o) === 'active');
+    const quality = computeProductQuality(p, allOffers);
+    const activeMinPrice =
+      activeOffers.length > 0 ? Math.min(...activeOffers.map((o) => o.priceIQD)) : 0;
+    const totalStock = activeOffers.reduce((sum, o) => sum + (Number(o.availableStock) || 0), 0);
+
+    return {
+      ...p,
+      status: this.getProductStatus(p),
+      qualityScore: quality.score,
+      missingFieldsCount: quality.missingFields.length,
+      missingFields: quality.missingFields,
+      offersCount: allOffers.length,
+      activeOffersCount: activeOffers.length,
+      minPriceIQD: activeMinPrice,
+      totalAvailableStock: totalStock
+    };
+  }
+
+  listAdminProducts(params?: {
+    search?: string;
+    category?: string;
+    brandId?: string;
+    status?: string;
+    maxQuality?: number;
+    hasOffers?: string;
+    suppliersFilter?: string;
+    sortBy?: string;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const enrichedAll = this.products.map((p) => this.enrichAdminProductSummary(p));
+
+    const counts = {
+      all: enrichedAll.length,
+      active: enrichedAll.filter((p) => p.status === 'active').length,
+      hidden: enrichedAll.filter((p) => p.status === 'hidden').length,
+      archived: enrichedAll.filter((p) => p.status === 'archived').length,
+      withoutOffers: enrichedAll.filter((p) => p.activeOffersCount === 0).length,
+      lowQuality: enrichedAll.filter((p) => p.qualityScore < 60).length
+    };
+
+    let filtered = [...enrichedAll];
+
+    if (params?.status && params.status !== 'all') {
+      filtered = filtered.filter((p) => p.status === params.status);
+    }
+    if (params?.category && params.category !== 'all') {
+      const resolved = resolveSharedCategoryKey(params.category);
+      filtered = filtered.filter(
+        (p) => p.category === params.category || resolveSharedCategoryKey(p.category) === resolved
+      );
+    }
+    if (params?.brandId && params.brandId !== 'all') {
+      filtered = filtered.filter((p) => p.brandId === params.brandId);
+    }
+    if (params?.maxQuality !== undefined && Number.isFinite(Number(params.maxQuality))) {
+      const cap = Number(params.maxQuality);
+      filtered = filtered.filter((p) => p.qualityScore <= cap);
+    }
+    if (params?.hasOffers === 'with') {
+      filtered = filtered.filter((p) => p.activeOffersCount > 0);
+    } else if (params?.hasOffers === 'without') {
+      filtered = filtered.filter((p) => p.activeOffersCount === 0);
+    }
+    if (params?.suppliersFilter === '0') {
+      filtered = filtered.filter((p) => p.activeOffersCount === 0);
+    } else if (params?.suppliersFilter === '1') {
+      filtered = filtered.filter((p) => p.activeOffersCount === 1);
+    } else if (params?.suppliersFilter === '2+') {
+      filtered = filtered.filter((p) => p.activeOffersCount >= 2);
+    }
+
+    if (params?.search && params.search.trim()) {
+      const q = params.search.trim().toLowerCase();
+      filtered = filtered.filter((p) => {
+        const hay = [
+          p.barcode,
+          p.nameAr,
+          p.nameEn,
+          p.brand,
+          p.category,
+          p.subCategory,
+          p.countryOfOrigin
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return hay.includes(q);
+      });
+    }
+
+    const sortBy = params?.sortBy || 'quality_asc';
+    filtered.sort((a, b) => {
+      if (sortBy === 'quality_asc') {
+        return a.qualityScore - b.qualityScore || a.nameAr.localeCompare(b.nameAr, 'ar');
+      }
+      if (sortBy === 'quality_desc') {
+        return b.qualityScore - a.qualityScore || a.nameAr.localeCompare(b.nameAr, 'ar');
+      }
+      if (sortBy === 'offers_desc') {
+        return b.activeOffersCount - a.activeOffersCount;
+      }
+      if (sortBy === 'name_asc') {
+        return a.nameAr.localeCompare(b.nameAr, 'ar');
+      }
+      const timeA = Date.parse(a.createdAt || '2026-01-01');
+      const timeB = Date.parse(b.createdAt || '2026-01-01');
+      return (Number.isFinite(timeB) ? timeB : 0) - (Number.isFinite(timeA) ? timeA : 0);
+    });
+
+    const pageSize = Math.min(50, Math.max(1, Number(params?.pageSize) || 15));
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(totalPages, Math.max(1, Number(params?.page) || 1));
+    const start = (page - 1) * pageSize;
+
+    const categories = SHARED_CATEGORY_TREE.map((d) => ({
+      categoryKey: d.categoryKey,
+      labelAr: d.labelAr,
+      labelEn: d.labelEn
+    }));
+
+    return {
+      items: filtered.slice(start, start + pageSize),
+      total,
+      page,
+      pageSize,
+      totalPages,
+      counts,
+      categories,
+      brands: this.brands.map((b) => ({
+        id: b.id,
+        nameAr: b.nameAr,
+        nameEn: b.nameEn,
+        status: this.getBrandStatus(b)
+      }))
+    };
+  }
+
+  getAdminProductDetail(barcode: string) {
+    const product = this.products.find((p) => p.barcode === barcode);
+    if (!product) return null;
+
+    const productOffers = this.offers
+      .filter((o) => o.barcode === barcode)
+      .sort((a, b) => a.priceIQD - b.priceIQD);
+    const anomalyMap = computeOfferPriceAnomalyMap(productOffers);
+    const minActivePrice = (() => {
+      const active = productOffers.filter((o) => this.getOfferStatus(o) === 'active');
+      return active.length > 0 ? Math.min(...active.map((o) => o.priceIQD)) : null;
+    })();
+
+    const enrichedOffers = productOffers.map((o) => {
+      const anom = anomalyMap.get(o.id) || {
+        isPriceAnomaly: false,
+        medianPriceIQD: null,
+        deviationPercent: null
+      };
+      return {
+        ...o,
+        status: this.getOfferStatus(o),
+        isLowestPrice: minActivePrice !== null && this.getOfferStatus(o) === 'active' && o.priceIQD === minActivePrice,
+        ...anom
+      };
+    });
+
+    const quality = computeProductQuality(product, productOffers);
+    const auditLogs = this.auditLogs
+      .filter(
+        (l) =>
+          (l.entityType === 'catalog_product' && l.entityId === barcode) ||
+          (l.entityType === 'catalog_offer' &&
+            productOffers.some((o) => o.id === l.entityId))
+      )
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+
+    return {
+      product: {
+        ...product,
+        status: this.getProductStatus(product),
+        adminNotes: product.adminNotes || []
+      },
+      offers: enrichedOffers,
+      quality,
+      auditLogs
+    };
+  }
+
+  createAdminProduct(params: {
+    barcode: string;
+    nameAr: string;
+    nameEn?: string;
+    brand?: string;
+    brandId?: string;
+    category: string;
+    subCategory?: string;
+    unit: string;
+    packSize?: string;
+    packageQuantity?: number;
+    imageUrl?: string;
+    descriptionAr?: string;
+    isPerishable?: boolean;
+    storageType?: 'ambient' | 'chilled' | 'frozen' | 'dry' | 'controlled';
+    countryOfOrigin?: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const check = validateBarcode(params.barcode);
+    if (!check.valid) {
+      throw new Error(check.errorAr || 'الباركود غير صالح');
+    }
+    if (this.products.some((p) => p.barcode === check.normalized)) {
+      throw new Error(`الباركود (${check.normalized}) مسجل مسبقاً في الكتالوج`);
+    }
+
+    const nameAr = (params.nameAr || '').trim();
+    const category = resolveSharedCategoryKey((params.category || '').trim());
+    const unit = (params.unit || '').trim();
+    if (nameAr.length < 2 || !category || category === 'الكل' || !unit) {
+      throw new Error('يرجى إدخال الاسم العربي والقسم الرئيسي والوحدة بشكل صحيح');
+    }
+
+    let brandId = params.brandId?.trim() || undefined;
+    let brandName = (params.brand || '').trim();
+    if (brandId) {
+      const matchedBrand = this.brands.find((b) => b.id === brandId);
+      if (!matchedBrand) {
+        throw new Error('العلامة التجارية المختارة غير موجودة');
+      }
+      brandName = brandName || matchedBrand.nameAr;
+    } else if (brandName) {
+      const lower = brandName.toLowerCase();
+      let matched = this.brands.find(
+        (b) => b.nameAr.toLowerCase() === lower || b.nameEn.toLowerCase() === lower
+      );
+      if (!matched) {
+        const cleanSlug = brandName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+        matched = {
+          id: cleanSlug ? `brand_${cleanSlug}_${Date.now().toString().slice(-4)}` : `brand_${Date.now()}`,
+          nameAr: brandName,
+          nameEn: brandName,
+          status: 'active',
+          createdAt: new Date().toISOString().slice(0, 10)
+        };
+        this.brands.unshift(matched);
+      }
+      brandId = matched.id;
+      brandName = matched.nameAr;
+    } else {
+      throw new Error('يرجى تحديد العلامة التجارية للمنتج');
+    }
+
+    const safeImageUrl = this.validateSafeMediaUrl(params.imageUrl, 'صورة المنتج');
+    const nowIso = new Date().toISOString();
+
+    const created: UnifiedProduct = {
+      barcode: check.normalized,
+      nameAr,
+      nameEn: params.nameEn?.trim() || undefined,
+      brand: brandName,
+      brandId,
+      category,
+      subCategory: params.subCategory?.trim() || undefined,
+      unit,
+      packSize: params.packSize?.trim() || undefined,
+      packageQuantity: Math.max(1, Number(params.packageQuantity) || 1),
+      imageUrl: safeImageUrl || undefined,
+      images: safeImageUrl ? [safeImageUrl] : undefined,
+      descriptionAr: params.descriptionAr?.trim() || undefined,
+      isPerishable: Boolean(params.isPerishable),
+      storageType: params.storageType || undefined,
+      countryOfOrigin: params.countryOfOrigin?.trim() || undefined,
+      standardBarcodeFormat: check.format || 'EAN-13',
+      status: 'active',
+      statusChangedAt: nowIso,
+      statusChangedBy: params.actor.actorId,
+      createdAt: nowIso
+    };
+
+    this.products.unshift(created);
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'catalog.product.create',
+      entityType: 'catalog_product',
+      entityId: created.barcode,
+      summaryAr: `إضافة منتج موحّد جديد (${created.nameAr}) بالباركود ${created.barcode}`,
+      summaryEn: `Created unified catalog product (${created.nameEn || created.nameAr}) [${created.barcode}]`,
+      before: null,
+      after: {
+        barcode: created.barcode,
+        nameAr: created.nameAr,
+        brandId: created.brandId,
+        category: created.category,
+        status: created.status
+      },
+      reason: 'إدراج صنف موحّد جديد في كتالوج المنصة'
+    });
+
+    return this.getAdminProductDetail(created.barcode);
+  }
+
+  updateAdminProduct(params: {
+    barcode: string;
+    patch: Record<string, any>;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const product = this.products.find((p) => p.barcode === params.barcode);
+    if (!product) {
+      const err = new Error('المنتج غير موجود في الكتالوج');
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const before: Record<string, any> = {};
+    const after: Record<string, any> = {};
+
+    const applyOptionalStr = (field: keyof UnifiedProduct, rawVal: unknown) => {
+      if (rawVal === undefined) return;
+      const normalized = rawVal === null ? undefined : String(rawVal).trim() || undefined;
+      if ((product[field] as any) !== normalized) {
+        before[field] = product[field] ?? null;
+        (product as any)[field] = normalized;
+        after[field] = normalized ?? null;
+      }
+    };
+
+    if (params.patch.nameAr !== undefined) {
+      const v = String(params.patch.nameAr || '').trim();
+      if (v.length < 2) {
+        throw new Error('الاسم العربي للمنتج لا يجب أن يقل عن حرفين');
+      }
+      if (product.nameAr !== v) {
+        before.nameAr = product.nameAr;
+        product.nameAr = v;
+        after.nameAr = v;
+      }
+    }
+
+    applyOptionalStr('nameEn', params.patch.nameEn);
+    applyOptionalStr('subCategory', params.patch.subCategory);
+    applyOptionalStr('packSize', params.patch.packSize);
+    applyOptionalStr('countryOfOrigin', params.patch.countryOfOrigin);
+    applyOptionalStr('descriptionAr', params.patch.descriptionAr);
+
+    if (params.patch.category !== undefined) {
+      const c = resolveSharedCategoryKey(String(params.patch.category || '').trim());
+      if (!c || c === 'الكل') {
+        throw new Error('القسم الرئيسي غير صالح');
+      }
+      if (product.category !== c) {
+        before.category = product.category;
+        product.category = c;
+        after.category = c;
+      }
+    }
+
+    if (params.patch.unit !== undefined) {
+      const u = String(params.patch.unit || '').trim();
+      if (!u) throw new Error('الوحدة مطلوبة');
+      if (product.unit !== u) {
+        before.unit = product.unit;
+        product.unit = u;
+        after.unit = u;
+      }
+    }
+
+    if (params.patch.packageQuantity !== undefined && Number.isFinite(Number(params.patch.packageQuantity))) {
+      const q = Math.max(1, Math.round(Number(params.patch.packageQuantity)));
+      if (product.packageQuantity !== q) {
+        before.packageQuantity = product.packageQuantity;
+        product.packageQuantity = q;
+        after.packageQuantity = q;
+      }
+    }
+
+    if (params.patch.storageType !== undefined) {
+      const allowedStorage = ['ambient', 'chilled', 'frozen', 'dry', 'controlled'];
+      const rawSt = params.patch.storageType === null ? '' : String(params.patch.storageType).trim();
+      if (!rawSt) {
+        if (product.storageType !== undefined) {
+          before.storageType = product.storageType;
+          product.storageType = undefined;
+          after.storageType = null;
+        }
+      } else if (allowedStorage.includes(rawSt)) {
+        if (product.storageType !== rawSt) {
+          before.storageType = product.storageType ?? null;
+          product.storageType = rawSt as any;
+          after.storageType = rawSt;
+        }
+      } else {
+        throw new Error('نوع التخزين غير صالح');
+      }
+    }
+
+    if (params.patch.isPerishable !== undefined) {
+      const nextPerish = Boolean(params.patch.isPerishable);
+      if (product.isPerishable !== nextPerish) {
+        before.isPerishable = product.isPerishable;
+        product.isPerishable = nextPerish;
+        after.isPerishable = nextPerish;
+      }
+    }
+
+    if (params.patch.brandId !== undefined) {
+      const bid = String(params.patch.brandId || '').trim();
+      const matched = this.brands.find((b) => b.id === bid);
+      if (!matched) {
+        throw new Error('العلامة التجارية المختارة غير موجودة');
+      }
+      if (product.brandId !== matched.id || product.brand !== matched.nameAr) {
+        before.brandId = product.brandId ?? null;
+        before.brand = product.brand;
+        product.brandId = matched.id;
+        product.brand = matched.nameAr;
+        after.brandId = matched.id;
+        after.brand = matched.nameAr;
+      }
+    } else if (params.patch.brand !== undefined) {
+      const bName = String(params.patch.brand || '').trim();
+      if (bName && bName !== product.brand) {
+        before.brand = product.brand;
+        product.brand = bName;
+        after.brand = bName;
+      }
+    }
+
+    if (params.patch.imageUrl !== undefined) {
+      const validated = this.validateSafeMediaUrl(params.patch.imageUrl, 'صورة المنتج');
+      const nextImg = validated || undefined;
+      if ((product.imageUrl ?? undefined) !== nextImg) {
+        before.imageUrl = product.imageUrl ?? null;
+        product.imageUrl = nextImg;
+        if (!nextImg) {
+          before.images = product.images ?? null;
+          product.images = undefined;
+          after.images = null;
+        } else {
+          product.images = [nextImg, ...((product.images || []).filter((i) => i !== nextImg))];
+        }
+        after.imageUrl = nextImg ?? null;
+      }
+    }
+
+    if (Object.keys(after).length > 0) {
+      this.recordAudit({
+        actorId: params.actor.actorId,
+        actorName: params.actor.actorName,
+        action: 'catalog.product.update',
+        entityType: 'catalog_product',
+        entityId: product.barcode,
+        summaryAr: `تحديث بيانات المنتج (${product.nameAr})`,
+        summaryEn: `Updated catalog product metadata (${product.nameEn || product.nameAr})`,
+        before,
+        after,
+        reason:
+          typeof params.patch.reason === 'string' && params.patch.reason.trim()
+            ? params.patch.reason.trim()
+            : 'تحديث بيانات المنتج في الكتالوج'
+      });
+    }
+
+    return this.getAdminProductDetail(product.barcode);
+  }
+
+  transitionAdminProductStatus(params: {
+    barcode: string;
+    action: 'hide' | 'restore' | 'archive';
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const reason = (params.reason || '').trim();
+    if (reason.length < 5) {
+      throw new Error('يرجى إدخال سبب إداري واضح لا يقل عن 5 أحرف');
+    }
+
+    const product = this.products.find((p) => p.barcode === params.barcode);
+    if (!product) {
+      const err = new Error('المنتج غير موجود في الكتالوج');
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const beforeStatus = this.getProductStatus(product);
+    const nextStatus: CatalogProductStatus =
+      params.action === 'hide' ? 'hidden' : params.action === 'archive' ? 'archived' : 'active';
+
+    if (beforeStatus === nextStatus) {
+      throw new Error(`المنتج في حالة (${nextStatus}) بالفعل`);
+    }
+
+    const nowIso = new Date().toISOString();
+    product.status = nextStatus;
+    product.statusReason = reason;
+    product.statusChangedAt = nowIso;
+    product.statusChangedBy = params.actor.actorId;
+
+    const verbAr: Record<typeof params.action, string> = {
+      hide: 'إخفاء المنتج عن السوق',
+      restore: 'إعادة تفعيل وإظهار المنتج',
+      archive: 'أرشفة المنتج'
+    };
+    const verbEn: Record<typeof params.action, string> = {
+      hide: 'Hid catalog product from marketplace',
+      restore: 'Restored catalog product',
+      archive: 'Archived catalog product'
+    };
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: `catalog.product.${params.action}`,
+      entityType: 'catalog_product',
+      entityId: product.barcode,
+      summaryAr: `${verbAr[params.action]}: ${product.nameAr}`,
+      summaryEn: `${verbEn[params.action]}: ${product.nameEn || product.nameAr}`,
+      before: { status: beforeStatus },
+      after: { status: nextStatus },
+      reason
+    });
+
+    return this.getAdminProductDetail(product.barcode);
+  }
+
+  addAdminProductNote(params: {
+    barcode: string;
+    text: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const text = (params.text || '').trim();
+    if (text.length < 3) {
+      throw new Error('يرجى كتابة نص الملاحظة (3 أحرف على الأقل)');
+    }
+    const product = this.products.find((p) => p.barcode === params.barcode);
+    if (!product) {
+      const err = new Error('المنتج غير موجود في الكتالوج');
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    if (!Array.isArray(product.adminNotes)) {
+      product.adminNotes = [];
+    }
+    const note: AdminInternalNote = {
+      id: `note_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      at: new Date().toISOString(),
+      author: params.actor.actorName,
+      text
+    };
+    product.adminNotes.unshift(note);
+
+    this.recordAudit({
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'catalog.product.add_note',
+      entityType: 'catalog_product',
+      entityId: product.barcode,
+      summaryAr: `إضافة ملاحظة إدارية على المنتج (${product.nameAr})`,
+      summaryEn: `Added admin note on product (${product.nameEn || product.nameAr})`,
+      before: null,
+      after: { noteText: text },
+      reason: text
+    });
+
+    return this.getAdminProductDetail(product.barcode);
+  }
+
+  listAdminBrands(params?: { search?: string; status?: string }) {
+    const enriched = this.brands.map((b) => {
+      const linked = this.products.filter((p) => p.brandId === b.id);
+      const activeLinked = linked.filter((p) => this.isProductOperable(p));
+      return {
+        ...b,
+        status: this.getBrandStatus(b),
+        productsCount: linked.length,
+        activeProductsCount: activeLinked.length
+      };
+    });
+
+    const counts = {
+      all: enriched.length,
+      active: enriched.filter((b) => b.status === 'active').length,
+      hidden: enriched.filter((b) => b.status === 'hidden').length
+    };
+
+    let filtered = [...enriched];
+    if (params?.status && params.status !== 'all') {
+      filtered = filtered.filter((b) => b.status === params.status);
+    }
+    if (params?.search && params.search.trim()) {
+      const q = params.search.trim().toLowerCase();
+      filtered = filtered.filter(
+        (b) =>
+          b.nameAr.toLowerCase().includes(q) ||
+          b.nameEn.toLowerCase().includes(q) ||
+          b.id.toLowerCase().includes(q)
+      );
+    }
+
+    filtered.sort((a, b) => b.productsCount - a.productsCount || a.nameAr.localeCompare(b.nameAr, 'ar'));
+
+    return { items: filtered, counts };
+  }
+
+  createAdminBrand(params: {
+    nameAr: string;
+    nameEn?: string;
+    logoUrl?: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const nameAr = (params.nameAr || '').trim();
+    const nameEn = (params.nameEn || '').trim() || nameAr;
+    if (nameAr.length < 2) {
+      throw new Error('يرجى إدخال اسم العلامة التجارية بالعربية (حرفان على الأقل)');
+    }
+
+    const dup = this.brands.find(
+      (b) =>
+        b.nameAr.trim().toLowerCase() === nameAr.toLowerCase() ||
+        b.nameEn.trim().toLowerCase() === nameEn.toLowerCase()
+    );
+    if (dup) {
+      throw new Error(`العلامة التجارية (${dup.nameAr}) مسجلة مسبقاً`);
+    }
+
+    const safeLogoUrl = this.validateSafeMediaUrl(params.logoUrl, 'شعار العلامة');
+    const cleanSlug = nameEn
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_|_$/g, '');
+    const id = cleanSlug ? `brand_${cleanSlug}_${Date.now().toString().slice(-4)}` : `brand_${Date.now()}`;
+    const nowIso = new Date().toISOString();
+
+    const created: Brand = {
+      id,
+      nameAr,
+      nameEn,
+      logoUrl: safeLogoUrl || undefined,
+      status: 'active',
+      statusChangedAt: nowIso,
+      statusChangedBy: params.actor.actorId,
+      createdAt: nowIso
+    };
+    this.brands.unshift(created);
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'catalog.brand.create',
+      entityType: 'catalog_brand',
+      entityId: created.id,
+      summaryAr: `إضافة علامة تجارية جديدة: ${created.nameAr}`,
+      summaryEn: `Created brand: ${created.nameEn}`,
+      before: null,
+      after: { id: created.id, nameAr: created.nameAr, nameEn: created.nameEn, status: created.status },
+      reason: 'إضافة علامة تجارية موثقة في الكتالوج'
+    });
+
+    return {
+      ...created,
+      status: this.getBrandStatus(created),
+      productsCount: 0,
+      activeProductsCount: 0
+    };
+  }
+
+  updateAdminBrand(params: {
+    id: string;
+    nameAr?: string;
+    nameEn?: string;
+    logoUrl?: string;
+    reason?: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const brand = this.brands.find((b) => b.id === params.id);
+    if (!brand) {
+      const err = new Error('العلامة التجارية غير موجودة');
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const before: Record<string, any> = {};
+    const after: Record<string, any> = {};
+
+    const nextAr = params.nameAr !== undefined ? String(params.nameAr || '').trim() : brand.nameAr;
+    const nextEn = params.nameEn !== undefined ? String(params.nameEn || '').trim() : brand.nameEn;
+
+    if (nextAr.length < 2) {
+      throw new Error('اسم العلامة التجارية بالعربية يجب أن لا يقل عن حرفين');
+    }
+
+    const dup = this.brands.find(
+      (b) =>
+        b.id !== brand.id &&
+        (b.nameAr.trim().toLowerCase() === nextAr.toLowerCase() ||
+          (nextEn && b.nameEn.trim().toLowerCase() === nextEn.toLowerCase()))
+    );
+    if (dup) {
+      throw new Error(`الاسم يتعارض مع علامة أخرى مسجلة (${dup.nameAr})`);
+    }
+
+    if (brand.nameAr !== nextAr) {
+      before.nameAr = brand.nameAr;
+      brand.nameAr = nextAr;
+      after.nameAr = nextAr;
+      for (const p of this.products) {
+        if (p.brandId === brand.id) {
+          p.brand = nextAr;
+        }
+      }
+    }
+    if (brand.nameEn !== (nextEn || nextAr)) {
+      before.nameEn = brand.nameEn;
+      brand.nameEn = nextEn || nextAr;
+      after.nameEn = brand.nameEn;
+    }
+    if (params.logoUrl !== undefined) {
+      const validated = this.validateSafeMediaUrl(params.logoUrl, 'شعار العلامة');
+      const nextLogo = validated || undefined;
+      if ((brand.logoUrl ?? undefined) !== nextLogo) {
+        before.logoUrl = brand.logoUrl ?? null;
+        brand.logoUrl = nextLogo;
+        after.logoUrl = nextLogo ?? null;
+      }
+    }
+
+    if (Object.keys(after).length > 0) {
+      this.recordAudit({
+        actorId: params.actor.actorId,
+        actorName: params.actor.actorName,
+        action: 'catalog.brand.update',
+        entityType: 'catalog_brand',
+        entityId: brand.id,
+        summaryAr: `تعديل بيانات العلامة التجارية (${brand.nameAr})`,
+        summaryEn: `Updated brand (${brand.nameEn})`,
+        before,
+        after,
+        reason: (params.reason || '').trim() || 'تحديث بيانات العلامة التجارية'
+      });
+    }
+
+    const linked = this.products.filter((p) => p.brandId === brand.id);
+    return {
+      ...brand,
+      status: this.getBrandStatus(brand),
+      productsCount: linked.length,
+      activeProductsCount: linked.filter((p) => this.isProductOperable(p)).length
+    };
+  }
+
+  transitionAdminBrandStatus(params: {
+    id: string;
+    action: 'hide' | 'restore';
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const reason = (params.reason || '').trim();
+    if (reason.length < 5) {
+      throw new Error('يرجى إدخال سبب إداري واضح لا يقل عن 5 أحرف');
+    }
+    const brand = this.brands.find((b) => b.id === params.id);
+    if (!brand) {
+      const err = new Error('العلامة التجارية غير موجودة');
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const beforeStatus = this.getBrandStatus(brand);
+    const nextStatus: CatalogBrandStatus = params.action === 'hide' ? 'hidden' : 'active';
+    if (beforeStatus === nextStatus) {
+      throw new Error(`العلامة في حالة (${nextStatus}) بالفعل`);
+    }
+
+    const nowIso = new Date().toISOString();
+    brand.status = nextStatus;
+    brand.statusReason = reason;
+    brand.statusChangedAt = nowIso;
+    brand.statusChangedBy = params.actor.actorId;
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: `catalog.brand.${params.action}`,
+      entityType: 'catalog_brand',
+      entityId: brand.id,
+      summaryAr: `${params.action === 'hide' ? 'إخفاء' : 'إعادة إظهار'} العلامة التجارية: ${brand.nameAr}`,
+      summaryEn: `${params.action === 'hide' ? 'Hid' : 'Restored'} brand: ${brand.nameEn}`,
+      before: { status: beforeStatus },
+      after: { status: nextStatus },
+      reason
+    });
+
+    const linked = this.products.filter((p) => p.brandId === brand.id);
+    return {
+      ...brand,
+      status: this.getBrandStatus(brand),
+      productsCount: linked.length,
+      activeProductsCount: linked.filter((p) => this.isProductOperable(p)).length
+    };
+  }
+
+  listAdminOffers(params?: {
+    search?: string;
+    supplierId?: string;
+    barcode?: string;
+    status?: string;
+    lowStock?: boolean;
+    anomalyOnly?: boolean;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const productByBarcode = new Map<string, UnifiedProduct>();
+    for (const p of this.products) productByBarcode.set(p.barcode, p);
+
+    const anomalyMap = this.buildGlobalOfferAnomalyMap();
+
+    const enrichedAll = this.offers.map((o) => {
+      const prod = productByBarcode.get(o.barcode);
+      const anom = anomalyMap.get(o.id) || {
+        isPriceAnomaly: false,
+        medianPriceIQD: null,
+        deviationPercent: null
+      };
+      return {
+        ...o,
+        status: this.getOfferStatus(o),
+        productNameAr: prod?.nameAr || o.barcode,
+        productNameEn: prod?.nameEn || prod?.nameAr || o.barcode,
+        productUnit: prod?.unit || '',
+        productCategory: prod?.category || '',
+        productStatus: prod ? this.getProductStatus(prod) : 'active',
+        isLowStock: Number(o.availableStock) <= 20,
+        ...anom
+      };
+    });
+
+    const counts = {
+      all: enrichedAll.length,
+      active: enrichedAll.filter((o) => o.status === 'active').length,
+      suspended: enrichedAll.filter((o) => o.status === 'suspended').length,
+      lowStock: enrichedAll.filter((o) => o.isLowStock).length,
+      anomaly: enrichedAll.filter((o) => o.isPriceAnomaly).length
+    };
+
+    let filtered = [...enrichedAll];
+    if (params?.status && params.status !== 'all') {
+      filtered = filtered.filter((o) => o.status === params.status);
+    }
+    if (params?.supplierId && params.supplierId !== 'all') {
+      filtered = filtered.filter((o) => o.supplierId === params.supplierId);
+    }
+    if (params?.barcode) {
+      filtered = filtered.filter((o) => o.barcode === params.barcode);
+    }
+    if (params?.lowStock) {
+      filtered = filtered.filter((o) => o.isLowStock);
+    }
+    if (params?.anomalyOnly) {
+      filtered = filtered.filter((o) => o.isPriceAnomaly);
+    }
+    if (params?.search && params.search.trim()) {
+      const q = params.search.trim().toLowerCase();
+      filtered = filtered.filter((o) => {
+        const hay = [
+          o.id,
+          o.barcode,
+          o.productNameAr,
+          o.productNameEn,
+          o.supplierName,
+          o.supplierCity
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return hay.includes(q);
+      });
+    }
+
+    // Surface anomalous & suspended items early, then sort by price deviation / stock
+    filtered.sort((a, b) => {
+      if (a.isPriceAnomaly !== b.isPriceAnomaly) return a.isPriceAnomaly ? -1 : 1;
+      if (a.status !== b.status) return a.status === 'suspended' ? -1 : 1;
+      return a.availableStock - b.availableStock;
+    });
+
+    const pageSize = Math.min(50, Math.max(1, Number(params?.pageSize) || 15));
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(totalPages, Math.max(1, Number(params?.page) || 1));
+    const start = (page - 1) * pageSize;
+
+    const suppliers = this.suppliers.map((s) => ({
+      id: s.id,
+      companyName: s.companyName
+    }));
+
+    return {
+      items: filtered.slice(start, start + pageSize),
+      total,
+      page,
+      pageSize,
+      totalPages,
+      counts,
+      suppliers
+    };
+  }
+
+  transitionAdminOfferStatus(params: {
+    id: string;
+    action: 'suspend' | 'restore';
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const reason = (params.reason || '').trim();
+    if (reason.length < 5) {
+      throw new Error('يرجى إدخال سبب إداري واضح لا يقل عن 5 أحرف');
+    }
+
+    const offer = this.offers.find((o) => o.id === params.id);
+    if (!offer) {
+      const err = new Error('عرض المورد غير موجود');
+      (err as any).statusCode = 404;
+      throw err;
+    }
+
+    const beforeStatus = this.getOfferStatus(offer);
+    const nextStatus: CatalogOfferStatus = params.action === 'suspend' ? 'suspended' : 'active';
+    if (beforeStatus === nextStatus) {
+      throw new Error(`العرض في حالة (${nextStatus}) بالفعل`);
+    }
+
+    const product = this.products.find((p) => p.barcode === offer.barcode);
+    const nowIso = new Date().toISOString();
+    offer.status = nextStatus;
+    offer.statusReason = reason;
+    offer.statusChangedAt = nowIso;
+    offer.statusChangedBy = params.actor.actorId;
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: `catalog.offer.${params.action}`,
+      entityType: 'catalog_offer',
+      entityId: offer.id,
+      summaryAr: `${params.action === 'suspend' ? 'إيقاف' : 'إعادة تفعيل'} عرض (${offer.supplierName}) للمنتج ${product?.nameAr || offer.barcode}`,
+      summaryEn: `${params.action === 'suspend' ? 'Suspended' : 'Restored'} offer from ${offer.supplierName} for ${product?.nameEn || offer.barcode}`,
+      before: { status: beforeStatus },
+      after: { status: nextStatus },
+      reason
+    });
+
+    return {
+      ...offer,
+      status: nextStatus
+    };
+  }
+
+  getAdminCategoryTree() {
+    const departments = SHARED_CATEGORY_TREE.map((dept) => {
+      const deptProducts = this.products.filter(
+        (p) => resolveSharedCategoryKey(p.category) === dept.categoryKey
+      );
+      const branches = dept.branches.map((br) => {
+        const brProducts = deptProducts.filter((p) => p.subCategory === br.subCategoryKey);
+        return {
+          ...br,
+          productsCount: brProducts.length,
+          activeProductsCount: brProducts.filter((p) => this.isProductOperable(p)).length
+        };
+      });
+
+      return {
+        id: dept.id,
+        order: dept.order,
+        categoryKey: dept.categoryKey,
+        labelAr: dept.labelAr,
+        labelEn: dept.labelEn,
+        productsCount: deptProducts.length,
+        activeProductsCount: deptProducts.filter((p) => this.isProductOperable(p)).length,
+        hiddenOrArchivedCount: deptProducts.filter((p) => !this.isProductOperable(p)).length,
+        branches
+      };
+    });
+
+    return {
+      totalDepartments: departments.length,
+      totalBranches: departments.reduce((sum, d) => sum + d.branches.length, 0),
+      totalProducts: this.products.length,
+      departments
+    };
+  }
+
+  getAdminCatalogQualitySummary() {
+    const offersByBarcode = new Map<string, SupplierOffer[]>();
+    for (const o of this.offers) {
+      const list = offersByBarcode.get(o.barcode) || [];
+      list.push(o);
+      offersByBarcode.set(o.barcode, list);
+    }
+
+    const missingCounts = new Map<string, number>();
+    for (const def of QUALITY_FIELD_DEFINITIONS) {
+      missingCounts.set(def.key, 0);
+    }
+
+    let scoreSum = 0;
+    let below60Count = 0;
+    let below80Count = 0;
+    let withoutOffersCount = 0;
+
+    const evaluated = this.products.map((p) => {
+      const prodOffers = offersByBarcode.get(p.barcode) || [];
+      const quality = computeProductQuality(p, prodOffers);
+      scoreSum += quality.score;
+      if (quality.score < 60) below60Count += 1;
+      if (quality.score < 80) below80Count += 1;
+      if (!quality.hasActiveOffer) withoutOffersCount += 1;
+
+      for (const mf of quality.missingFields) {
+        missingCounts.set(mf.key, (missingCounts.get(mf.key) || 0) + 1);
+      }
+
+      return {
+        barcode: p.barcode,
+        nameAr: p.nameAr,
+        nameEn: p.nameEn,
+        brand: p.brand,
+        category: p.category,
+        imageUrl: p.imageUrl,
+        status: this.getProductStatus(p),
+        score: quality.score,
+        missingFields: quality.missingFields,
+        offersCount: prodOffers.length,
+        activeOffersCount: prodOffers.filter((o) => this.getOfferStatus(o) === 'active').length
+      };
+    });
+
+    const totalProducts = evaluated.length;
+    const averageScore = totalProducts > 0 ? Math.round(scoreSum / totalProducts) : 100;
+
+    const missingFieldStats = QUALITY_FIELD_DEFINITIONS.map((def) => {
+      const missingCount = missingCounts.get(def.key) || 0;
+      const missingPercent = totalProducts > 0 ? Math.round((missingCount / totalProducts) * 100) : 0;
+      return {
+        ...def,
+        missingCount,
+        missingPercent
+      };
+    }).sort((a, b) => b.missingCount - a.missingCount);
+
+    const worstProducts = [...evaluated]
+      .sort((a, b) => a.score - b.score || b.missingFields.length - a.missingFields.length)
+      .slice(0, 25);
+
+    return {
+      totalProducts,
+      averageScore,
+      below60Count,
+      below80Count,
+      withoutOffersCount,
+      missingFieldStats,
+      worstProducts
+    };
   }
 }
 

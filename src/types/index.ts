@@ -145,6 +145,10 @@ export interface StoreBranchAddress {
   isDefault: boolean;
 }
 
+export type CatalogProductStatus = 'active' | 'hidden' | 'archived';
+export type CatalogOfferStatus = 'active' | 'suspended';
+export type CatalogBrandStatus = 'active' | 'hidden';
+
 export interface ProductWithOffers {
   barcode: string;
   nameAr: string;
@@ -162,6 +166,11 @@ export interface ProductWithOffers {
   storageType?: 'ambient' | 'chilled' | 'frozen' | 'dry' | 'controlled';
   countryOfOrigin?: string;
   standardBarcodeFormat: 'EAN-13' | 'GTIN-14' | 'UPC-A';
+  status?: CatalogProductStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
+  adminNotes?: AdminInternalNote[];
   offers: SupplierOfferItem[];
   minPrice: number;
   maxPrice: number;
@@ -201,6 +210,10 @@ export interface SupplierOfferItem {
   isClearanceNearExpiry?: boolean;
   clearanceDiscountPercent?: number;
   expiryDate?: string;
+  status?: CatalogOfferStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
 }
 
 export interface CartItem {

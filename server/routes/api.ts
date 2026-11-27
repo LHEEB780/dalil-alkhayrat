@@ -184,6 +184,15 @@ apiRouter.get('/products/:barcode', (req: Request, res: Response) => {
   }
 });
 
+apiRouter.get('/brands', (_req: Request, res: Response) => {
+  try {
+    const brands = db.getPublicBrands();
+    res.json({ success: true, count: brands.length, data: brands });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 apiRouter.get('/suppliers', (req: Request, res: Response) => {
   try {
     const { deliveryZoneId, businessType, verificationStatus } = req.query;

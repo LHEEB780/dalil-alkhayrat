@@ -323,6 +323,35 @@ export interface TranslationDictionary {
   adminAccDetailCredit: string;
   adminAccDetailNotes: string;
   adminAccDetailAudit: string;
+  adminKpiCatalogQuality: string;
+  adminCatTitle: string;
+  adminCatSubtitle: string;
+  adminCatTabProducts: string;
+  adminCatTabBrands: string;
+  adminCatTabOffers: string;
+  adminCatTabCategories: string;
+  adminCatTabQuality: string;
+  adminCatAddProduct: string;
+  adminCatEditProduct: string;
+  adminCatAddBrand: string;
+  adminCatEditBrand: string;
+  adminCatSearchProducts: string;
+  adminCatSearchBrands: string;
+  adminCatSearchOffers: string;
+  adminCatStatusActive: string;
+  adminCatStatusHidden: string;
+  adminCatStatusArchived: string;
+  adminCatStatusSuspended: string;
+  adminCatHideAction: string;
+  adminCatRestoreAction: string;
+  adminCatArchiveAction: string;
+  adminCatSuspendAction: string;
+  adminCatPriceAnomalyBadge: string;
+  adminCatLowestPriceBadge: string;
+  adminCatLowStockBadge: string;
+  adminCatQualityScoreLabel: string;
+  adminCatMissingFieldsTitle: string;
+  adminCatOffersCompareTitle: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -650,7 +679,36 @@ export const translations: Record<Language, TranslationDictionary> = {
     adminAccDetailActivity: 'النشاط',
     adminAccDetailCredit: 'الائتمان',
     adminAccDetailNotes: 'الملاحظات',
-    adminAccDetailAudit: 'السجل'
+    adminAccDetailAudit: 'السجل',
+    adminKpiCatalogQuality: 'جودة الكتالوج',
+    adminCatTitle: 'إدارة الكتالوج والمنتجات الموحدة',
+    adminCatSubtitle: 'حوكمة المنتجات والعلامات وعروض الموردين وشجرة الأقسام ومؤشرات جودة البيانات',
+    adminCatTabProducts: 'المنتجات الموحدة',
+    adminCatTabBrands: 'العلامات التجارية',
+    adminCatTabOffers: 'عروض الموردين',
+    adminCatTabCategories: 'شجرة الأقسام',
+    adminCatTabQuality: 'جودة البيانات',
+    adminCatAddProduct: 'إضافة منتج موحّد',
+    adminCatEditProduct: 'تعديل المنتج',
+    adminCatAddBrand: 'إضافة علامة تجارية',
+    adminCatEditBrand: 'تعديل العلامة',
+    adminCatSearchProducts: 'ابحث بالباركود، اسم المنتج، العلامة أو القسم...',
+    adminCatSearchBrands: 'ابحث باسم العلامة التجارية أو المعرّف...',
+    adminCatSearchOffers: 'ابحث بالباركود، المنتج أو المورد...',
+    adminCatStatusActive: 'فعال',
+    adminCatStatusHidden: 'مخفي',
+    adminCatStatusArchived: 'مؤرشف',
+    adminCatStatusSuspended: 'موقوف',
+    adminCatHideAction: 'إخفاء',
+    adminCatRestoreAction: 'إعادة تفعيل',
+    adminCatArchiveAction: 'أرشفة',
+    adminCatSuspendAction: 'إيقاف العرض',
+    adminCatPriceAnomalyBadge: 'سعر شاذ',
+    adminCatLowestPriceBadge: 'أقل سعر',
+    adminCatLowStockBadge: 'مخزون منخفض',
+    adminCatQualityScoreLabel: 'نسبة الجودة',
+    adminCatMissingFieldsTitle: 'الحقول الناقصة لتحسين جودة المنتج',
+    adminCatOffersCompareTitle: 'مقارنة عروض الموردين على هذا الباركود'
   },
   en: {
     // Brand & General
@@ -976,7 +1034,36 @@ export const translations: Record<Language, TranslationDictionary> = {
     adminAccDetailActivity: 'Activity',
     adminAccDetailCredit: 'Credit',
     adminAccDetailNotes: 'Notes',
-    adminAccDetailAudit: 'Audit Log'
+    adminAccDetailAudit: 'Audit Log',
+    adminKpiCatalogQuality: 'Catalog Quality',
+    adminCatTitle: 'Catalog & Unified Products',
+    adminCatSubtitle: 'Govern unified products, brands, supplier offers, category tree, and data quality',
+    adminCatTabProducts: 'Unified Products',
+    adminCatTabBrands: 'Brands',
+    adminCatTabOffers: 'Supplier Offers',
+    adminCatTabCategories: 'Category Tree',
+    adminCatTabQuality: 'Data Quality',
+    adminCatAddProduct: 'Add Unified Product',
+    adminCatEditProduct: 'Edit Product',
+    adminCatAddBrand: 'Add Brand',
+    adminCatEditBrand: 'Edit Brand',
+    adminCatSearchProducts: 'Search by barcode, product name, brand, or category...',
+    adminCatSearchBrands: 'Search by brand name or ID...',
+    adminCatSearchOffers: 'Search by barcode, product, or supplier...',
+    adminCatStatusActive: 'Active',
+    adminCatStatusHidden: 'Hidden',
+    adminCatStatusArchived: 'Archived',
+    adminCatStatusSuspended: 'Suspended',
+    adminCatHideAction: 'Hide',
+    adminCatRestoreAction: 'Restore',
+    adminCatArchiveAction: 'Archive',
+    adminCatSuspendAction: 'Suspend Offer',
+    adminCatPriceAnomalyBadge: 'Price Anomaly',
+    adminCatLowestPriceBadge: 'Lowest Price',
+    adminCatLowStockBadge: 'Low Stock',
+    adminCatQualityScoreLabel: 'Quality Score',
+    adminCatMissingFieldsTitle: 'Missing Fields to Improve Quality',
+    adminCatOffersCompareTitle: 'Supplier Offers Comparison for Barcode'
   }
 };
 

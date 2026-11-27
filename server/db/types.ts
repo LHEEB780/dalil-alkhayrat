@@ -82,10 +82,20 @@ export interface CurrencyConfig {
 
 export type StorageType = 'ambient' | 'chilled' | 'frozen' | 'dry' | 'controlled';
 
+export type CatalogProductStatus = 'active' | 'hidden' | 'archived';
+export type CatalogOfferStatus = 'active' | 'suspended';
+export type CatalogBrandStatus = 'active' | 'hidden';
+
 export interface Brand {
   id: string;
   nameAr: string;
   nameEn: string;
+  logoUrl?: string;
+  status?: CatalogBrandStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
+  createdAt?: string;
 }
 
 export interface UnifiedProduct {
@@ -112,6 +122,12 @@ export interface UnifiedProduct {
   reviewsCount?: number;
   subCategory?: string;
   isSmartShipping?: boolean;
+  status?: CatalogProductStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
+  adminNotes?: AdminInternalNote[];
+  createdAt?: string;
 }
 
 export interface SupplierOffer {
@@ -137,6 +153,10 @@ export interface SupplierOffer {
   isClearanceNearExpiry?: boolean;
   clearanceDiscountPercent?: number;
   expiryDate?: string;
+  status?: CatalogOfferStatus;
+  statusReason?: string;
+  statusChangedAt?: string;
+  statusChangedBy?: string;
 }
 
 export interface StoreProfile {

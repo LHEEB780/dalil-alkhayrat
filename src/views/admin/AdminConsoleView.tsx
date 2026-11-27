@@ -67,6 +67,7 @@ import { getLocalizedText, translations } from '../../utils/translations.ts';
 import { ApiDocsView } from '../ApiDocsView.tsx';
 import { UserSession } from '../WelcomeAuthView.tsx';
 import { AccountsView, AccountSectionMode } from './AccountsView.tsx';
+import { CatalogView } from './CatalogView.tsx';
 
 export type AdminSectionId =
   | 'overview'
@@ -182,7 +183,8 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         labelEn: 'Unified Products',
         descAr: 'إدارة دليل الباركود الدولي الموحد (EAN/GTIN)، التصنيفات، وبيانات التخزين.',
         descEn: 'Manage canonical EAN/GTIN product catalog, categories, and storage attributes.',
-        icon: Package
+        icon: Package,
+        implemented: true
       },
       {
         id: 'brands',
@@ -190,7 +192,8 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         labelEn: 'Brands',
         descAr: 'اعتماد العلامات التجارية، الشعارات، وربط الموزعين الرسميين.',
         descEn: 'Manage brand registry, logos, and authorized distributor badges.',
-        icon: Award
+        icon: Award,
+        implemented: true
       },
       {
         id: 'offers',
@@ -198,7 +201,8 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         labelEn: 'Supplier Offers',
         descAr: 'مراقبة الأسعار، الكميات المتوفرة، تصفيات قرب الصلاحية، وإيقاف العروض المخالفة.',
         descEn: 'Monitor pricing, stock levels, near-expiry clearances, and suspend flagged offers.',
-        icon: Tag
+        icon: Tag,
+        implemented: true
       }
     ]
   },
@@ -387,6 +391,10 @@ interface AdminOverviewData {
     totalOverdueDebtIQD: number;
     pendingCreditUpgradesCount: number;
     lowStockOffersCount: number;
+    catalogQualityPercent?: number;
+    catalogLowQualityCount?: number;
+    productsWithoutOffersCount?: number;
+    priceAnomalyOffersCount?: number;
   };
   dailySeries: Array<{
     date: string;
@@ -411,7 +419,15 @@ interface AdminOverviewData {
   }>;
   needsAttention: Array<{
     id: string;
-    type: 'pending_supplier' | 'pending_store' | 'credit_upgrade' | 'stuck_order' | 'disputed_order' | 'blocked_credit';
+    type:
+      | 'pending_supplier'
+      | 'pending_store'
+      | 'credit_upgrade'
+      | 'stuck_order'
+      | 'disputed_order'
+      | 'blocked_credit'
+      | 'catalog_no_offers'
+      | 'catalog_price_anomaly';
     severity: 'high' | 'medium';
     titleAr: string;
     titleEn: string;
@@ -490,6 +506,10 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
   const [accountDeepLink, setAccountDeepLink] = useState<{
     statusTab?: 'all' | 'pending' | 'active' | 'suspended' | 'rejected_archived';
     selectedId?: string | null;
+  }>({});
+  const [catalogDeepLink, setCatalogDeepLink] = useState<{
+    selectedId?: string | null;
+    filterPreset?: string | null;
   }>({});
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -647,10 +667,18 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
     options?: {
       statusTab?: 'all' | 'pending' | 'active' | 'suspended' | 'rejected_archived';
       selectedId?: string | null;
+      filterPreset?: string | null;
     }
   ) => {
     setActiveSection(section);
-    setAccountDeepLink(options || {});
+    setAccountDeepLink({
+      statusTab: options?.statusTab,
+      selectedId: options?.selectedId
+    });
+    setCatalogDeepLink({
+      selectedId: options?.selectedId,
+      filterPreset: options?.filterPreset
+    });
     setMobileMenuOpen(false);
     setSearchDropdownOpen(false);
     setBellOpen(false);
@@ -1145,7 +1173,7 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
 
               <button
                 type="button"
-                onClick={() => handleNavigate('offers')}
+                onClick={() => handleNavigate('offers', { filterPreset: 'low_stock' })}
                 className="bg-white rounded-xl border border-[#E5E7EB] p-3 text-start hover:border-[#00A046] transition-colors cursor-pointer flex flex-col justify-between"
               >
                 <div className="flex items-center justify-between gap-1.5 mb-1">
@@ -1165,6 +1193,29 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                   {isAr ? 'عروض ≤ 20' : 'Stock ≤ 20'}
                 </div>
               </button>
+
+              {kpis.catalogQualityPercent !== undefined && (
+                <button
+                  type="button"
+                  onClick={() => handleNavigate('products', { filterPreset: 'quality' })}
+                  className="bg-white rounded-xl border border-[#E5E7EB] p-3 text-start hover:border-[#00A046] transition-colors cursor-pointer flex flex-col justify-between"
+                >
+                  <div className="flex items-center justify-between gap-1.5 mb-1">
+                    <span className="text-[11px] font-bold text-[#797878] truncate">
+                      {t.adminKpiCatalogQuality}
+                    </span>
+                    <Sparkles className="w-3.5 h-3.5 text-[#00A046] shrink-0" />
+                  </div>
+                  <div className="text-base sm:text-lg font-black text-[#00A046] leading-tight">
+                    {kpis.catalogQualityPercent}%
+                  </div>
+                  <div className="text-[10px] font-semibold text-[#797878] truncate mt-0.5">
+                    {isAr
+                      ? `${kpis.catalogLowQualityCount || 0} أقل من 60%`
+                      : `${kpis.catalogLowQualityCount || 0} below 60%`}
+                  </div>
+                </button>
+              )}
             </div>
 
             {/* Chart + Order Status Distribution */}
@@ -2179,7 +2230,8 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                                       hit.targetSection,
                                       hit.targetSection === 'suppliers' ||
                                         hit.targetSection === 'stores' ||
-                                        hit.targetSection === 'drivers'
+                                        hit.targetSection === 'drivers' ||
+                                        hit.targetSection === 'products'
                                         ? { selectedId: hit.id }
                                         : undefined
                                     )
@@ -2242,7 +2294,16 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                         <button
                           key={item.id}
                           type="button"
-                          onClick={() => handleNavigate(item.targetSection)}
+                          onClick={() =>
+                            handleNavigate(
+                              item.targetSection,
+                              item.type === 'catalog_no_offers'
+                                ? { filterPreset: 'without_offers' }
+                                : item.type === 'catalog_price_anomaly'
+                                ? { filterPreset: 'price_anomaly' }
+                                : undefined
+                            )
+                          }
                           className="w-full text-start p-2 rounded-lg hover:bg-[#F9FAFB] border border-[#E5E7EB] cursor-pointer"
                         >
                           <div className="text-xs font-bold text-[#221F1F]">
@@ -2298,6 +2359,17 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
               onDataChanged={() => fetchOverview(range)}
             />
           )}
+          {(activeSection === 'products' ||
+            activeSection === 'brands' ||
+            activeSection === 'offers') && (
+            <CatalogView
+              mode={activeSection as 'products' | 'brands' | 'offers'}
+              language={language}
+              currency={currency}
+              initialDeepLink={catalogDeepLink}
+              onDataChanged={() => fetchOverview(range)}
+            />
+          )}
           {activeSection === 'audit_log' && renderAuditLog()}
           {activeSection === 'roles_permissions' && renderRolesAndPermissions()}
           {activeSection === 'api_docs' && <ApiDocsView />}
@@ -2306,6 +2378,9 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
             activeSection !== 'stores' &&
             activeSection !== 'drivers' &&
             activeSection !== 'store_staff' &&
+            activeSection !== 'products' &&
+            activeSection !== 'brands' &&
+            activeSection !== 'offers' &&
             activeSection !== 'audit_log' &&
             activeSection !== 'roles_permissions' &&
             activeSection !== 'api_docs' &&

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { apiRouter } from './server/routes/api.ts';
 import { adminRouter } from './server/routes/adminRoutes.ts';
+import { adminCatalogRouter } from './server/routes/adminCatalogRoutes.ts';
 
 dotenv.config();
 
@@ -19,7 +20,8 @@ async function startServer() {
   // Middlewares
   app.use(express.json());
 
-  // Mount Admin Operations & API routes
+  // Mount Admin Operations & API routes (specific /api/admin/catalog BEFORE generic /api/admin)
+  app.use('/api/admin/catalog', adminCatalogRouter);
   app.use('/api/admin', adminRouter);
   app.use('/api', apiRouter);
 
