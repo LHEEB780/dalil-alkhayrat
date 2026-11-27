@@ -48,7 +48,14 @@ import {
   KycChecklistKey,
   CatalogProductStatus,
   CatalogOfferStatus,
-  CatalogBrandStatus
+  CatalogBrandStatus,
+  OrderStatus,
+  SubOrderStatusHistoryEntry,
+  Dispute,
+  DisputeOpenedBy,
+  DisputeReasonCode,
+  DisputeStatus,
+  DisputeResolutionType
 } from './types.ts';
 import {
   validateBarcode,
@@ -78,6 +85,7 @@ import {
   initialLedgerEntries,
   initialStoreInventory,
   initialSubOrders,
+  initialDisputes,
   initialCollectivePools,
   initialPosters,
   initialStorePOSSales,
@@ -112,6 +120,20 @@ const SERVER_CATEGORY_ALIASES: Record<string, string> = {
   'مكرونة وشعرية': 'مواد غذائية أساسية'
 };
 
+export const SUBORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  pending: ['approved', 'cancelled'],
+  approved: ['assigned_driver', 'cancelled'],
+  assigned_driver: ['out_for_delivery', 'approved', 'cancelled'],
+  out_for_delivery: ['delivered', 'assigned_driver', 'cancelled'],
+  delivered: ['disputed'],
+  disputed: ['delivered', 'cancelled'],
+  cancelled: []
+};
+
+export function getAllowedSubOrderTransitions(status: OrderStatus): OrderStatus[] {
+  return SUBORDER_TRANSITIONS[status] ? [...SUBORDER_TRANSITIONS[status]] : [];
+}
+
 class AppDataStore {
   governorates: Governorate[] = [...initialGovernorates];
   districts: District[] = [...initialDistricts];
@@ -130,6 +152,7 @@ class AppDataStore {
   creditAccounts: CreditAccount[] = [...initialCreditAccounts];
   ledgerEntries: LedgerEntry[] = [...initialLedgerEntries];
   subOrders: SubOrder[] = [...initialSubOrders];
+  disputes: Dispute[] = [...initialDisputes];
   storeInventory: StoreInventoryItem[] = [...initialStoreInventory];
   collectivePools: CollectiveBuyingPool[] = [...initialCollectivePools];
   posters: StorePosterConfig[] = [...initialPosters];
@@ -193,6 +216,7 @@ class AppDataStore {
       }
     ];
     this.ensureProductBrandLinks();
+    this.ensureSubOrderHistories();
   }
   auditLogs: AdminAuditLog[] = [
     {
@@ -1091,6 +1115,7 @@ class AppDataStore {
       // Generate 4-digit PIN for delivery proof
       const pin = Math.floor(1000 + Math.random() * 9000).toString();
 
+      const nowOrderIso = new Date().toISOString();
       const subOrder: SubOrder = {
         id: `SUB-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
         parentOrderId,
@@ -1107,8 +1132,17 @@ class AppDataStore {
         status: 'pending',
         deliveryType: 'supplier_fleet',
         deliveryPin: pin,
-        createdAt: new Date().toISOString(),
-        notes: params.notes
+        createdAt: nowOrderIso,
+        notes: params.notes,
+        statusHistory: [
+          {
+            status: 'pending',
+            at: nowOrderIso,
+            actorType: 'store',
+            actorName: store.name,
+            note: 'إنشاء الطلبية من سلة المشتريات'
+          }
+        ]
       };
 
       this.subOrders.unshift(subOrder);
@@ -3179,16 +3213,24 @@ class AppDataStore {
       });
     }
 
-    const stuckCutoffMs = endMs - 24 * 60 * 60 * 1000;
+    let stuckOrdersCount = 0;
+    let openDisputesCount = 0;
     for (const o of this.subOrders) {
-      const ts = Date.parse(o.createdAt);
-      if (o.status === 'pending' && Number.isFinite(ts) && ts < stuckCutoffMs) {
+      const stuckCheck = this.isSubOrderStuck(o, endMs);
+      if (stuckCheck.isStuck) {
+        stuckOrdersCount += 1;
         needsAttention.push({
           id: `att_stuck_${o.id}`,
           type: 'stuck_order',
           severity: 'high',
-          titleAr: `طلب عالق أكثر من 24 ساعة (${o.id})`,
-          titleEn: `Order stuck pending >24h (${o.id})`,
+          titleAr:
+            stuckCheck.stuckType === 'delivery_48h'
+              ? `طلب متأخر في التوصيل >48 ساعة (${o.id})`
+              : `طلب عالق أكثر من 24 ساعة (${o.id})`,
+          titleEn:
+            stuckCheck.stuckType === 'delivery_48h'
+              ? `Order out for delivery >48h (${o.id})`
+              : `Order stuck pending >24h (${o.id})`,
           subtitleAr: `${o.storeName} ← ${o.supplierName}`,
           subtitleEn: `${o.storeName} ← ${o.supplierName}`,
           targetSection: 'orders',
@@ -3196,6 +3238,10 @@ class AppDataStore {
         });
       }
       if (o.status === 'disputed') {
+        openDisputesCount += 1;
+        const linkedDispute = this.disputes.find(
+          (d) => d.subOrderId === o.id && (d.status === 'open' || d.status === 'under_review')
+        );
         needsAttention.push({
           id: `att_disp_${o.id}`,
           type: 'disputed_order',
@@ -3205,7 +3251,7 @@ class AppDataStore {
           subtitleAr: `${o.storeName} • ${(Number(o.subtotalIQD) || 0).toLocaleString('en-US')} د.ع`,
           subtitleEn: `${o.storeName} • ${(Number(o.subtotalIQD) || 0).toLocaleString('en-US')} IQD`,
           targetSection: 'disputes',
-          entityId: o.id
+          entityId: linkedDispute?.id || o.id
         });
       }
     }
@@ -3278,6 +3324,11 @@ class AppDataStore {
         totalOverdueDebtIQD,
         pendingCreditUpgradesCount: pendingCreditUpgrades.length,
         lowStockOffersCount,
+        stuckOrdersCount,
+        openDisputesCount: Math.max(
+          openDisputesCount,
+          this.disputes.filter((d) => d.status === 'open' || d.status === 'under_review').length
+        ),
         catalogQualityPercent: qualitySummary.averageScore,
         catalogLowQualityCount: qualitySummary.below60Count,
         productsWithoutOffersCount: qualitySummary.withoutOffersCount,
@@ -5381,6 +5432,1238 @@ class AppDataStore {
       withoutOffersCount,
       missingFieldStats,
       worstProducts
+    };
+  }
+
+  // ================= ADMIN PHASE 4: ORDERS, LOGISTICS & DISPUTES =================
+  private isSubOrderStuck(
+    o: SubOrder,
+    nowMs: number = Date.now()
+  ): { isStuck: boolean; stuckType?: 'pending_24h' | 'delivery_48h'; hoursInStage: number } {
+    const history = o.statusHistory || [];
+    const lastStageTs =
+      history.length > 0 ? Date.parse(history[history.length - 1].at) : Date.parse(o.createdAt);
+    const createdTs = Date.parse(o.createdAt);
+    const refTs = Number.isFinite(lastStageTs) ? lastStageTs : createdTs;
+    const hoursInStage = Number.isFinite(refTs)
+      ? Math.max(0, Math.round((nowMs - refTs) / (60 * 60 * 1000)))
+      : 0;
+
+    if (o.status === 'pending' && Number.isFinite(createdTs) && nowMs - createdTs > 24 * 60 * 60 * 1000) {
+      return {
+        isStuck: true,
+        stuckType: 'pending_24h',
+        hoursInStage: Math.max(0, Math.round((nowMs - createdTs) / (60 * 60 * 1000)))
+      };
+    }
+
+    if (o.status === 'out_for_delivery' && Number.isFinite(refTs) && nowMs - refTs > 48 * 60 * 60 * 1000) {
+      return {
+        isStuck: true,
+        stuckType: 'delivery_48h',
+        hoursInStage
+      };
+    }
+
+    return { isStuck: false, hoursInStage };
+  }
+
+  private ensureSubOrderHistories() {
+    for (const o of this.subOrders) {
+      if (o.statusHistory && o.statusHistory.length > 0) continue;
+      const baseTs = Date.parse(o.createdAt) || Date.now();
+      const stepIso = (offsetHours: number) =>
+        new Date(baseTs + offsetHours * 60 * 60 * 1000).toISOString();
+
+      const timeline: SubOrderStatusHistoryEntry[] = [
+        {
+          status: 'pending',
+          at: o.createdAt,
+          actorType: 'store',
+          actorName: o.storeName
+        }
+      ];
+
+      if (o.status !== 'pending') {
+        if (o.status === 'cancelled') {
+          timeline.push({
+            status: 'cancelled',
+            at: stepIso(1),
+            actorType: 'admin',
+            actorName: 'المدير العام (Super Admin)'
+          });
+        } else {
+          timeline.push({
+            status: 'approved',
+            at: stepIso(1),
+            actorType: 'supplier',
+            actorName: o.supplierName
+          });
+        }
+      }
+
+      if (
+        o.status === 'assigned_driver' ||
+        o.status === 'out_for_delivery' ||
+        o.status === 'delivered' ||
+        o.status === 'disputed'
+      ) {
+        timeline.push({
+          status: 'assigned_driver',
+          at: stepIso(2),
+          actorType: 'supplier',
+          actorName: o.supplierName,
+          note: o.assignedDriverName ? `السائق: ${o.assignedDriverName}` : undefined
+        });
+      }
+
+      if (o.status === 'out_for_delivery' || o.status === 'delivered' || o.status === 'disputed') {
+        timeline.push({
+          status: 'out_for_delivery',
+          at: stepIso(3),
+          actorType: 'supplier',
+          actorName: o.supplierName
+        });
+      }
+
+      if (o.status === 'delivered' || o.status === 'disputed') {
+        timeline.push({
+          status: 'delivered',
+          at: o.deliveredAt || stepIso(5),
+          actorType: 'driver',
+          actorName: o.assignedDriverName || 'مندوب التوزيع'
+        });
+      }
+
+      if (o.status === 'disputed') {
+        timeline.push({
+          status: 'disputed',
+          at: new Date(
+            Math.max(
+              Date.parse(o.deliveredAt || o.createdAt) + 2 * 60 * 60 * 1000,
+              Date.now() - 18 * 60 * 60 * 1000
+            )
+          ).toISOString(),
+          actorType: 'store',
+          actorName: o.storeName,
+          note: 'فتح نزاع بعد التسليم'
+        });
+      }
+
+      o.statusHistory = timeline;
+    }
+  }
+
+  /**
+   * Centralized SubOrder State Engine.
+   * Enforces valid lifecycle transitions, driver operability, delivery PIN checks,
+   * atomic stock return + ledger reversal on cancellation, statusHistory timeline,
+   * and immutable AdminAuditLog entries when executed by admin.
+   */
+  transitionSubOrder(params: {
+    id: string;
+    toStatus: OrderStatus;
+    actor: {
+      actorType: 'system' | 'admin' | 'supplier' | 'driver' | 'store';
+      actorId?: string;
+      actorName?: string;
+    };
+    reason?: string;
+    pin?: string;
+    driverId?: string;
+    force?: boolean;
+    restockOnCancel?: boolean;
+    addCashToTodaySales?: boolean;
+    extraHistoryNote?: string;
+  }): SubOrder {
+    const order = this.subOrders.find((o) => o.id === params.id);
+    if (!order) {
+      const err: any = new Error('الطلب غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const fromStatus = order.status;
+    const allowedTargets = SUBORDER_TRANSITIONS[fromStatus] || [];
+    if (!allowedTargets.includes(params.toStatus)) {
+      const err: any = new Error(
+        `الانتقال من الحالة (${fromStatus}) إلى (${params.toStatus}) غير مسموح به وفق دورة حياة الطلب`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const trimmedReason = typeof params.reason === 'string' ? params.reason.trim() : '';
+    if (params.actor.actorType === 'admin' && trimmedReason.length < 5) {
+      const err: any = new Error('يرجى إدخال سبب إداري واضح لا يقل عن 5 أحرف');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // Validate driver when assigning or dispatching
+    let resolvedDriver: DriverProfile | undefined;
+    if (params.driverId) {
+      resolvedDriver = this.assertDriverOperable(params.driverId);
+    } else if (
+      (params.toStatus === 'assigned_driver' || params.toStatus === 'out_for_delivery') &&
+      order.assignedDriverId
+    ) {
+      this.assertDriverOperable(order.assignedDriverId);
+    }
+
+    // Delivery PIN verification (unless force delivery by admin from out_for_delivery OR resolving dispute back to delivered)
+    if (params.toStatus === 'delivered' && fromStatus === 'out_for_delivery') {
+      const isAdminForce = params.actor.actorType === 'admin' && params.force === true;
+      if (!isAdminForce && order.deliveryPin && params.pin !== order.deliveryPin) {
+        const err: any = new Error(
+          'رمز التحقق من الاستلام (PIN) غير صحيح! اطلب الرمز المكون من 4 أرقام من صاحب المتجر.'
+        );
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    // Pre-check cancellation ledger preconditions BEFORE mutating stock or order
+    let invoiceEntryToReverse: LedgerEntry | undefined;
+    const shouldRestock = params.restockOnCancel !== false;
+    if (params.toStatus === 'cancelled' && order.paymentMethod === 'credit') {
+      invoiceEntryToReverse = this.ledgerEntries.find(
+        (l) => l.referenceType === 'INVOICE' && l.referenceId === order.id && !l.isReversed
+      );
+      if (invoiceEntryToReverse) {
+        const creditAcc = this.creditAccounts.find(
+          (c) => c.id === invoiceEntryToReverse!.creditAccountId
+        );
+        if (!creditAcc) {
+          const err: any = new Error('الحساب الائتماني المرتبط بقيد الفاتورة غير موجود');
+          err.statusCode = 400;
+          throw err;
+        }
+      }
+    }
+
+    // Snapshot before state
+    const nowIso = new Date().toISOString();
+    const beforeSnapshot = {
+      status: order.status,
+      assignedDriverId: order.assignedDriverId || null,
+      assignedDriverName: order.assignedDriverName || null,
+      deliveredAt: order.deliveredAt || null,
+      paidAt: order.paidAt || null,
+      adminFlags: order.adminFlags ? { ...order.adminFlags } : null
+    };
+
+    // Apply driver update if provided
+    if (resolvedDriver) {
+      order.assignedDriverId = resolvedDriver.id;
+      order.assignedDriverName = resolvedDriver.name;
+    }
+
+    let noteDetails = params.extraHistoryNote || '';
+
+    // Apply delivery side-effects
+    if (params.toStatus === 'delivered') {
+      if (!order.deliveredAt) {
+        order.deliveredAt = nowIso;
+      }
+      if (fromStatus === 'out_for_delivery' && params.actor.actorType === 'admin' && params.force) {
+        order.adminFlags = { ...(order.adminFlags || {}), forcedDelivery: true };
+        noteDetails = noteDetails
+          ? `${noteDetails} | تأكيد تسليم قسري إدارياً بدون رمز PIN`
+          : 'تأكيد تسليم قسري إدارياً بدون رمز PIN';
+      }
+      if (order.paymentMethod === 'cod' && !order.paidAt) {
+        order.paidAt = nowIso;
+        const targetDriverId = resolvedDriver?.id || order.assignedDriverId;
+        const driver = targetDriverId ? this.drivers.find((d) => d.id === targetDriverId) : undefined;
+        if (driver) {
+          driver.currentCashCollectedIQD += order.subtotalIQD;
+          if (params.addCashToTodaySales) {
+            driver.todayCashSalesIQD = (driver.todayCashSalesIQD || 0) + order.subtotalIQD;
+          }
+        }
+      }
+    }
+
+    // Apply cancellation side-effects atomically (stock + ledger reversal)
+    if (params.toStatus === 'cancelled') {
+      let restockedUnits = 0;
+      if (shouldRestock) {
+        for (const item of order.items) {
+          const offer = this.offers.find(
+            (o) => o.supplierId === order.supplierId && o.barcode === item.barcode
+          );
+          if (offer) {
+            offer.availableStock += item.quantity;
+            restockedUnits += item.quantity;
+          }
+        }
+      }
+
+      let ledgerNote = '';
+      if (order.paymentMethod === 'credit') {
+        if (invoiceEntryToReverse) {
+          this.reverseLedgerEntry(
+            invoiceEntryToReverse.id,
+            trimmedReason || 'إلغاء الطلب وإرجاع المخزون'
+          );
+          ledgerNote = `تم عكس قيد الفاتورة (${invoiceEntryToReverse.id}) بقيد عكسي في دفتر الأستاذ.`;
+        } else {
+          ledgerNote = 'ملاحظة: لا يوجد قيد فاتورة نشط غير معكوس في دفتر الأستاذ لعكسه.';
+        }
+      }
+
+      if (params.actor.actorType === 'admin') {
+        order.adminFlags = { ...(order.adminFlags || {}), cancelledByAdmin: true };
+      }
+
+      const cancelParts = [
+        shouldRestock
+          ? `أُعيد ${restockedUnits} وحدة إلى مخزون المورد.`
+          : 'تم الإلغاء دون إعادة المخزون (بضاعة تالفة/مستردة).',
+        ledgerNote
+      ].filter(Boolean);
+      noteDetails = [noteDetails, ...cancelParts].filter(Boolean).join(' ');
+    }
+
+    order.status = params.toStatus;
+    if (!order.statusHistory) order.statusHistory = [];
+    order.statusHistory.push({
+      status: params.toStatus,
+      at: nowIso,
+      actorType: params.actor.actorType,
+      actorName:
+        params.actor.actorName ||
+        (params.actor.actorType === 'admin'
+          ? 'المدير العام (Super Admin)'
+          : params.actor.actorType === 'supplier'
+          ? order.supplierName
+          : params.actor.actorType === 'driver'
+          ? order.assignedDriverName || 'السائق'
+          : order.storeName),
+      reason: trimmedReason || undefined,
+      note: noteDetails || undefined
+    });
+
+    if (params.actor.actorType === 'admin') {
+      const actionCode =
+        params.toStatus === 'cancelled'
+          ? 'order.cancel'
+          : params.force
+          ? 'order.force_deliver'
+          : resolvedDriver && params.toStatus === 'assigned_driver'
+          ? 'order.assign_driver'
+          : 'order.transition_status';
+
+      this.recordAudit({
+        at: nowIso,
+        actorId: params.actor.actorId || 'admin_root',
+        actorName: params.actor.actorName || 'المدير العام (Super Admin)',
+        action: actionCode,
+        entityType: 'sub_order',
+        entityId: order.id,
+        summaryAr: `تغيير حالة الطلبية (${order.id}) من ${fromStatus} إلى ${params.toStatus}${noteDetails ? ` — ${noteDetails}` : ''}`,
+        summaryEn: `Transitioned sub-order ${order.id} from ${fromStatus} to ${params.toStatus}`,
+        before: beforeSnapshot,
+        after: {
+          status: order.status,
+          assignedDriverId: order.assignedDriverId || null,
+          assignedDriverName: order.assignedDriverName || null,
+          deliveredAt: order.deliveredAt || null,
+          paidAt: order.paidAt || null,
+          adminFlags: order.adminFlags ? { ...order.adminFlags } : null
+        },
+        reason: trimmedReason
+      });
+    }
+
+    return order;
+  }
+
+  private enrichAdminOrder(o: SubOrder) {
+    const stuckInfo = this.isSubOrderStuck(o);
+    const activeDispute = this.disputes.find(
+      (d) => d.subOrderId === o.id && (d.status === 'open' || d.status === 'under_review')
+    );
+    const driver = o.assignedDriverId
+      ? this.drivers.find((d) => d.id === o.assignedDriverId)
+      : undefined;
+    return {
+      ...o,
+      isStuck: stuckInfo.isStuck,
+      stuckType: stuckInfo.stuckType || null,
+      hoursInStage: stuckInfo.hoursInStage,
+      hasOpenDispute: Boolean(activeDispute),
+      openDisputeId: activeDispute?.id || null,
+      assignedDriverStatus: driver ? this.getDriverAccountStatus(driver) : null,
+      allowedTransitions: getAllowedSubOrderTransitions(o.status)
+    };
+  }
+
+  listAdminOrders(params?: {
+    search?: string;
+    status?: string;
+    supplierId?: string;
+    storeId?: string;
+    paymentMethod?: string;
+    city?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    stuckOnly?: boolean;
+    sortBy?: string;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const allEnriched = this.subOrders.map((o) => this.enrichAdminOrder(o));
+    const counts = {
+      all: allEnriched.length,
+      pending: allEnriched.filter((o) => o.status === 'pending').length,
+      approved: allEnriched.filter((o) => o.status === 'approved').length,
+      assigned_driver: allEnriched.filter((o) => o.status === 'assigned_driver').length,
+      out_for_delivery: allEnriched.filter((o) => o.status === 'out_for_delivery').length,
+      delivered: allEnriched.filter((o) => o.status === 'delivered').length,
+      disputed: allEnriched.filter((o) => o.status === 'disputed').length,
+      cancelled: allEnriched.filter((o) => o.status === 'cancelled').length,
+      stuck: allEnriched.filter((o) => o.isStuck).length
+    };
+
+    let filtered = [...allEnriched];
+    if (params?.search && params.search.trim()) {
+      const q = params.search.trim().toLowerCase();
+      filtered = filtered.filter(
+        (o) =>
+          o.id.toLowerCase().includes(q) ||
+          o.parentOrderId.toLowerCase().includes(q) ||
+          o.storeName.toLowerCase().includes(q) ||
+          o.supplierName.toLowerCase().includes(q) ||
+          (o.assignedDriverName && o.assignedDriverName.toLowerCase().includes(q))
+      );
+    }
+    if (params?.status && params.status !== 'all') {
+      if (params.status === 'stuck') {
+        filtered = filtered.filter((o) => o.isStuck);
+      } else {
+        filtered = filtered.filter((o) => o.status === params.status);
+      }
+    }
+    if (params?.stuckOnly) {
+      filtered = filtered.filter((o) => o.isStuck);
+    }
+    if (params?.supplierId && params.supplierId !== 'all') {
+      filtered = filtered.filter((o) => o.supplierId === params.supplierId);
+    }
+    if (params?.storeId && params.storeId !== 'all') {
+      filtered = filtered.filter((o) => o.storeId === params.storeId);
+    }
+    if (params?.paymentMethod && params.paymentMethod !== 'all') {
+      filtered = filtered.filter((o) => o.paymentMethod === params.paymentMethod);
+    }
+    if (params?.city && params.city !== 'all') {
+      filtered = filtered.filter((o) => o.storeCity === params.city);
+    }
+    if (params?.dateFrom) {
+      const fromMs = Date.parse(params.dateFrom);
+      if (Number.isFinite(fromMs)) {
+        filtered = filtered.filter((o) => Date.parse(o.createdAt) >= fromMs);
+      }
+    }
+    if (params?.dateTo) {
+      const toStr = params.dateTo.length === 10 ? `${params.dateTo}T23:59:59.999Z` : params.dateTo;
+      const toMs = Date.parse(toStr);
+      if (Number.isFinite(toMs)) {
+        filtered = filtered.filter((o) => Date.parse(o.createdAt) <= toMs);
+      }
+    }
+
+    const sortBy = params?.sortBy || 'newest';
+    filtered.sort((a, b) => {
+      if (sortBy === 'oldest') {
+        return Date.parse(a.createdAt) - Date.parse(b.createdAt);
+      }
+      if (sortBy === 'amount_desc') {
+        return b.subtotalIQD - a.subtotalIQD;
+      }
+      if (sortBy === 'amount_asc') {
+        return a.subtotalIQD - b.subtotalIQD;
+      }
+      return Date.parse(b.createdAt) - Date.parse(a.createdAt);
+    });
+
+    const pageSize = Math.min(100, Math.max(1, Number(params?.pageSize) || 15));
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(totalPages, Math.max(1, Number(params?.page) || 1));
+    const start = (page - 1) * pageSize;
+
+    const cities = Array.from(new Set(this.subOrders.map((o) => o.storeCity).filter(Boolean)));
+    const suppliers = this.suppliers.map((s) => ({
+      id: s.id,
+      companyName: s.companyName
+    }));
+    const stores = this.stores.map((s) => ({
+      id: s.id,
+      name: s.name
+    }));
+    const drivers = this.drivers.map((d) => ({
+      id: d.id,
+      name: d.name,
+      supplierId: d.supplierId,
+      supplierName: d.supplierName,
+      vehiclePlate: d.vehiclePlate,
+      accountStatus: this.getDriverAccountStatus(d)
+    }));
+
+    return {
+      items: filtered.slice(start, start + pageSize),
+      allFilteredItems: filtered,
+      total,
+      page,
+      pageSize,
+      totalPages,
+      counts,
+      filterOptions: {
+        cities,
+        suppliers,
+        stores,
+        drivers
+      }
+    };
+  }
+
+  getAdminOrderDetail(id: string) {
+    const raw = this.subOrders.find((o) => o.id === id);
+    if (!raw) {
+      const err: any = new Error('الطلب غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const order = this.enrichAdminOrder(raw);
+    const store = this.stores.find((s) => s.id === raw.storeId) || null;
+    const supplier = this.suppliers.find((s) => s.id === raw.supplierId) || null;
+    const driver = raw.assignedDriverId
+      ? this.drivers.find((d) => d.id === raw.assignedDriverId) || null
+      : null;
+
+    const siblingSubOrders = this.subOrders
+      .filter((s) => s.parentOrderId === raw.parentOrderId && s.id !== raw.id)
+      .map((s) => ({
+        id: s.id,
+        supplierId: s.supplierId,
+        supplierName: s.supplierName,
+        subtotalIQD: s.subtotalIQD,
+        status: s.status
+      }));
+
+    const creditAccount = this.getCreditAccount(raw.storeId, raw.supplierId) || null;
+    const disputes = this.disputes
+      .filter((d) => d.subOrderId === raw.id)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const disputeIds = new Set(disputes.map((d) => d.id));
+
+    const directInvoiceIds = new Set(
+      this.ledgerEntries
+        .filter((l) => l.referenceType === 'INVOICE' && l.referenceId === raw.id)
+        .map((l) => l.id)
+    );
+
+    const ledgerEntries = this.ledgerEntries
+      .filter(
+        (l) =>
+          l.referenceId === raw.id ||
+          disputeIds.has(l.referenceId) ||
+          (l.referenceType === 'REVERSAL' &&
+            directInvoiceIds.has(l.referenceId.replace(/^REV-/, '')))
+      )
+      .sort((a, b) => Date.parse(b.entryDate) - Date.parse(a.entryDate));
+
+    const auditLogs = this.auditLogs
+      .filter(
+        (a) =>
+          (a.entityType === 'sub_order' && a.entityId === raw.id) ||
+          (a.entityType === 'dispute' && disputeIds.has(a.entityId))
+      )
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+
+    const activeDriversForSupplier = this.drivers
+      .filter(
+        (d) =>
+          this.getDriverAccountStatus(d) === 'active' &&
+          (d.supplierId === raw.supplierId || true)
+      )
+      .map((d) => ({
+        id: d.id,
+        name: d.name,
+        supplierId: d.supplierId,
+        supplierName: d.supplierName,
+        vehiclePlate: d.vehiclePlate,
+        sameSupplier: d.supplierId === raw.supplierId
+      }))
+      .sort((a, b) => Number(b.sameSupplier) - Number(a.sameSupplier));
+
+    return {
+      order,
+      store: store
+        ? {
+            id: store.id,
+            name: store.name,
+            ownerName: store.ownerName,
+            phone: store.phone,
+            city: store.city,
+            district: store.district,
+            address: store.address,
+            accountStatus: this.getStoreAccountStatus(store)
+          }
+        : null,
+      supplier: supplier
+        ? {
+            id: supplier.id,
+            companyName: supplier.companyName,
+            contactPerson: supplier.contactPerson,
+            phone: supplier.phone,
+            city: supplier.city,
+            accountStatus: this.getSupplierAccountStatus(supplier)
+          }
+        : null,
+      driver: driver
+        ? {
+            id: driver.id,
+            name: driver.name,
+            phone: driver.phone,
+            vehiclePlate: driver.vehiclePlate,
+            vehicleType: driver.vehicleModel,
+            accountStatus: this.getDriverAccountStatus(driver)
+          }
+        : null,
+      siblingSubOrders,
+      creditAccount,
+      ledgerEntries,
+      disputes,
+      adminNotes: raw.adminNotes || [],
+      auditLogs,
+      availableDrivers: activeDriversForSupplier,
+      hasActiveCreditInvoice: this.ledgerEntries.some(
+        (l) => l.referenceType === 'INVOICE' && l.referenceId === raw.id && !l.isReversed
+      )
+    };
+  }
+
+  addAdminOrderNote(params: {
+    id: string;
+    text: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const order = this.subOrders.find((o) => o.id === params.id);
+    if (!order) {
+      const err: any = new Error('الطلب غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    const clean = String(params.text || '').trim();
+    if (clean.length < 3) {
+      const err: any = new Error('نص الملاحظة قصير جداً (3 أحرف على الأقل)');
+      err.statusCode = 400;
+      throw err;
+    }
+    const nowIso = new Date().toISOString();
+    const note: AdminInternalNote = {
+      id: `onote_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      at: nowIso,
+      author: params.actor.actorName,
+      text: clean
+    };
+    if (!order.adminNotes) order.adminNotes = [];
+    order.adminNotes.unshift(note);
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'order.add_note',
+      entityType: 'sub_order',
+      entityId: order.id,
+      summaryAr: `إضافة ملاحظة إدارية داخلية على الطلب (${order.id})`,
+      summaryEn: `Added internal admin note on sub-order ${order.id}`,
+      before: null,
+      after: { noteText: clean },
+      reason: clean
+    });
+
+    return note;
+  }
+
+  // ---- Disputes Management ----
+  private enrichDispute(d: Dispute) {
+    const order = this.subOrders.find((o) => o.id === d.subOrderId) || null;
+    return {
+      ...d,
+      subOrder: order
+        ? {
+            id: order.id,
+            parentOrderId: order.parentOrderId,
+            storeId: order.storeId,
+            storeName: order.storeName,
+            supplierId: order.supplierId,
+            supplierName: order.supplierName,
+            subtotalIQD: order.subtotalIQD,
+            paymentMethod: order.paymentMethod,
+            status: order.status,
+            createdAt: order.createdAt
+          }
+        : null
+    };
+  }
+
+  listAdminDisputes(params?: {
+    status?: string;
+    reasonCode?: string;
+    search?: string;
+  }) {
+    const allEnriched = this.disputes
+      .map((d) => this.enrichDispute(d))
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+    const counts = {
+      all: allEnriched.length,
+      open: allEnriched.filter((d) => d.status === 'open').length,
+      under_review: allEnriched.filter((d) => d.status === 'under_review').length,
+      resolved: allEnriched.filter((d) => d.status === 'resolved').length,
+      rejected: allEnriched.filter((d) => d.status === 'rejected').length
+    };
+
+    let filtered = [...allEnriched];
+    if (params?.status && params.status !== 'all') {
+      filtered = filtered.filter((d) => d.status === params.status);
+    }
+    if (params?.reasonCode && params.reasonCode !== 'all') {
+      filtered = filtered.filter((d) => d.reasonCode === params.reasonCode);
+    }
+    if (params?.search && params.search.trim()) {
+      const q = params.search.trim().toLowerCase();
+      filtered = filtered.filter(
+        (d) =>
+          d.id.toLowerCase().includes(q) ||
+          d.subOrderId.toLowerCase().includes(q) ||
+          d.description.toLowerCase().includes(q) ||
+          (d.subOrder?.storeName && d.subOrder.storeName.toLowerCase().includes(q)) ||
+          (d.subOrder?.supplierName && d.subOrder.supplierName.toLowerCase().includes(q))
+      );
+    }
+
+    const eligibleOrdersForDispute = this.subOrders
+      .filter((o) => o.status === 'delivered')
+      .map((o) => ({
+        id: o.id,
+        storeName: o.storeName,
+        supplierName: o.supplierName,
+        subtotalIQD: o.subtotalIQD,
+        paymentMethod: o.paymentMethod
+      }));
+
+    return {
+      items: filtered,
+      counts,
+      eligibleOrdersForDispute
+    };
+  }
+
+  createAdminDispute(params: {
+    subOrderId: string;
+    openedBy: DisputeOpenedBy;
+    reasonCode: DisputeReasonCode;
+    description: string;
+    claimedAmountIQD?: number;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const order = this.subOrders.find((o) => o.id === params.subOrderId);
+    if (!order) {
+      const err: any = new Error('الطلب المرتبط بالنزاع غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const existingActive = this.disputes.find(
+      (d) => d.subOrderId === order.id && (d.status === 'open' || d.status === 'under_review')
+    );
+    if (existingActive) {
+      const err: any = new Error(`يوجد نزاع نشط بالفعل على هذا الطلب (${existingActive.id})`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (order.status !== 'delivered' && order.status !== 'disputed') {
+      const err: any = new Error(
+        `لا يمكن فتح نزاع لطلب بحالة (${order.status}) — يجب أن يكون الطلب مسلّماً أولاً`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const desc = String(params.description || '').trim();
+    if (desc.length < 5) {
+      const err: any = new Error('يرجى كتابة وصف واضح للنزاع (5 أحرف على الأقل)');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    let claimedAmount: number | undefined;
+    if (params.claimedAmountIQD !== undefined && params.claimedAmountIQD !== null && String(params.claimedAmountIQD) !== '') {
+      const num = Number(params.claimedAmountIQD);
+      if (!Number.isFinite(num) || num < 0 || num > order.subtotalIQD) {
+        const err: any = new Error('المبلغ المطالب به يجب أن يكون بين 0 وقيمة الطلب');
+        err.statusCode = 400;
+        throw err;
+      }
+      claimedAmount = num;
+    }
+
+    const nowIso = new Date().toISOString();
+    const beforeOrderStatus = order.status;
+
+    if (order.status === 'delivered') {
+      this.transitionSubOrder({
+        id: order.id,
+        toStatus: 'disputed',
+        actor: {
+          actorType: 'admin',
+          actorId: params.actor.actorId,
+          actorName: params.actor.actorName
+        },
+        reason: `فتح نزاع (${params.reasonCode}): ${desc}`,
+        extraHistoryNote: `فُتح نزاع بواسطة (${params.openedBy})`
+      });
+    }
+
+    const dispute: Dispute = {
+      id: `disp_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      subOrderId: order.id,
+      openedBy: params.openedBy || 'admin',
+      reasonCode: params.reasonCode || 'other',
+      description: desc,
+      claimedAmountIQD: claimedAmount,
+      status: 'open',
+      createdAt: nowIso,
+      notes: []
+    };
+
+    this.disputes.unshift(dispute);
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'dispute.open',
+      entityType: 'dispute',
+      entityId: dispute.id,
+      summaryAr: `فتح نزاع (${dispute.id}) على الطلب ${order.id} بالسبب: ${params.reasonCode}`,
+      summaryEn: `Opened dispute ${dispute.id} on order ${order.id} (${params.reasonCode})`,
+      before: { orderStatus: beforeOrderStatus },
+      after: { disputeStatus: dispute.status, orderStatus: order.status, claimedAmountIQD: claimedAmount ?? null },
+      reason: desc
+    });
+
+    return this.enrichDispute(dispute);
+  }
+
+  reviewAdminDispute(params: {
+    id: string;
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const dispute = this.disputes.find((d) => d.id === params.id);
+    if (!dispute) {
+      const err: any = new Error('النزاع غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    const cleanReason = String(params.reason || '').trim();
+    if (cleanReason.length < 5) {
+      const err: any = new Error('يرجى إدخال سبب واضح لا يقل عن 5 أحرف');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (dispute.status !== 'open') {
+      const err: any = new Error('يمكن تحويل النزاعات المفتوحة فقط إلى قيد المراجعة');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const beforeStatus = dispute.status;
+    dispute.status = 'under_review';
+    const nowIso = new Date().toISOString();
+    dispute.notes.unshift({
+      id: `dnote_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      at: nowIso,
+      author: params.actor.actorName,
+      text: `بدء المراجعة: ${cleanReason}`
+    });
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'dispute.review',
+      entityType: 'dispute',
+      entityId: dispute.id,
+      summaryAr: `تحويل النزاع (${dispute.id}) للطلب ${dispute.subOrderId} إلى قيد المراجعة`,
+      summaryEn: `Moved dispute ${dispute.id} to under_review`,
+      before: { status: beforeStatus },
+      after: { status: dispute.status },
+      reason: cleanReason
+    });
+
+    return this.enrichDispute(dispute);
+  }
+
+  resolveAdminDispute(params: {
+    id: string;
+    type: DisputeResolutionType;
+    amountIQD?: number;
+    restockToSupplier?: boolean;
+    note?: string;
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const dispute = this.disputes.find((d) => d.id === params.id);
+    if (!dispute) {
+      const err: any = new Error('النزاع غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    const order = this.subOrders.find((o) => o.id === dispute.subOrderId);
+    if (!order) {
+      const err: any = new Error('الطلب المرتبط بالنزاع غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (dispute.status === 'resolved' || dispute.status === 'rejected') {
+      const err: any = new Error('تم إغلاق هذا النزاع مسبقاً');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const cleanReason = String(params.reason || '').trim();
+    if (cleanReason.length < 5) {
+      const err: any = new Error('يرجى إدخال سبب إداري واضح لا يقل عن 5 أحرف');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const validTypes: DisputeResolutionType[] = ['full_refund', 'partial_credit', 'replacement', 'rejected'];
+    if (!validTypes.includes(params.type)) {
+      const err: any = new Error('نوع تسوية النزاع غير صالح');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // Validate partial_credit amount before any mutation
+    let resolvedAmountIQD = params.amountIQD !== undefined ? Number(params.amountIQD) : undefined;
+    if (params.type === 'partial_credit') {
+      if (!Number.isFinite(resolvedAmountIQD) || (resolvedAmountIQD as number) <= 0 || (resolvedAmountIQD as number) > order.subtotalIQD) {
+        const err: any = new Error(
+          `قيمة الخصم الجزئي يجب أن تكون أكبر من 0 ولا تتجاوز قيمة الطلب (${order.subtotalIQD.toLocaleString('en-US')} د.ع)`
+        );
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    // Validate credit account exists before partial_credit mutation on credit orders
+    let partialCreditAccount: CreditAccount | undefined;
+    if (params.type === 'partial_credit' && order.paymentMethod === 'credit') {
+      partialCreditAccount = this.getCreditAccount(order.storeId, order.supplierId);
+      if (!partialCreditAccount) {
+        const err: any = new Error('الحساب الائتماني للمتجر مع هذا المورد غير موجود لتسجيل الإشعار الدائن');
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const beforeSnapshot = {
+      disputeStatus: dispute.status,
+      orderStatus: order.status
+    };
+    const restockFlag = Boolean(params.restockToSupplier);
+    const resolutionNote = String(params.note || cleanReason).trim();
+
+    if (params.type === 'full_refund') {
+      resolvedAmountIQD = order.subtotalIQD;
+      if (order.status === 'disputed' || order.status !== 'cancelled') {
+        if (order.status === 'delivered') {
+          this.transitionSubOrder({
+            id: order.id,
+            toStatus: 'disputed',
+            actor: { actorType: 'admin', actorId: params.actor.actorId, actorName: params.actor.actorName },
+            reason: cleanReason
+          });
+        }
+        this.transitionSubOrder({
+          id: order.id,
+          toStatus: 'cancelled',
+          actor: {
+            actorType: 'admin',
+            actorId: params.actor.actorId,
+            actorName: params.actor.actorName
+          },
+          reason: cleanReason,
+          restockOnCancel: restockFlag,
+          extraHistoryNote: `تسوية النزاع (${dispute.id}): استرداد كامل`
+        });
+      }
+      dispute.status = 'resolved';
+    } else if (params.type === 'partial_credit') {
+      const creditValue = resolvedAmountIQD as number;
+      if (order.paymentMethod === 'credit' && partialCreditAccount) {
+        this.addLedgerEntry({
+          creditAccountId: partialCreditAccount.id,
+          supplierId: order.supplierId,
+          storeId: order.storeId,
+          referenceType: 'RETURN_CREDIT',
+          referenceId: dispute.id,
+          entryDate: nowIso.split('T')[0],
+          debitIQD: 0,
+          creditIQD: creditValue,
+          runningBalanceIQD: Math.max(0, partialCreditAccount.currentUsedCreditIQD - creditValue),
+          descriptionAr: `إشعار دائن لفض نزاع (${dispute.id}) على طلب ${order.id} - ${resolutionNote}`
+        });
+      }
+      if (restockFlag) {
+        const ratio = Math.min(1, creditValue / Math.max(1, order.subtotalIQD));
+        for (const item of order.items) {
+          const offer = this.offers.find(
+            (o) => o.supplierId === order.supplierId && o.barcode === item.barcode
+          );
+          if (offer) {
+            offer.availableStock += Math.max(1, Math.round(item.quantity * ratio));
+          }
+        }
+      }
+      if (order.status === 'disputed') {
+        this.transitionSubOrder({
+          id: order.id,
+          toStatus: 'delivered',
+          actor: {
+            actorType: 'admin',
+            actorId: params.actor.actorId,
+            actorName: params.actor.actorName
+          },
+          reason: cleanReason,
+          extraHistoryNote: `إغلاق النزاع (${dispute.id}) بخصم جزئي ${creditValue.toLocaleString('en-US')} د.ع`
+        });
+      }
+      dispute.status = 'resolved';
+    } else if (params.type === 'replacement') {
+      if (restockFlag) {
+        for (const item of order.items) {
+          const offer = this.offers.find(
+            (o) => o.supplierId === order.supplierId && o.barcode === item.barcode
+          );
+          if (offer) {
+            offer.availableStock += item.quantity;
+          }
+        }
+      }
+      if (order.status === 'disputed') {
+        this.transitionSubOrder({
+          id: order.id,
+          toStatus: 'delivered',
+          actor: {
+            actorType: 'admin',
+            actorId: params.actor.actorId,
+            actorName: params.actor.actorName
+          },
+          reason: cleanReason,
+          extraHistoryNote: `إغلاق النزاع (${dispute.id}) بالاستبدال العيني`
+        });
+      }
+      dispute.status = 'resolved';
+    } else {
+      // rejected
+      if (order.status === 'disputed') {
+        this.transitionSubOrder({
+          id: order.id,
+          toStatus: 'delivered',
+          actor: {
+            actorType: 'admin',
+            actorId: params.actor.actorId,
+            actorName: params.actor.actorName
+          },
+          reason: cleanReason,
+          extraHistoryNote: `رفض النزاع (${dispute.id}) وإعادة الطلب لحالة مكتمل`
+        });
+      }
+      dispute.status = 'rejected';
+    }
+
+    dispute.resolution = {
+      type: params.type,
+      amountIQD: resolvedAmountIQD,
+      restockToSupplier: restockFlag,
+      note: resolutionNote,
+      resolvedBy: params.actor.actorId
+    };
+    dispute.resolvedAt = nowIso;
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'dispute.resolve',
+      entityType: 'dispute',
+      entityId: dispute.id,
+      summaryAr: `تسوية النزاع (${dispute.id}) للطلب ${order.id} بالقرار: ${params.type}${resolvedAmountIQD ? ` (${resolvedAmountIQD.toLocaleString('en-US')} د.ع)` : ''}`,
+      summaryEn: `Resolved dispute ${dispute.id} (${params.type})`,
+      before: beforeSnapshot,
+      after: {
+        disputeStatus: dispute.status,
+        resolutionType: params.type,
+        amountIQD: resolvedAmountIQD ?? null,
+        restockToSupplier: restockFlag,
+        orderStatus: order.status
+      },
+      reason: cleanReason
+    });
+
+    return this.enrichDispute(dispute);
+  }
+
+  addAdminDisputeNote(params: {
+    id: string;
+    text: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const dispute = this.disputes.find((d) => d.id === params.id);
+    if (!dispute) {
+      const err: any = new Error('النزاع غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    const clean = String(params.text || '').trim();
+    if (clean.length < 3) {
+      const err: any = new Error('نص الملاحظة قصير جداً');
+      err.statusCode = 400;
+      throw err;
+    }
+    const nowIso = new Date().toISOString();
+    const note: AdminInternalNote = {
+      id: `dnote_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      at: nowIso,
+      author: params.actor.actorName,
+      text: clean
+    };
+    dispute.notes.unshift(note);
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'dispute.add_note',
+      entityType: 'dispute',
+      entityId: dispute.id,
+      summaryAr: `إضافة ملاحظة على النزاع (${dispute.id})`,
+      summaryEn: `Added note to dispute ${dispute.id}`,
+      before: null,
+      after: { noteText: clean },
+      reason: clean
+    });
+
+    return note;
+  }
+
+  // ---- Logistics & Fleet Overview ----
+  getAdminLogisticsOverview() {
+    const todayPrefix = new Date().toISOString().slice(0, 10);
+
+    const driversSummary = this.drivers.map((d) => {
+      const accountStatus = this.getDriverAccountStatus(d);
+      const driverOrders = this.subOrders.filter((o) => o.assignedDriverId === d.id);
+      const activeOrders = driverOrders.filter(
+        (o) => o.status === 'assigned_driver' || o.status === 'out_for_delivery'
+      );
+      const deliveredTodayCount = driverOrders.filter(
+        (o) =>
+          o.status === 'delivered' &&
+          ((o.deliveredAt || '').startsWith(todayPrefix) || (o.createdAt || '').startsWith(todayPrefix))
+      ).length;
+      const vanDeliveredTxCount = this.vanTransactions.filter(
+        (t) => t.driverId === d.id && t.createdAt.startsWith(todayPrefix)
+      ).length;
+
+      const stockItems = this.vanInventory.filter((v) => v.driverId === d.id);
+      const vanStockUnits = stockItems.reduce((sum, v) => sum + (v.remainingQuantity || 0), 0);
+      const vanStockValueIQD = stockItems.reduce(
+        (sum, v) => sum + (v.remainingQuantity || 0) * (v.unitPriceIQD || 0),
+        0
+      );
+      const lowStockItemsCount = stockItems.filter((v) => (v.remainingQuantity || 0) <= 5).length;
+
+      const routeStops = this.vanRouteStops.filter((s) => s.driverId === d.id);
+      const completedStops = routeStops.filter((s) => s.status === 'visited' || s.status === 'sold').length;
+
+      return {
+        id: d.id,
+        name: d.name,
+        phone: d.phone,
+        supplierId: d.supplierId,
+        supplierName: d.supplierName,
+        vehiclePlate: d.vehiclePlate,
+        vehicleType: d.vehicleModel,
+        accountStatus,
+        isActiveShift: d.isActiveShift,
+        availabilityStatus: d.availabilityStatus,
+        todayDeliveriesCount: deliveredTodayCount + vanDeliveredTxCount,
+        activeOrdersCount: activeOrders.length,
+        activeOrders: activeOrders.map((o) => ({
+          id: o.id,
+          storeName: o.storeName,
+          status: o.status,
+          subtotalIQD: o.subtotalIQD
+        })),
+        currentCashCollectedIQD: d.currentCashCollectedIQD,
+        vanStockUnits,
+        vanStockValueIQD,
+        lowStockItemsCount,
+        routeStopsTotal: routeStops.length,
+        routeStopsCompleted: completedStops
+      };
+    });
+
+    const vanLoadRequests = this.vanLoadRequests
+      .map((req) => {
+        const totalUnits = req.items.reduce((s, it) => s + (it.requestedQuantity || 0), 0);
+        return {
+          ...req,
+          requestedAt: req.createdAt,
+          totalUnits
+        };
+      })
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+    const suspendedDriversWithActiveOrders = driversSummary.filter(
+      (d) => d.accountStatus !== 'active' && d.activeOrdersCount > 0
+    );
+    const lowStockActiveVans = driversSummary.filter(
+      (d) => d.accountStatus === 'active' && d.isActiveShift && d.vanStockUnits <= 20
+    );
+
+    return {
+      kpis: {
+        totalDrivers: driversSummary.length,
+        activeShiftDrivers: driversSummary.filter((d) => d.isActiveShift && d.accountStatus === 'active').length,
+        activeAssignedOrders: this.subOrders.filter(
+          (o) => o.status === 'assigned_driver' || o.status === 'out_for_delivery'
+        ).length,
+        totalCashInCustodyIQD: driversSummary.reduce((sum, d) => sum + d.currentCashCollectedIQD, 0),
+        pendingVanLoadRequests: vanLoadRequests.filter((r) => r.status === 'pending_approval').length,
+        alertsCount: suspendedDriversWithActiveOrders.length + lowStockActiveVans.length
+      },
+      drivers: driversSummary,
+      vanLoadRequests,
+      alerts: {
+        suspendedDriversWithActiveOrders,
+        lowStockActiveVans
+      }
     };
   }
 }

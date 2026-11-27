@@ -459,6 +459,20 @@ export interface OrderItem {
   totalPriceIQD: number;
 }
 
+export interface SubOrderStatusHistoryEntry {
+  status: OrderStatus;
+  at: string;
+  actorType: 'system' | 'admin' | 'supplier' | 'driver' | 'store';
+  actorName?: string;
+  reason?: string;
+  note?: string;
+}
+
+export interface SubOrderAdminFlags {
+  forcedDelivery?: boolean;
+  cancelledByAdmin?: boolean;
+}
+
 export interface SubOrder {
   id: string;
   parentOrderId: string;
@@ -482,6 +496,9 @@ export interface SubOrder {
   deliveredAt?: string;
   createdAt: string;
   notes?: string;
+  statusHistory?: SubOrderStatusHistoryEntry[];
+  adminFlags?: SubOrderAdminFlags;
+  adminNotes?: AdminInternalNote[];
 }
 
 export interface ParentOrder {
@@ -492,6 +509,43 @@ export interface ParentOrder {
   subOrders: SubOrder[];
   paymentMethod: PaymentMethod;
   createdAt: string;
+}
+
+export type DisputeOpenedBy = 'store' | 'supplier' | 'admin';
+export type DisputeReasonCode =
+  | 'damaged'
+  | 'missing_items'
+  | 'wrong_items'
+  | 'late'
+  | 'price_mismatch'
+  | 'other';
+export type DisputeStatus = 'open' | 'under_review' | 'resolved' | 'rejected';
+export type DisputeResolutionType =
+  | 'full_refund'
+  | 'partial_credit'
+  | 'replacement'
+  | 'rejected';
+
+export interface DisputeResolution {
+  type: DisputeResolutionType;
+  amountIQD?: number;
+  restockToSupplier?: boolean;
+  note: string;
+  resolvedBy?: string;
+}
+
+export interface Dispute {
+  id: string;
+  subOrderId: string;
+  openedBy: DisputeOpenedBy;
+  reasonCode: DisputeReasonCode;
+  description: string;
+  claimedAmountIQD?: number;
+  status: DisputeStatus;
+  resolution?: DisputeResolution;
+  createdAt: string;
+  resolvedAt?: string;
+  notes: AdminInternalNote[];
 }
 
 export interface StoreInventoryItem {

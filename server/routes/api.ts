@@ -301,50 +301,55 @@ apiRouter.get('/orders', (req: Request, res: Response) => {
 apiRouter.patch('/orders/:id/status', (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { status, deliveryPin, driverId } = req.body;
-    const order = db.subOrders.find(o => o.id === id);
+    const { status, deliveryPin, driverId } = req.body || {};
+    const existing = db.subOrders.find(o => o.id === id);
 
-    if (!order) {
+    if (!existing) {
       return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
     }
 
-    // Verify delivery PIN when delivering
-    if (status === 'delivered') {
-      if (order.deliveryPin && deliveryPin !== order.deliveryPin) {
-        return res.status(400).json({
-          success: false,
-          message: 'رمز التحقق من الاستلام (PIN) غير صحيح! اطلب الرمز المكون من 4 أرقام من صاحب المتجر.'
-        });
+    if (!status) {
+      if (driverId) {
+        const driver = db.assertDriverOperable(driverId);
+        existing.assignedDriverId = driver.id;
+        existing.assignedDriverName = driver.name;
+        return res.json({ success: true, message: 'تم تحديث حالة الطلب', data: existing });
       }
-      order.deliveredAt = new Date().toISOString();
-      if (order.paymentMethod === 'cod') {
-        order.paidAt = new Date().toISOString();
-        // Add to driver cash if assigned
-        const driver = db.drivers.find(d => d.id === order.assignedDriverId);
-        if (driver) {
-          driver.currentCashCollectedIQD += order.subtotalIQD;
-        }
-      }
+      return res.status(400).json({ success: false, message: 'يرجى تحديد الحالة الجديدة للطلب' });
     }
 
-    if (driverId) {
-      const driver = db.assertDriverOperable(driverId);
-      order.assignedDriverId = driver.id;
-      order.assignedDriverName = driver.name;
-    } else if (
-      (status === 'assigned_driver' || status === 'out_for_delivery') &&
-      order.assignedDriverId
-    ) {
-      db.assertDriverOperable(order.assignedDriverId);
+    // Preserve Supplier Portal single-click "Approve & Assign Driver" from pending while keeping strict transition rules
+    if (existing.status === 'pending' && status === 'assigned_driver') {
+      db.transitionSubOrder({
+        id,
+        toStatus: 'approved',
+        actor: { actorType: 'supplier', actorName: existing.supplierName },
+        reason: 'اعتماد الطلبية من بوابة المورد'
+      });
+      const assigned = db.transitionSubOrder({
+        id,
+        toStatus: 'assigned_driver',
+        driverId,
+        actor: { actorType: 'supplier', actorName: existing.supplierName },
+        reason: 'تعيين السائق من بوابة المورد'
+      });
+      return res.json({ success: true, message: 'تم تحديث حالة الطلب', data: assigned });
     }
 
-    if (status) {
-      order.status = status;
-    }
+    const updated = db.transitionSubOrder({
+      id,
+      toStatus: status,
+      pin: deliveryPin,
+      driverId,
+      actor:
+        status === 'delivered'
+          ? { actorType: 'driver', actorName: existing.assignedDriverName || 'مندوب التوزيع' }
+          : { actorType: 'supplier', actorName: existing.supplierName }
+    });
 
-    res.json({ success: true, message: 'تم تحديث حالة الطلب', data: order });
+    res.json({ success: true, message: 'تم تحديث حالة الطلب', data: updated });
   } catch (error: any) {
-    res.status(400).json({ success: false, message: error.message });
+    res.status(error?.statusCode || 400).json({ success: false, message: error.message });
   }
 });
 
@@ -1046,30 +1051,27 @@ apiRouter.post('/van/unload-warehouse', (req: Request, res: Response) => {
 apiRouter.post('/van/delivery/:orderId/confirm', (req: Request, res: Response) => {
   try {
     const { orderId } = req.params;
-    const { driverId, enteredPin } = req.body;
-    const order = db.subOrders.find(o => o.id === orderId);
-    if (!order) {
+    const { driverId, enteredPin } = req.body || {};
+    const existing = db.subOrders.find(o => o.id === orderId);
+    if (!existing) {
       return res.status(404).json({ success: false, message: 'الطلب غير موجود' });
     }
-    if (order.deliveryPin && enteredPin !== order.deliveryPin) {
-      return res.status(400).json({
-        success: false,
-        message: 'رمز التحقق من الاستلام (PIN) غير صحيح! اطلب الرمز المكون من 4 أرقام من صاحب المتجر.'
-      });
-    }
-    order.status = 'delivered';
-    order.deliveredAt = new Date().toISOString();
-    if (order.paymentMethod === 'cod') {
-      order.paidAt = new Date().toISOString();
-      const driver = db.drivers.find(d => d.id === (driverId || order.assignedDriverId));
-      if (driver) {
-        driver.currentCashCollectedIQD += order.subtotalIQD;
-        driver.todayCashSalesIQD = (driver.todayCashSalesIQD || 0) + order.subtotalIQD;
+    const driver = driverId ? db.drivers.find(d => d.id === driverId) : undefined;
+    const updated = db.transitionSubOrder({
+      id: orderId,
+      toStatus: 'delivered',
+      pin: enteredPin,
+      driverId: driverId || undefined,
+      addCashToTodaySales: true,
+      actor: {
+        actorType: 'driver',
+        actorId: driverId || existing.assignedDriverId,
+        actorName: driver?.name || existing.assignedDriverName || 'مندوب التوزيع'
       }
-    }
-    res.json({ success: true, message: 'تم تأكيد التسليم بنجاح', data: order });
+    });
+    res.json({ success: true, message: 'تم تأكيد التسليم بنجاح', data: updated });
   } catch (error: any) {
-    res.status(400).json({ success: false, message: error.message });
+    res.status(error?.statusCode || 400).json({ success: false, message: error.message });
   }
 });
 

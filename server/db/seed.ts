@@ -21,7 +21,8 @@ import {
   SupplierInventoryBatch,
   VanExpenseRecord,
   VanReturnRecord,
-  ShiftCloseReport
+  ShiftCloseReport,
+  Dispute
 } from './types.ts';
 import { buildBranchProductsAndOffers } from './branchProductsSeed.ts';
 
@@ -1988,6 +1989,21 @@ export const initialLedgerEntries: LedgerEntry[] = [
     runningBalanceIQD: 4850000,
     descriptionAr: 'فاتورة توريد زيت عافية ومعكرونة إسباغيتي',
     isReversed: false
+  },
+  {
+    id: 'led_sub_104',
+    creditAccountId: 'cred_almansoor_baghdad_hub',
+    supplierId: 'supp_baghdad_hub',
+    storeId: 'store_almansoor',
+    referenceType: 'INVOICE',
+    referenceId: 'ord_sub_104',
+    entryDate: '2026-11-24',
+    dueDate: '2026-12-24',
+    debitIQD: 336000,
+    creditIQD: 0,
+    runningBalanceIQD: 2100000,
+    descriptionAr: 'فاتورة طلبية جملة رقم ord_sub_104 - 1 صنف',
+    isReversed: false
   }
 ];
 
@@ -2253,6 +2269,137 @@ export const initialSubOrders: SubOrder[] = [
     assignedDriverName: 'علي حسن الساعدي',
     deliveryPin: '7308',
     createdAt: '2026-11-08T08:15:00Z'
+  },
+  {
+    id: 'ord_sub_103',
+    parentOrderId: 'ord_main_2',
+    supplierId: 'supp_rafidain',
+    supplierName: 'شركة الرافدين للتجارة العامة والأغذية',
+    storeId: 'store_almansoor',
+    storeName: 'سوبرماركت المنصور المركزي',
+    storePhone: '+964 771 555 8899',
+    storeCity: 'بغداد',
+    storeAddress: 'حي المنصور - شارع 14 رمضان',
+    items: [
+      {
+        barcode: '6281008765432',
+        productName: 'سكر أبيض نقي مكرر عالي النقاوة',
+        unit: 'شوال (50 كغم)',
+        quantity: 6,
+        unitPriceIQD: 44000,
+        totalPriceIQD: 264000
+      }
+    ],
+    subtotalIQD: 264000,
+    paymentMethod: 'cod',
+    status: 'delivered',
+    deliveryType: 'supplier_fleet',
+    assignedDriverId: 'drv_ahmed_baghdad',
+    assignedDriverName: 'أحمد كاظم البغدادي',
+    deliveryPin: '5914',
+    paidAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+    deliveredAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+    createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+    notes: 'تم التسليم في الفرع الرئيسي'
+  },
+  {
+    id: 'ord_sub_104',
+    parentOrderId: 'ord_main_3',
+    supplierId: 'supp_baghdad_hub',
+    supplierName: 'مجمع بغداد للمواد الاستهلاكية والتوزيع',
+    storeId: 'store_almansoor',
+    storeName: 'سوبرماركت المنصور المركزي',
+    storePhone: '+964 771 555 8899',
+    storeCity: 'بغداد',
+    storeAddress: 'حي المنصور - شارع 14 رمضان',
+    items: [
+      {
+        barcode: '5201002345678',
+        productName: 'معجون طماطم تركي مركز',
+        unit: 'كرتون (48 × 800 غرام)',
+        quantity: 8,
+        unitPriceIQD: 42000,
+        totalPriceIQD: 336000
+      }
+    ],
+    subtotalIQD: 336000,
+    paymentMethod: 'credit',
+    status: 'disputed',
+    deliveryType: 'supplier_fleet',
+    assignedDriverId: 'drv_ali_rasheed',
+    assignedDriverName: 'علي حسن الساعدي',
+    deliveryPin: '8420',
+    deliveredAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    notes: 'إبلاغ عن تلف جزئي في كرتونين أثناء التفريغ'
+  },
+  {
+    id: 'ord_sub_105',
+    parentOrderId: 'ord_main_4',
+    supplierId: 'supp_rafidain',
+    supplierName: 'شركة الرافدين للتجارة العامة والأغذية',
+    storeId: 'store_karrada',
+    storeName: 'أسواق دجلة الخير - الكرادة',
+    storePhone: '+964 770 444 7711',
+    storeCity: 'بغداد',
+    storeAddress: 'الكرادة داخل - قرب ساحة كهرمانة',
+    items: [
+      {
+        barcode: '6281005551234',
+        productName: 'معكرونة إسباغيتي قمح صلب',
+        unit: 'كرتون (20 × 500 غرام)',
+        quantity: 12,
+        unitPriceIQD: 18500,
+        totalPriceIQD: 222000
+      }
+    ],
+    subtotalIQD: 222000,
+    paymentMethod: 'cod',
+    status: 'pending',
+    deliveryType: 'supplier_fleet',
+    deliveryPin: '3619',
+    createdAt: new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString(),
+    notes: 'طلبية بانتظار اعتماد المورد منذ أكثر من 24 ساعة'
+  }
+];
+
+export const initialDisputes: Dispute[] = [
+  {
+    id: 'disp_101',
+    subOrderId: 'ord_sub_104',
+    openedBy: 'store',
+    reasonCode: 'damaged',
+    description: 'وصول كرتونين من معجون الطماطم التركي بحالة منبعجة وتسرب في العبوات عند الاستلام.',
+    claimedAmountIQD: 84000,
+    status: 'open',
+    createdAt: new Date(Date.now() - 18 * 60 * 60 * 1000).toISOString(),
+    notes: [
+      {
+        id: 'dnote_1',
+        at: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
+        author: 'المدير العام (Super Admin)',
+        text: 'تم استلام صور الشحنة ومخاطبة مستودع مجمع بغداد لتأكيد الاستبدال أو الخصم الآجل.'
+      }
+    ]
+  },
+  {
+    id: 'disp_102',
+    subOrderId: 'ord_sub_103',
+    openedBy: 'store',
+    reasonCode: 'missing_items',
+    description: 'نقص شوال واحد من شحنة السكر الأبيض المسلّمة للفرع، وتم استكمال تسليمه من الفان في اليوم التالي.',
+    claimedAmountIQD: 44000,
+    status: 'resolved',
+    resolution: {
+      type: 'replacement',
+      amountIQD: 44000,
+      restockToSupplier: false,
+      note: 'تم تسليم الشوال الناقص عبر مندوب التوزيع وتأكيد الاستلام من أمين المخزن.',
+      resolvedBy: 'admin_root'
+    },
+    createdAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+    resolvedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    notes: []
   }
 ];
 

@@ -295,6 +295,7 @@ export const SupplierLedgerDetailView: React.FC<SupplierLedgerDetailViewProps> =
       assigned_driver: { ar: 'تم تعيين سائق', en: 'Driver Assigned', cls: 'bg-indigo-100 text-indigo-800' },
       out_for_delivery: { ar: 'في الطريق', en: 'Out for Delivery', cls: 'bg-sky-100 text-sky-800' },
       delivered: { ar: 'تم التسليم', en: 'Delivered', cls: 'bg-emerald-100 text-[#0B5D32]' },
+      disputed: { ar: 'نزاع مفتوح', en: 'Disputed', cls: 'bg-rose-100 text-rose-800' },
       cancelled: { ar: 'ملغي', en: 'Cancelled', cls: 'bg-red-100 text-red-700' }
     };
     return map[status] || map.pending;

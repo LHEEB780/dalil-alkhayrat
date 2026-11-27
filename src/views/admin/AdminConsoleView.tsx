@@ -68,6 +68,9 @@ import { ApiDocsView } from '../ApiDocsView.tsx';
 import { UserSession } from '../WelcomeAuthView.tsx';
 import { AccountsView, AccountSectionMode } from './AccountsView.tsx';
 import { CatalogView } from './CatalogView.tsx';
+import { OrdersView } from './OrdersView.tsx';
+import { DisputesView } from './DisputesView.tsx';
+import { LogisticsView } from './LogisticsView.tsx';
 
 export type AdminSectionId =
   | 'overview'
@@ -217,7 +220,8 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         labelEn: 'All Orders',
         descAr: 'تتبع الطلبات الفرعية، الكشف عن الطلبات العالقة، وتجاوز الحالات عند الحاجة.',
         descEn: 'Track all wholesale sub-orders, catch stuck orders, and perform audited overrides.',
-        icon: ShoppingBag
+        icon: ShoppingBag,
+        implemented: true
       },
       {
         id: 'disputes',
@@ -225,7 +229,8 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         labelEn: 'Disputes & RMA',
         descAr: 'معالجة النزاعات بين المتاجر والموردين وإشعارات المرتجعات والتالف.',
         descEn: 'Resolve store-supplier disputes, damaged goods claims, and RMA credit notes.',
-        icon: Scale
+        icon: Scale,
+        implemented: true
       },
       {
         id: 'fleet',
@@ -233,7 +238,8 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         labelEn: 'Fleet Dispatch',
         descAr: 'متابعة خطوط السير، حمولة الفانات، ومؤشرات الالتزام بالزيارات الميدانية.',
         descEn: 'Oversee delivery routes, mobile van inventory, and field visit compliance.',
-        icon: Activity
+        icon: Activity,
+        implemented: true
       }
     ]
   },
@@ -391,6 +397,8 @@ interface AdminOverviewData {
     totalOverdueDebtIQD: number;
     pendingCreditUpgradesCount: number;
     lowStockOffersCount: number;
+    stuckOrdersCount?: number;
+    openDisputesCount?: number;
     catalogQualityPercent?: number;
     catalogLowQualityCount?: number;
     productsWithoutOffersCount?: number;
@@ -508,6 +516,14 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
     selectedId?: string | null;
   }>({});
   const [catalogDeepLink, setCatalogDeepLink] = useState<{
+    selectedId?: string | null;
+    filterPreset?: string | null;
+  }>({});
+  const [ordersDeepLink, setOrdersDeepLink] = useState<{
+    selectedId?: string | null;
+    filterPreset?: string | null;
+  }>({});
+  const [disputesDeepLink, setDisputesDeepLink] = useState<{
     selectedId?: string | null;
     filterPreset?: string | null;
   }>({});
@@ -679,6 +695,16 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
       selectedId: options?.selectedId,
       filterPreset: options?.filterPreset
     });
+    setOrdersDeepLink(
+      section === 'orders'
+        ? { selectedId: options?.selectedId, filterPreset: options?.filterPreset }
+        : {}
+    );
+    setDisputesDeepLink(
+      section === 'disputes'
+        ? { selectedId: options?.selectedId, filterPreset: options?.filterPreset }
+        : {}
+    );
     setMobileMenuOpen(false);
     setSearchDropdownOpen(false);
     setBellOpen(false);
@@ -850,6 +876,28 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                             }`}
                           >
                             {overview?.kpis.pendingStoresCount}
+                          </span>
+                        )}
+                        {item.id === 'orders' && (overview?.kpis.stuckOrdersCount || 0) > 0 && (
+                          <span
+                            className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                              isActive
+                                ? 'bg-white/20 text-white'
+                                : 'bg-red-100 text-red-700'
+                            }`}
+                          >
+                            {overview?.kpis.stuckOrdersCount}
+                          </span>
+                        )}
+                        {item.id === 'disputes' && (overview?.kpis.openDisputesCount || 0) > 0 && (
+                          <span
+                            className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                              isActive
+                                ? 'bg-white/20 text-white'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {overview?.kpis.openDisputesCount}
                           </span>
                         )}
                       </>
@@ -1385,6 +1433,14 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                           item.targetSection,
                           item.type === 'pending_supplier' || item.type === 'pending_store'
                             ? { statusTab: 'pending', selectedId: item.entityId }
+                            : item.type === 'stuck_order'
+                            ? { selectedId: item.entityId, filterPreset: 'stuck' }
+                            : item.type === 'disputed_order'
+                            ? { selectedId: item.entityId }
+                            : item.type === 'catalog_no_offers'
+                            ? { filterPreset: 'without_offers' }
+                            : item.type === 'catalog_price_anomaly'
+                            ? { filterPreset: 'price_anomaly' }
                             : undefined
                         )
                       }
@@ -2231,7 +2287,8 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                                       hit.targetSection === 'suppliers' ||
                                         hit.targetSection === 'stores' ||
                                         hit.targetSection === 'drivers' ||
-                                        hit.targetSection === 'products'
+                                        hit.targetSection === 'products' ||
+                                        hit.targetSection === 'orders'
                                         ? { selectedId: hit.id }
                                         : undefined
                                     )
@@ -2301,6 +2358,12 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                                 ? { filterPreset: 'without_offers' }
                                 : item.type === 'catalog_price_anomaly'
                                 ? { filterPreset: 'price_anomaly' }
+                                : item.type === 'stuck_order'
+                                ? { selectedId: item.entityId, filterPreset: 'stuck' }
+                                : item.type === 'disputed_order'
+                                ? { selectedId: item.entityId }
+                                : item.type === 'pending_supplier' || item.type === 'pending_store'
+                                ? { statusTab: 'pending', selectedId: item.entityId }
                                 : undefined
                             )
                           }
@@ -2370,6 +2433,31 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
               onDataChanged={() => fetchOverview(range)}
             />
           )}
+          {activeSection === 'orders' && (
+            <OrdersView
+              language={language}
+              currency={currency}
+              initialDeepLink={ordersDeepLink}
+              onDataChanged={() => fetchOverview(range)}
+              onOpenDispute={(id) => handleNavigate('disputes', { selectedId: id })}
+            />
+          )}
+          {activeSection === 'disputes' && (
+            <DisputesView
+              language={language}
+              currency={currency}
+              initialDeepLink={disputesDeepLink}
+              onDataChanged={() => fetchOverview(range)}
+              onOpenOrder={(orderId) => handleNavigate('orders', { selectedId: orderId })}
+            />
+          )}
+          {activeSection === 'fleet' && (
+            <LogisticsView
+              language={language}
+              currency={currency}
+              onOpenOrder={(orderId) => handleNavigate('orders', { selectedId: orderId })}
+            />
+          )}
           {activeSection === 'audit_log' && renderAuditLog()}
           {activeSection === 'roles_permissions' && renderRolesAndPermissions()}
           {activeSection === 'api_docs' && <ApiDocsView />}
@@ -2381,6 +2469,9 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
             activeSection !== 'products' &&
             activeSection !== 'brands' &&
             activeSection !== 'offers' &&
+            activeSection !== 'orders' &&
+            activeSection !== 'disputes' &&
+            activeSection !== 'fleet' &&
             activeSection !== 'audit_log' &&
             activeSection !== 'roles_permissions' &&
             activeSection !== 'api_docs' &&

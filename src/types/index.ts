@@ -301,13 +301,19 @@ export interface OrderItem {
   }[];
   subtotalIQD: number;
   paymentMethod: 'cod' | 'credit' | 'wallet' | 'online';
-  status: 'pending' | 'approved' | 'assigned_driver' | 'out_for_delivery' | 'delivered' | 'cancelled';
+  status: 'pending' | 'approved' | 'assigned_driver' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'disputed';
   deliveryType: string;
   assignedDriverId?: string;
   assignedDriverName?: string;
   deliveryPin: string;
+  paidAt?: string;
+  deliveredAt?: string;
   createdAt: string;
   notes?: string;
+  adminFlags?: {
+    forcedDelivery?: boolean;
+    cancelledByAdmin?: boolean;
+  };
 }
 
 export type VanModuleSection =

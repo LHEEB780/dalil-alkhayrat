@@ -352,6 +352,50 @@ export interface TranslationDictionary {
   adminCatQualityScoreLabel: string;
   adminCatMissingFieldsTitle: string;
   adminCatOffersCompareTitle: string;
+  adminOrdTitle: string;
+  adminOrdSubtitle: string;
+  adminOrdSearchPlaceholder: string;
+  adminOrdExportCsv: string;
+  adminOrdTabStuck: string;
+  adminOrdStuckBadge: string;
+  adminOrdForcedDeliveryBadge: string;
+  adminOrdCancelledAdminBadge: string;
+  adminOrdCancelWarningCredit: string;
+  adminOrdCancelWarningCod: string;
+  adminOrdTimelineTitle: string;
+  adminOrdLedgerTitle: string;
+  adminOrdSiblingsTitle: string;
+  adminOrdItemsTitle: string;
+  adminOrdNotesTitle: string;
+  adminOrdActionApprove: string;
+  adminOrdActionAssignDriver: string;
+  adminOrdActionDispatch: string;
+  adminOrdActionRevertApproved: string;
+  adminOrdActionRevertAssigned: string;
+  adminOrdActionForceDeliver: string;
+  adminOrdActionCancel: string;
+  adminOrdOpenDisputeBtn: string;
+  adminOrdEmpty: string;
+  adminDispTitle: string;
+  adminDispSubtitle: string;
+  adminDispNewBtn: string;
+  adminDispTabAll: string;
+  adminDispTabOpen: string;
+  adminDispTabUnderReview: string;
+  adminDispTabResolved: string;
+  adminDispTabRejected: string;
+  adminDispReviewBtn: string;
+  adminDispResolveBtn: string;
+  adminDispResolveModalTitle: string;
+  adminDispRestockLabel: string;
+  adminDispEmpty: string;
+  adminLogTitle: string;
+  adminLogSubtitle: string;
+  adminLogAlertSuspendedTitle: string;
+  adminLogAlertLowStockTitle: string;
+  adminLogDriversTab: string;
+  adminLogRequestsTab: string;
+  adminLogEmpty: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -708,7 +752,51 @@ export const translations: Record<Language, TranslationDictionary> = {
     adminCatLowStockBadge: 'مخزون منخفض',
     adminCatQualityScoreLabel: 'نسبة الجودة',
     adminCatMissingFieldsTitle: 'الحقول الناقصة لتحسين جودة المنتج',
-    adminCatOffersCompareTitle: 'مقارنة عروض الموردين على هذا الباركود'
+    adminCatOffersCompareTitle: 'مقارنة عروض الموردين على هذا الباركود',
+    adminOrdTitle: 'إدارة الطلبات الفرعية وتتبع التنفيذ',
+    adminOrdSubtitle: 'مراقبة الطلبات، كشف الحالات العالقة، وتنفيذ الانتقالات والإلغاءات الموثقة',
+    adminOrdSearchPlaceholder: 'ابحث برقم الطلب، الطلب الأب، المتجر، المورد أو السائق...',
+    adminOrdExportCsv: 'تصدير CSV',
+    adminOrdTabStuck: 'الطلبات العالقة',
+    adminOrdStuckBadge: 'طلب عالق',
+    adminOrdForcedDeliveryBadge: 'تسليم إداري قسري',
+    adminOrdCancelledAdminBadge: 'ملغي إدارياً',
+    adminOrdCancelWarningCredit: 'تنبيه مالي ومخزني: سيُعاد مخزون المورد لجميع الأصناف، وسيُعكس قيد الفاتورة في دفتر الأستاذ بقيد عكسي لتحديث الرصيد الائتماني.',
+    adminOrdCancelWarningCod: 'تنبيه مخزني: سيُعاد مخزون المورد لجميع الأصناف تلقائياً وتُغلق الطلبية كملغاة.',
+    adminOrdTimelineTitle: 'الخط الزمني لحالات الطلب',
+    adminOrdLedgerTitle: 'القيود المالية والحساب الائتماني',
+    adminOrdSiblingsTitle: 'الطلبات الشقيقة في نفس الطلب الأب',
+    adminOrdItemsTitle: 'تفاصيل الأصناف والكميات',
+    adminOrdNotesTitle: 'الملاحظات الإدارية الداخلية',
+    adminOrdActionApprove: 'اعتماد الطلب',
+    adminOrdActionAssignDriver: 'تعيين / تعديل السائق',
+    adminOrdActionDispatch: 'إخراج للتوصيل',
+    adminOrdActionRevertApproved: 'إعادة إلى مقبول',
+    adminOrdActionRevertAssigned: 'إعادة إلى مسند لسائق',
+    adminOrdActionForceDeliver: 'تأكيد تسليم إداري (بدون PIN)',
+    adminOrdActionCancel: 'إلغاء الطلب وإعادة المخزون',
+    adminOrdOpenDisputeBtn: 'فتح نزاع على الطلب',
+    adminOrdEmpty: 'لا توجد طلبات مطابقة للفلاتر الحالية',
+    adminDispTitle: 'إدارة النزاعات والمرتجعات',
+    adminDispSubtitle: 'فحص الشكاوى، تسوية الاستردادات والخصومات الآجلة، وتوثيق قرارات التحكيم',
+    adminDispNewBtn: 'فتح نزاع جديد',
+    adminDispTabAll: 'الكل',
+    adminDispTabOpen: 'مفتوحة',
+    adminDispTabUnderReview: 'قيد المراجعة',
+    adminDispTabResolved: 'محلولة',
+    adminDispTabRejected: 'مرفوضة',
+    adminDispReviewBtn: 'تحويل للمراجعة',
+    adminDispResolveBtn: 'إصدار قرار التسوية',
+    adminDispResolveModalTitle: 'قرار تسوية النزاع',
+    adminDispRestockLabel: 'إعادة الكميات إلى مخزون المورد (restockToSupplier)',
+    adminDispEmpty: 'لا توجد نزاعات مطابقة لمعايير البحث',
+    adminLogTitle: 'اللوجستيات وأسطول التوصيل',
+    adminLogSubtitle: 'متابعة السائقين الميدانيين، العهدة النقدية، حمولة الفانات وطلبات التحميل',
+    adminLogAlertSuspendedTitle: 'تنبيه حرج: سائقون موقوفون لديهم طلبات نشطة',
+    adminLogAlertLowStockTitle: 'تنبيه مخزون الفان: مركبات نشطة بمخزون منخفض (≤ 20 وحدة)',
+    adminLogDriversTab: 'أسطول السائقين',
+    adminLogRequestsTab: 'طلبات تحميل الفان',
+    adminLogEmpty: 'لا توجد بيانات لوجستية للعرض'
   },
   en: {
     // Brand & General
@@ -1063,7 +1151,51 @@ export const translations: Record<Language, TranslationDictionary> = {
     adminCatLowStockBadge: 'Low Stock',
     adminCatQualityScoreLabel: 'Quality Score',
     adminCatMissingFieldsTitle: 'Missing Fields to Improve Quality',
-    adminCatOffersCompareTitle: 'Supplier Offers Comparison for Barcode'
+    adminCatOffersCompareTitle: 'Supplier Offers Comparison for Barcode',
+    adminOrdTitle: 'Orders & Execution Oversight',
+    adminOrdSubtitle: 'Track split sub-orders, detect stuck shipments, and apply audited lifecycle transitions',
+    adminOrdSearchPlaceholder: 'Search by Order ID, Parent ID, store, supplier, or driver...',
+    adminOrdExportCsv: 'Export CSV',
+    adminOrdTabStuck: 'Stuck Orders',
+    adminOrdStuckBadge: 'Stuck',
+    adminOrdForcedDeliveryBadge: 'Admin Forced Delivery',
+    adminOrdCancelledAdminBadge: 'Cancelled by Admin',
+    adminOrdCancelWarningCredit: 'Financial & Stock Impact: Supplier stock will be restored for all items and the active INVOICE ledger entry will be reversed via an offset REVERSAL entry.',
+    adminOrdCancelWarningCod: 'Stock Impact: Supplier stock will be restored automatically for all items and the sub-order will be marked cancelled.',
+    adminOrdTimelineTitle: 'Status Lifecycle Timeline',
+    adminOrdLedgerTitle: 'Ledger Entries & Credit Account',
+    adminOrdSiblingsTitle: 'Sibling Sub-Orders in Same Parent Order',
+    adminOrdItemsTitle: 'Line Items Breakdown',
+    adminOrdNotesTitle: 'Internal Admin Notes',
+    adminOrdActionApprove: 'Approve Order',
+    adminOrdActionAssignDriver: 'Assign / Update Driver',
+    adminOrdActionDispatch: 'Dispatch Out for Delivery',
+    adminOrdActionRevertApproved: 'Revert to Approved',
+    adminOrdActionRevertAssigned: 'Revert to Assigned Driver',
+    adminOrdActionForceDeliver: 'Force Deliver (Bypass PIN)',
+    adminOrdActionCancel: 'Cancel Order & Restore Stock',
+    adminOrdOpenDisputeBtn: 'Open Dispute',
+    adminOrdEmpty: 'No sub-orders match the selected filters',
+    adminDispTitle: 'Disputes & Claims Resolution',
+    adminDispSubtitle: 'Investigate claims, issue credit notes or full refunds, and log arbitration decisions',
+    adminDispNewBtn: 'Open New Dispute',
+    adminDispTabAll: 'All',
+    adminDispTabOpen: 'Open',
+    adminDispTabUnderReview: 'Under Review',
+    adminDispTabResolved: 'Resolved',
+    adminDispTabRejected: 'Rejected',
+    adminDispReviewBtn: 'Start Review',
+    adminDispResolveBtn: 'Resolve Dispute',
+    adminDispResolveModalTitle: 'Dispute Resolution Decision',
+    adminDispRestockLabel: 'Return goods to supplier stock (restockToSupplier)',
+    adminDispEmpty: 'No disputes match the current filters',
+    adminLogTitle: 'Fleet & Logistics Oversight',
+    adminLogSubtitle: 'Monitor active field drivers, cash custody, van inventory levels, and load requests',
+    adminLogAlertSuspendedTitle: 'Critical Alert: Suspended drivers with active assigned orders',
+    adminLogAlertLowStockTitle: 'Low Van Stock Alert: Active drivers with <= 20 remaining units',
+    adminLogDriversTab: 'Fleet Drivers',
+    adminLogRequestsTab: 'Van Load Requests',
+    adminLogEmpty: 'No logistics records found'
   }
 };
 
