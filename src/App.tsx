@@ -27,6 +27,7 @@ import { CategoryBranchesView } from './views/CategoryBranchesView.tsx';
 import { AllBrandsView } from './views/AllBrandsView.tsx';
 import { ApiDocsView } from './views/ApiDocsView.tsx';
 import { AdminConsoleView } from './views/admin/AdminConsoleView.tsx';
+import { DeliveryPartnerPortalView } from './views/DeliveryPartnerPortalView.tsx';
 
 import {
   ProductWithOffers,
@@ -684,6 +685,17 @@ export default function App() {
         onLoginAsRole={handleLoginAsRole} 
         language={language}
         onLanguageChange={setLanguage}
+      />
+    );
+  }
+
+  if (userSession.role === 'delivery_partner') {
+    return (
+      <DeliveryPartnerPortalView
+        language={language}
+        currency={currency}
+        onLanguageChange={setLanguage}
+        onLogout={handleLogout}
       />
     );
   }

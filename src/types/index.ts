@@ -1,5 +1,10 @@
 import type { SupplierOrderRules } from '../../shared/orderRules.ts';
 import type {
+  DeliveryJob,
+  DeliveryJobEndpoint,
+  DeliveryJobFailureReasonCode,
+  DeliveryJobHistoryEntry,
+  DeliveryJobStatus,
   DeliveryPartnerType,
   DeliveryPlatformSettings,
   DeliveryProviderType,
@@ -10,6 +15,11 @@ import type {
   VehicleTemperatureType
 } from '../../shared/deliveryRules.ts';
 export type {
+  DeliveryJob,
+  DeliveryJobEndpoint,
+  DeliveryJobFailureReasonCode,
+  DeliveryJobHistoryEntry,
+  DeliveryJobStatus,
   DeliveryPartnerType,
   DeliveryPlatformSettings,
   DeliveryProviderType,
@@ -21,7 +31,15 @@ export type {
 };
 export type { SupplierOrderRules };
 
-export type Role = 'store' | 'cashier' | 'accountant' | 'supplier' | 'driver' | 'admin' | 'customer';
+export type Role =
+  | 'store'
+  | 'cashier'
+  | 'accountant'
+  | 'supplier'
+  | 'driver'
+  | 'admin'
+  | 'customer'
+  | 'delivery_partner';
 
 export type StoreStaffRole = 'cashier' | 'accountant';
 
@@ -351,6 +369,8 @@ export interface DeliveryDriver {
   statusChangedAt?: string;
   statusChangedBy?: string;
   isAvailable: boolean;
+  availability?: 'online' | 'offline';
+  cashOnHandIQD?: number;
   adminNotes?: AdminInternalNote[];
   createdAt: string;
 }
@@ -395,6 +415,8 @@ export interface OrderItem {
   paymentMethod: 'cod' | 'credit' | 'wallet' | 'online';
   status: 'pending' | 'approved' | 'assigned_driver' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'disputed';
   deliveryType: string;
+  deliveryZoneId?: string;
+  deliveryJobId?: string;
   assignedDriverId?: string;
   assignedDriverName?: string;
   deliveryPin: string;

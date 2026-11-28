@@ -67,7 +67,11 @@ import {
   DeliveryRateRule,
   DeliveryPlatformSettings,
   SupplierDeliverySettings,
-  VehicleTemperatureType
+  VehicleTemperatureType,
+  DeliveryJob,
+  DeliveryJobStatus,
+  DeliveryJobFailureReasonCode,
+  DeliveryJobHistoryEntry
 } from './types.ts';
 import {
   validateBarcode,
@@ -122,7 +126,8 @@ import {
   initialDeliveryVehicles,
   initialDeliveryDrivers,
   initialDeliveryPlatformSettings,
-  initialDeliveryRateRules
+  initialDeliveryRateRules,
+  initialDeliveryJobs
 } from './seed.ts';
 import {
   applyProductFilters,
@@ -197,6 +202,7 @@ class AppDataStore {
   deliveryPlatformSettings: DeliveryPlatformSettings = JSON.parse(
     JSON.stringify(initialDeliveryPlatformSettings)
   );
+  deliveryJobs: DeliveryJob[] = JSON.parse(JSON.stringify(initialDeliveryJobs));
   private partnerRegistrationRateMap: Map<string, number[]> = new Map();
 
   constructor() {
@@ -251,6 +257,24 @@ class AppDataStore {
     this.ensureProductBrandLinks();
     this.ensureSubOrderHistories();
     this.ensureSupplierDeliveryDefaults();
+    this.ensureDeliveryDriverDefaults();
+  }
+
+  private ensureDeliveryDriverDefaults() {
+    for (const d of this.deliveryDrivers) {
+      if (!d.availability) {
+        d.availability = d.isAvailable === false ? 'offline' : 'online';
+      }
+      if (typeof d.cashOnHandIQD !== 'number') {
+        d.cashOnHandIQD = 0;
+      }
+    }
+    if (typeof this.deliveryPlatformSettings.staleOpenJobMinutes !== 'number') {
+      this.deliveryPlatformSettings.staleOpenJobMinutes = 30;
+    }
+    if (typeof this.deliveryPlatformSettings.maxActiveJobsPerDriver !== 'number') {
+      this.deliveryPlatformSettings.maxActiveJobsPerDriver = 3;
+    }
   }
   auditLogs: AdminAuditLog[] = [
     {
@@ -1149,6 +1173,11 @@ class AppDataStore {
       // Generate 4-digit PIN for delivery proof
       const pin = Math.floor(1000 + Math.random() * 9000).toString();
 
+      const supplier = this.suppliers.find(s => s.id === group.supplierId);
+      const usesPlatformDelivery =
+        supplier?.deliverySettings?.hasOwnFleet === false &&
+        supplier?.deliverySettings?.allowPlatformDelivery === true;
+
       const nowOrderIso = new Date().toISOString();
       const subOrder: SubOrder = {
         id: `SUB-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
@@ -1164,7 +1193,8 @@ class AppDataStore {
         subtotalIQD: group.subtotalIQD,
         paymentMethod: params.paymentMethod,
         status: 'pending',
-        deliveryType: 'supplier_fleet',
+        deliveryType: usesPlatformDelivery ? 'platform_driver' : 'supplier_fleet',
+        deliveryZoneId: params.deliveryZoneId,
         deliveryPin: pin,
         createdAt: nowOrderIso,
         notes: params.notes,
@@ -3198,7 +3228,10 @@ class AppDataStore {
         | 'catalog_price_anomaly'
         | 'pending_delivery_partner'
         | 'expiring_vehicle_doc'
-        | 'supplier_no_delivery_option';
+        | 'supplier_no_delivery_option'
+        | 'stale_delivery_job'
+        | 'failed_delivery_job'
+        | 'platform_order_missing_job';
       severity: 'high' | 'medium';
       titleAr: string;
       titleEn: string;
@@ -3394,6 +3427,65 @@ class AppDataStore {
       });
     }
 
+    // Platform Dispatch Queue Alerts (Phase D2)
+    const staleThresholdMin = this.deliveryPlatformSettings.staleOpenJobMinutes ?? 30;
+    const staleOpenJobs = this.deliveryJobs.filter((j) => {
+      if (j.status !== 'open') return false;
+      const ageMin = (Date.now() - Date.parse(j.createdAt)) / 60000;
+      return Number.isFinite(ageMin) && ageMin > staleThresholdMin;
+    });
+    if (staleOpenJobs.length > 0) {
+      needsAttention.push({
+        id: 'att_dispatch_stale_open',
+        type: 'stale_delivery_job',
+        severity: 'high',
+        titleAr: `${staleOpenJobs.length} مهمة توصيل مفتوحة متأخرة لأكثر من ${staleThresholdMin} دقيقة`,
+        titleEn: `${staleOpenJobs.length} open delivery job(s) waiting > ${staleThresholdMin} min`,
+        subtitleAr: staleOpenJobs.map((j) => `${j.subOrderId} (${j.dropoff.city})`).slice(0, 2).join(' • '),
+        subtitleEn: staleOpenJobs.map((j) => `${j.subOrderId} (${j.dropoff.city})`).slice(0, 2).join(' • '),
+        targetSection: 'dispatch_board',
+        entityId: staleOpenJobs[0].id
+      });
+    }
+
+    const failedJobsList = this.deliveryJobs.filter((j) => {
+      if (j.status !== 'failed') return false;
+      const linkedOrder = this.subOrders.find((o) => o.id === j.subOrderId);
+      return linkedOrder && !['cancelled', 'delivered'].includes(linkedOrder.status);
+    });
+    if (failedJobsList.length > 0) {
+      needsAttention.push({
+        id: 'att_dispatch_failed',
+        type: 'failed_delivery_job',
+        severity: 'high',
+        titleAr: `${failedJobsList.length} مهمة توصيل فاشلة تتطلب إعادة التوزيع`,
+        titleEn: `${failedJobsList.length} failed delivery job(s) require reassignment`,
+        subtitleAr: failedJobsList.map((j) => `${j.subOrderId} — ${j.failure?.reasonCode || ''}`).slice(0, 2).join(' • '),
+        subtitleEn: failedJobsList.map((j) => `${j.subOrderId} — ${j.failure?.reasonCode || ''}`).slice(0, 2).join(' • '),
+        targetSection: 'dispatch_board',
+        entityId: failedJobsList[0].id
+      });
+    }
+
+    const platformOrdersMissingJob = this.subOrders.filter((o) => {
+      if (o.deliveryType !== 'platform_driver' || o.status !== 'approved') return false;
+      const job = o.deliveryJobId ? this.deliveryJobs.find((j) => j.id === o.deliveryJobId) : undefined;
+      return !job || job.status === 'cancelled';
+    });
+    if (platformOrdersMissingJob.length > 0) {
+      needsAttention.push({
+        id: 'att_dispatch_missing_job',
+        type: 'platform_order_missing_job',
+        severity: 'medium',
+        titleAr: `${platformOrdersMissingJob.length} طلب منصة معتمد بدون مهمة توصيل نشطة`,
+        titleEn: `${platformOrdersMissingJob.length} approved platform order(s) missing active delivery job`,
+        subtitleAr: platformOrdersMissingJob.map((o) => o.id).slice(0, 2).join(' • '),
+        subtitleEn: platformOrdersMissingJob.map((o) => o.id).slice(0, 2).join(' • '),
+        targetSection: 'dispatch_board',
+        entityId: platformOrdersMissingJob[0].id
+      });
+    }
+
     return {
       range,
       kpis: {
@@ -3421,7 +3513,10 @@ class AppDataStore {
         productsWithoutOffersCount: qualitySummary.withoutOffersCount,
         priceAnomalyOffersCount: anomalyOffers.length,
         pendingDeliveryPartnersCount: pendingPartnersList.length,
-        expiringVehicleDocsCount: expiringVehiclesList.length
+        expiringVehicleDocsCount: expiringVehiclesList.length,
+        openDeliveryJobsCount: this.deliveryJobs.filter((j) => j.status === 'open').length,
+        staleDeliveryJobsCount: staleOpenJobs.length,
+        failedDeliveryJobsCount: failedJobsList.length
       },
       dailySeries,
       statusDistribution,
@@ -5653,7 +5748,7 @@ class AppDataStore {
     id: string;
     toStatus: OrderStatus;
     actor: {
-      actorType: 'system' | 'admin' | 'supplier' | 'driver' | 'store';
+      actorType: 'system' | 'admin' | 'supplier' | 'driver' | 'store' | 'delivery_partner';
       actorId?: string;
       actorName?: string;
     };
@@ -5689,15 +5784,40 @@ class AppDataStore {
       throw err;
     }
 
-    // Validate driver when assigning or dispatching
-    let resolvedDriver: DriverProfile | undefined;
-    if (params.driverId) {
-      resolvedDriver = this.assertDriverOperable(params.driverId);
-    } else if (
-      (params.toStatus === 'assigned_driver' || params.toStatus === 'out_for_delivery') &&
-      order.assignedDriverId
+    // Platform Delivery Ownership Guard: Suppliers cannot assign their van drivers or dispatch platform orders
+    if (
+      order.deliveryType === 'platform_driver' &&
+      params.actor.actorType === 'supplier' &&
+      (params.toStatus === 'assigned_driver' ||
+        params.toStatus === 'out_for_delivery' ||
+        Boolean(params.driverId))
     ) {
-      this.assertDriverOperable(order.assignedDriverId);
+      const err: any = new Error('توصيل هذا الطلب تتولاه شبكة المنصة');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // Validate driver when assigning or dispatching
+    let resolvedVanDriver: DriverProfile | undefined;
+    let resolvedPlatformDriver: DeliveryDriver | undefined;
+    if (order.deliveryType === 'platform_driver') {
+      if (params.driverId) {
+        resolvedPlatformDriver = this.assertDeliveryDriverOperable(params.driverId);
+      } else if (
+        (params.toStatus === 'assigned_driver' || params.toStatus === 'out_for_delivery') &&
+        order.assignedDriverId
+      ) {
+        resolvedPlatformDriver = this.assertDeliveryDriverOperable(order.assignedDriverId);
+      }
+    } else {
+      if (params.driverId) {
+        resolvedVanDriver = this.assertDriverOperable(params.driverId);
+      } else if (
+        (params.toStatus === 'assigned_driver' || params.toStatus === 'out_for_delivery') &&
+        order.assignedDriverId
+      ) {
+        this.assertDriverOperable(order.assignedDriverId);
+      }
     }
 
     // Delivery PIN verification (unless force delivery by admin from out_for_delivery OR resolving dispute back to delivered)
@@ -5707,6 +5827,27 @@ class AppDataStore {
         const err: any = new Error(
           'رمز التحقق من الاستلام (PIN) غير صحيح! اطلب الرمز المكون من 4 أرقام من صاحب المتجر.'
         );
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    // Verify COD permission for partner drivers before mutating anything
+    if (
+      params.toStatus === 'delivered' &&
+      order.deliveryType === 'platform_driver' &&
+      order.paymentMethod === 'cod' &&
+      !order.paidAt
+    ) {
+      const targetDriverId = resolvedPlatformDriver?.id || order.assignedDriverId;
+      const targetDeliveryDriver = targetDriverId
+        ? this.deliveryDrivers.find((d) => d.id === targetDriverId)
+        : undefined;
+      if (
+        targetDeliveryDriver?.providerType === 'partner' &&
+        !this.deliveryPlatformSettings.codAllowedForPartners
+      ) {
+        const err: any = new Error('الدفع عند الاستلام (COD) غير مفعل لشركاء التوصيل حالياً');
         err.statusCode = 400;
         throw err;
       }
@@ -5742,10 +5883,16 @@ class AppDataStore {
       adminFlags: order.adminFlags ? { ...order.adminFlags } : null
     };
 
-    // Apply driver update if provided
-    if (resolvedDriver) {
-      order.assignedDriverId = resolvedDriver.id;
-      order.assignedDriverName = resolvedDriver.name;
+    // Apply driver update if provided, or clear when returning to approved
+    if (resolvedPlatformDriver) {
+      order.assignedDriverId = resolvedPlatformDriver.id;
+      order.assignedDriverName = resolvedPlatformDriver.name;
+    } else if (resolvedVanDriver) {
+      order.assignedDriverId = resolvedVanDriver.id;
+      order.assignedDriverName = resolvedVanDriver.name;
+    } else if (fromStatus === 'assigned_driver' && params.toStatus === 'approved') {
+      order.assignedDriverId = undefined;
+      order.assignedDriverName = undefined;
     }
 
     let noteDetails = params.extraHistoryNote || '';
@@ -5763,18 +5910,28 @@ class AppDataStore {
       }
       if (order.paymentMethod === 'cod' && !order.paidAt) {
         order.paidAt = nowIso;
-        const targetDriverId = resolvedDriver?.id || order.assignedDriverId;
-        const driver = targetDriverId ? this.drivers.find((d) => d.id === targetDriverId) : undefined;
-        if (driver) {
-          driver.currentCashCollectedIQD += order.subtotalIQD;
-          if (params.addCashToTodaySales) {
-            driver.todayCashSalesIQD = (driver.todayCashSalesIQD || 0) + order.subtotalIQD;
+        if (order.deliveryType === 'platform_driver') {
+          const targetDriverId = resolvedPlatformDriver?.id || order.assignedDriverId;
+          const deliveryDriver = targetDriverId
+            ? this.deliveryDrivers.find((d) => d.id === targetDriverId)
+            : undefined;
+          if (deliveryDriver) {
+            deliveryDriver.cashOnHandIQD = (deliveryDriver.cashOnHandIQD || 0) + order.subtotalIQD;
+          }
+        } else {
+          const targetDriverId = resolvedVanDriver?.id || order.assignedDriverId;
+          const driver = targetDriverId ? this.drivers.find((d) => d.id === targetDriverId) : undefined;
+          if (driver) {
+            driver.currentCashCollectedIQD += order.subtotalIQD;
+            if (params.addCashToTodaySales) {
+              driver.todayCashSalesIQD = (driver.todayCashSalesIQD || 0) + order.subtotalIQD;
+            }
           }
         }
       }
     }
 
-    // Apply cancellation side-effects atomically (stock + ledger reversal)
+    // Apply cancellation side-effects atomically (stock + ledger reversal + linked delivery job)
     if (params.toStatus === 'cancelled') {
       let restockedUnits = 0;
       if (shouldRestock) {
@@ -5802,6 +5959,22 @@ class AppDataStore {
         }
       }
 
+      if (order.deliveryJobId) {
+        const linkedJob = this.deliveryJobs.find((j) => j.id === order.deliveryJobId);
+        if (linkedJob && !['delivered', 'cancelled'].includes(linkedJob.status)) {
+          linkedJob.status = 'cancelled';
+          linkedJob.cancelledAt = nowIso;
+          linkedJob.history.push({
+            status: 'cancelled',
+            at: nowIso,
+            actorType: params.actor.actorType === 'admin' ? 'admin' : 'system',
+            actorId: params.actor.actorId,
+            actorName: params.actor.actorName || 'النظام',
+            note: trimmedReason || 'تم إلغاء المهمة تلقائياً بسبب إلغاء الطلبية'
+          });
+        }
+      }
+
       if (params.actor.actorType === 'admin') {
         order.adminFlags = { ...(order.adminFlags || {}), cancelledByAdmin: true };
       }
@@ -5820,19 +5993,39 @@ class AppDataStore {
     order.statusHistory.push({
       status: params.toStatus,
       at: nowIso,
-      actorType: params.actor.actorType,
+      actorType: params.actor.actorType === 'delivery_partner' ? 'driver' : params.actor.actorType,
       actorName:
         params.actor.actorName ||
         (params.actor.actorType === 'admin'
           ? 'المدير العام (Super Admin)'
           : params.actor.actorType === 'supplier'
           ? order.supplierName
-          : params.actor.actorType === 'driver'
-          ? order.assignedDriverName || 'السائق'
+          : params.actor.actorType === 'driver' || params.actor.actorType === 'delivery_partner'
+          ? order.assignedDriverName || 'سائق المنصة'
           : order.storeName),
       reason: trimmedReason || undefined,
       note: noteDetails || undefined
     });
+
+    // Auto-create DeliveryJob when supplier/admin approves a platform-delivery order
+    if (
+      params.toStatus === 'approved' &&
+      fromStatus === 'pending' &&
+      order.deliveryType === 'platform_driver'
+    ) {
+      const existingActiveJob = order.deliveryJobId
+        ? this.deliveryJobs.find(
+            (j) => j.id === order.deliveryJobId && !['cancelled', 'failed'].includes(j.status)
+          )
+        : undefined;
+      if (!existingActiveJob) {
+        this.createDeliveryJobForSubOrder(order, {
+          actorType: params.actor.actorType === 'admin' ? 'admin' : 'system',
+          actorId: params.actor.actorId,
+          actorName: params.actor.actorName || 'النظام'
+        });
+      }
+    }
 
     if (params.actor.actorType === 'admin') {
       const actionCode =
@@ -5840,7 +6033,7 @@ class AppDataStore {
           ? 'order.cancel'
           : params.force
           ? 'order.force_deliver'
-          : resolvedDriver && params.toStatus === 'assigned_driver'
+          : (resolvedVanDriver || resolvedPlatformDriver) && params.toStatus === 'assigned_driver'
           ? 'order.assign_driver'
           : 'order.transition_status';
 
@@ -7460,6 +7653,7 @@ class AppDataStore {
         platformEnabledCount: platformEnabledSuppliersCount,
         noOptionCount: suppliersWithNoOptionCount
       },
+      jobs: this.getAdminDispatchSummary(),
       expiringVehicles
     };
   }
@@ -8594,6 +8788,8 @@ class AppDataStore {
     freeDeliveryThresholdIQD?: number;
     partnerCommissionPercent?: number;
     codAllowedForPartners?: boolean;
+    staleOpenJobMinutes?: number;
+    maxActiveJobsPerDriver?: number;
     vehicleClassDefaults?: DeliveryPlatformSettings['vehicleClassDefaults'];
     reason: string;
     actor: { actorId: string; actorName: string };
@@ -8616,6 +8812,18 @@ class AppDataStore {
     }
     if (typeof params.codAllowedForPartners === 'boolean') {
       this.deliveryPlatformSettings.codAllowedForPartners = params.codAllowedForPartners;
+    }
+    if (params.staleOpenJobMinutes !== undefined) {
+      this.deliveryPlatformSettings.staleOpenJobMinutes = Math.max(
+        5,
+        Math.min(1440, Math.round(Number(params.staleOpenJobMinutes) || 30))
+      );
+    }
+    if (params.maxActiveJobsPerDriver !== undefined) {
+      this.deliveryPlatformSettings.maxActiveJobsPerDriver = Math.max(
+        1,
+        Math.min(20, Math.round(Number(params.maxActiveJobsPerDriver) || 3))
+      );
     }
     if (Array.isArray(params.vehicleClassDefaults) && params.vehicleClassDefaults.length > 0) {
       this.deliveryPlatformSettings.vehicleClassDefaults = params.vehicleClassDefaults;
@@ -8818,6 +9026,1548 @@ class AppDataStore {
       hasActivePlatformCoverage: hasActiveCoverage,
       quote: directQuote,
       supplierEvaluation
+    };
+  }
+
+  // ================= PHASE D2: DISPATCH BOARD & DELIVERY PARTNER PORTAL =================
+
+  private inferZoneForSubOrder(order: SubOrder): {
+    governorateId: string;
+    deliveryZoneId?: string;
+  } {
+    if (order.deliveryZoneId) {
+      const explicitZone = this.deliveryZones.find((z) => z.id === order.deliveryZoneId);
+      if (explicitZone) {
+        return {
+          governorateId: explicitZone.governorateId,
+          deliveryZoneId: explicitZone.id
+        };
+      }
+    }
+
+    const store = this.stores.find((s) => s.id === order.storeId);
+    const haystack = `${order.storeCity || ''} ${store?.city || ''} ${store?.district || ''} ${order.storeAddress || ''}`.toLowerCase();
+
+    if (haystack.includes('النجف') || haystack.includes('najaf')) {
+      const kufa = haystack.includes('كوفة') || haystack.includes('kufa');
+      const zone = this.deliveryZones.find(
+        (z) => z.id === (kufa ? 'zone_najaf_kufa' : 'zone_najaf_center')
+      );
+      return { governorateId: 'gov_najaf', deliveryZoneId: zone?.id };
+    }
+    if (haystack.includes('كربلاء') || haystack.includes('karbala')) {
+      const hindiya = haystack.includes('هندية') || haystack.includes('hindiya');
+      const zone = this.deliveryZones.find(
+        (z) => z.id === (hindiya ? 'zone_karbala_hindiya' : 'zone_karbala_center')
+      );
+      return { governorateId: 'gov_karbala', deliveryZoneId: zone?.id };
+    }
+    if (haystack.includes('بابل') || haystack.includes('الحلة') || haystack.includes('babil')) {
+      const musayyib = haystack.includes('مسيب') || haystack.includes('musayyib');
+      const zone = this.deliveryZones.find(
+        (z) => z.id === (musayyib ? 'zone_babil_musayyib' : 'zone_babil_hilla')
+      );
+      return { governorateId: 'gov_babil', deliveryZoneId: zone?.id };
+    }
+    if (haystack.includes('بغداد') || haystack.includes('baghdad')) {
+      const isKarkh =
+        haystack.includes('منصور') ||
+        haystack.includes('كرخ') ||
+        haystack.includes('كاظم') ||
+        haystack.includes('شعلة');
+      const zone = this.deliveryZones.find(
+        (z) => z.id === (isKarkh ? 'zone_baghdad_karkh' : 'zone_baghdad_rusafa')
+      );
+      return { governorateId: 'gov_baghdad', deliveryZoneId: zone?.id };
+    }
+
+    const fallbackZone = this.deliveryZones[0];
+    return {
+      governorateId: fallbackZone?.governorateId || 'gov_baghdad',
+      deliveryZoneId: fallbackZone?.id
+    };
+  }
+
+  private computeJobLoadAndPayout(
+    order: SubOrder,
+    governorateId: string,
+    deliveryZoneId?: string
+  ): {
+    unitsCount: number;
+    requiredTemperature: VehicleTemperatureType;
+    estimatedPayoutIQD: number;
+  } {
+    let unitsCount = 0;
+    const storageTypes: Array<ProductStorageKind | undefined> = [];
+    for (const item of order.items || []) {
+      const qty = Math.max(1, Math.round(Number(item.quantity) || 1));
+      unitsCount += qty;
+      const product = this.products.find((p) => p.barcode === item.barcode);
+      storageTypes.push(product?.storageType || 'ambient');
+    }
+    if (unitsCount <= 0) unitsCount = 1;
+
+    const requiredTemperature = getRequiredTemperatureForStorageTypes(storageTypes);
+    const supplier = this.suppliers.find((s) => s.id === order.supplierId);
+    const quote = calculateDeliveryFee({
+      zone: { governorateId, deliveryZoneId },
+      units: unitsCount,
+      requiredTemperature,
+      orderValueIQD: order.subtotalIQD,
+      rules: this.deliveryRateRules,
+      settings: this.deliveryPlatformSettings,
+      supplierFreeThresholdIQD: supplier?.deliverySettings?.freeDeliveryThresholdIQD
+    });
+
+    const grossFee = quote?.breakdown?.rawTotalFeeIQD ?? 10000;
+    const commissionPct = Math.max(
+      0,
+      Math.min(100, this.deliveryPlatformSettings.partnerCommissionPercent || 0)
+    );
+    const estimatedPayoutIQD = Math.max(0, Math.round(grossFee * (1 - commissionPct / 100)));
+
+    return { unitsCount, requiredTemperature, estimatedPayoutIQD };
+  }
+
+  createDeliveryJobForSubOrder(
+    order: SubOrder,
+    actor?: {
+      actorType: 'system' | 'admin';
+      actorId?: string;
+      actorName?: string;
+      note?: string;
+    },
+    extra?: { preserveAttempts?: number; priorHistory?: DeliveryJobHistoryEntry[] }
+  ): DeliveryJob {
+    const supplier = this.suppliers.find((s) => s.id === order.supplierId);
+    const store = this.stores.find((s) => s.id === order.storeId);
+    const zoneInfo = this.inferZoneForSubOrder(order);
+    const { unitsCount, requiredTemperature, estimatedPayoutIQD } = this.computeJobLoadAndPayout(
+      order,
+      zoneInfo.governorateId,
+      zoneInfo.deliveryZoneId
+    );
+    const nowIso = new Date().toISOString();
+    const pickupPin = Math.floor(1000 + Math.random() * 9000).toString();
+
+    const history: DeliveryJobHistoryEntry[] = extra?.priorHistory
+      ? [...extra.priorHistory]
+      : [];
+    history.push({
+      status: 'open',
+      at: nowIso,
+      actorType: actor?.actorType || 'system',
+      actorId: actor?.actorId,
+      actorName: actor?.actorName || 'النظام',
+      note:
+        actor?.note ||
+        `فتح مهمة توصيل للطلب (${order.id}) في ${zoneInfo.deliveryZoneId || zoneInfo.governorateId}`
+    });
+
+    const job: DeliveryJob = {
+      id: `djob_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      subOrderId: order.id,
+      supplierId: order.supplierId,
+      storeId: order.storeId,
+      governorateId: zoneInfo.governorateId,
+      deliveryZoneId: zoneInfo.deliveryZoneId,
+      pickup: {
+        name: supplier?.companyName || order.supplierName,
+        phone: supplier?.phone || '',
+        city: supplier?.city || '',
+        address: supplier?.address || supplier?.city || ''
+      },
+      dropoff: {
+        name: store?.name || order.storeName,
+        phone: store?.phone || order.storePhone,
+        city: store?.city || order.storeCity,
+        address: [store?.district, store?.address || order.storeAddress].filter(Boolean).join(' - ')
+      },
+      unitsCount,
+      requiredTemperature,
+      paymentMethod: order.paymentMethod,
+      orderSubtotalIQD: order.subtotalIQD,
+      estimatedPayoutIQD,
+      status: 'open',
+      pickupPin,
+      attempts: extra?.preserveAttempts ?? 0,
+      createdAt: nowIso,
+      history
+    };
+
+    if (zoneInfo.deliveryZoneId) {
+      order.deliveryZoneId = zoneInfo.deliveryZoneId;
+    }
+    order.deliveryJobId = job.id;
+    this.deliveryJobs.unshift(job);
+    return job;
+  }
+
+  private getDriverActiveJobsCount(driverId: string, excludeJobId?: string): number {
+    const activeStatuses: DeliveryJobStatus[] = [
+      'assigned',
+      'accepted',
+      'at_pickup',
+      'picked_up',
+      'in_transit',
+      'at_dropoff'
+    ];
+    return this.deliveryJobs.filter(
+      (j) =>
+        j.id !== excludeJobId &&
+        j.assignedDriverId === driverId &&
+        activeStatuses.includes(j.status)
+    ).length;
+  }
+
+  evaluateDriverVehicleForJob(
+    job: DeliveryJob,
+    driver: DeliveryDriver,
+    vehicle?: DeliveryVehicle
+  ): {
+    eligible: boolean;
+    reasonsAr: string[];
+    reasonsEn: string[];
+    activeJobsCount: number;
+    maxActiveJobs: number;
+  } {
+    const reasonsAr: string[] = [];
+    const reasonsEn: string[] = [];
+    const maxActiveJobs = this.deliveryPlatformSettings.maxActiveJobsPerDriver ?? 3;
+    const activeJobsCount = this.getDriverActiveJobsCount(driver.id, job.id);
+
+    if (driver.accountStatus !== 'active') {
+      reasonsAr.push(`حالة السائق (${driver.accountStatus}) غير نشطة`);
+      reasonsEn.push(`Driver account status is ${driver.accountStatus}`);
+    }
+
+    const partner =
+      driver.providerType === 'partner' && driver.partnerId
+        ? this.deliveryPartners.find((p) => p.id === driver.partnerId)
+        : undefined;
+    if (driver.providerType === 'partner') {
+      if (!partner) {
+        reasonsAr.push('الشريك المرتبط بالسائق غير موجود');
+        reasonsEn.push('Linked partner not found');
+      } else if (partner.accountStatus !== 'active') {
+        reasonsAr.push(`حساب الشريك (${partner.name}) غير نشط (${partner.accountStatus})`);
+        reasonsEn.push(`Partner status is ${partner.accountStatus}`);
+      }
+    }
+
+    if ((driver.availability || 'online') !== 'online') {
+      reasonsAr.push('السائق غير متصل حالياً (Offline)');
+      reasonsEn.push('Driver is currently offline');
+    }
+
+    if (activeJobsCount >= maxActiveJobs) {
+      reasonsAr.push(`وصل السائق للحد الأقصى من المهام النشطة (${activeJobsCount}/${maxActiveJobs})`);
+      reasonsEn.push(`Driver reached max active jobs (${activeJobsCount}/${maxActiveJobs})`);
+    }
+
+    if (!vehicle) {
+      reasonsAr.push('لا توجد مركبة مخصصة لهذا السائق');
+      reasonsEn.push('No vehicle selected or assigned for this driver');
+    } else {
+      if (vehicle.status !== 'active') {
+        reasonsAr.push(`المركبة (${vehicle.plateNumber}) غير نشطة (${vehicle.status})`);
+        reasonsEn.push(`Vehicle ${vehicle.plateNumber} status is ${vehicle.status}`);
+      }
+      if (driver.providerType === 'partner' && vehicle.partnerId !== driver.partnerId) {
+        reasonsAr.push('المركبة لا تعود لنفس شريك التوصيل');
+        reasonsEn.push('Vehicle does not belong to the partner');
+      }
+      if (driver.providerType === 'platform' && vehicle.ownerType !== 'platform') {
+        reasonsAr.push('سائق المنصة يجب أن يستخدم مركبة تابعة لأسطول المنصة');
+        reasonsEn.push('Platform driver must use a platform-owned vehicle');
+      }
+      if ((vehicle.capacityUnits || 0) < job.unitsCount) {
+        reasonsAr.push(
+          `سعة المركبة (${vehicle.capacityUnits} وحدة) أقل من حمولة المهمة (${job.unitsCount} وحدة)`
+        );
+        reasonsEn.push(
+          `Vehicle capacity (${vehicle.capacityUnits}) is below required (${job.unitsCount} units)`
+        );
+      }
+      if (
+        !isVehicleSuitable(vehicle, {
+          units: job.unitsCount,
+          requiredTemperature: job.requiredTemperature,
+          requireActiveStatus: false
+        }) &&
+        (vehicle.capacityUnits || 0) >= job.unitsCount
+      ) {
+        reasonsAr.push(
+          `المركبة لا تدعم سلسلة التبريد المطلوبة (${job.requiredTemperature})`
+        );
+        reasonsEn.push(
+          `Vehicle does not support required temperature (${job.requiredTemperature})`
+        );
+      }
+    }
+
+    // Coverage check (Zone / Governorate)
+    const zoneMatch = job.deliveryZoneId
+      ? driver.serviceZoneIds.includes(job.deliveryZoneId)
+      : driver.governorateId === job.governorateId;
+    const partnerZoneMatch = partner
+      ? job.deliveryZoneId
+        ? partner.serviceZoneIds.includes(job.deliveryZoneId)
+        : partner.governorateId === job.governorateId
+      : true;
+    if (!zoneMatch || !partnerZoneMatch) {
+      reasonsAr.push('المهمة خارج نطاق المناطق الجغرافية المفعلة للسائق/الشريك');
+      reasonsEn.push('Job zone is outside driver/partner coverage areas');
+    }
+
+    // COD policy check for partner drivers
+    if (
+      job.paymentMethod === 'cod' &&
+      driver.providerType === 'partner' &&
+      !this.deliveryPlatformSettings.codAllowedForPartners
+    ) {
+      reasonsAr.push('الدفع عند الاستلام (COD) غير مفعل لشركاء التوصيل حسب إعدادات المنصة');
+      reasonsEn.push('COD delivery is disabled for partners in platform settings');
+    }
+
+    return {
+      eligible: reasonsAr.length === 0,
+      reasonsAr,
+      reasonsEn,
+      activeJobsCount,
+      maxActiveJobs
+    };
+  }
+
+  private enrichDeliveryJob(job: DeliveryJob, opts?: { sanitizeForPortal?: boolean }) {
+    const gov = this.governorates.find((g) => g.id === job.governorateId);
+    const zone = job.deliveryZoneId
+      ? this.deliveryZones.find((z) => z.id === job.deliveryZoneId)
+      : undefined;
+    const partner = job.assignedPartnerId
+      ? this.deliveryPartners.find((p) => p.id === job.assignedPartnerId)
+      : undefined;
+    const driver = job.assignedDriverId
+      ? this.deliveryDrivers.find((d) => d.id === job.assignedDriverId)
+      : undefined;
+    const vehicle = job.assignedVehicleId
+      ? this.deliveryVehicles.find((v) => v.id === job.assignedVehicleId)
+      : undefined;
+    const subOrder = this.subOrders.find((o) => o.id === job.subOrderId);
+
+    const staleMinutes = this.deliveryPlatformSettings.staleOpenJobMinutes ?? 30;
+    const minutesOpen = Math.max(
+      0,
+      Math.round((Date.now() - Date.parse(job.createdAt)) / 60000)
+    );
+    const isStaleOpen = job.status === 'open' && minutesOpen > staleMinutes;
+
+    const base: any = {
+      ...job,
+      governorateNameAr: gov?.nameAr || job.governorateId,
+      governorateNameEn: gov?.nameEn || job.governorateId,
+      zoneNameAr: zone?.nameAr || job.deliveryZoneId || '',
+      zoneNameEn: zone?.nameEn || job.deliveryZoneId || '',
+      assignedPartnerName: partner?.name || null,
+      assignedDriverName: driver?.name || null,
+      assignedDriverPhone: driver?.phone || null,
+      assignedDriverType: driver?.providerType || null,
+      assignedVehiclePlate: vehicle?.plateNumber || null,
+      assignedVehicleClass: vehicle?.vehicleClass || null,
+      subOrderStatus: subOrder?.status || null,
+      itemsSummary: subOrder?.items || [],
+      minutesOpen,
+      isStaleOpen
+    };
+
+    // Never leak sensitive customer/warehouse verification PINs inside Partner Portal API payloads
+    if (opts?.sanitizeForPortal) {
+      delete base.pickupPin;
+    }
+
+    return base;
+  }
+
+  getAdminDispatchSummary() {
+    const staleThreshold = this.deliveryPlatformSettings.staleOpenJobMinutes ?? 30;
+    const todayPrefix = new Date().toISOString().slice(0, 10);
+    const openJobs = this.deliveryJobs.filter((j) => j.status === 'open');
+    const staleOpen = openJobs.filter(
+      (j) => (Date.now() - Date.parse(j.createdAt)) / 60000 > staleThreshold
+    );
+    const assigned = this.deliveryJobs.filter((j) =>
+      ['assigned', 'accepted', 'at_pickup'].includes(j.status)
+    );
+    const inProgress = this.deliveryJobs.filter((j) =>
+      ['picked_up', 'in_transit', 'at_dropoff'].includes(j.status)
+    );
+    const delivered = this.deliveryJobs.filter((j) => j.status === 'delivered');
+    const deliveredToday = delivered.filter(
+      (j) => (j.deliveredAt || '').slice(0, 10) === todayPrefix
+    );
+    const failed = this.deliveryJobs.filter((j) => j.status === 'failed');
+    const cancelled = this.deliveryJobs.filter((j) => j.status === 'cancelled');
+
+    const ordersEligibleToConvert = this.subOrders.filter(
+      (o) =>
+        o.deliveryType !== 'platform_driver' &&
+        (o.status === 'pending' || o.status === 'approved')
+    ).length;
+
+    const platformOrdersMissingJob = this.subOrders.filter((o) => {
+      if (o.deliveryType !== 'platform_driver' || o.status !== 'approved') return false;
+      const linked = o.deliveryJobId ? this.deliveryJobs.find((j) => j.id === o.deliveryJobId) : undefined;
+      return !linked || linked.status === 'cancelled';
+    }).length;
+
+    return {
+      all: this.deliveryJobs.length,
+      open: openJobs.length,
+      staleOpen: staleOpen.length,
+      staleThresholdMinutes: staleThreshold,
+      assigned: assigned.length,
+      inProgress: inProgress.length,
+      delivered: delivered.length,
+      deliveredToday: deliveredToday.length,
+      failed: failed.length,
+      cancelled: cancelled.length,
+      ordersEligibleToConvert,
+      platformOrdersMissingJob
+    };
+  }
+
+  getAdminDispatchJobs(params?: {
+    tab?: string;
+    governorateId?: string;
+    partnerId?: string;
+    search?: string;
+    staleOnly?: boolean;
+  }) {
+    const all = this.deliveryJobs.map((j) => this.enrichDeliveryJob(j));
+    const counts = this.getAdminDispatchSummary();
+
+    let filtered = [...all];
+    if (params?.tab && params.tab !== 'all') {
+      if (params.tab === 'open') {
+        filtered = filtered.filter((j) => j.status === 'open');
+      } else if (params.tab === 'assigned') {
+        filtered = filtered.filter((j) =>
+          ['assigned', 'accepted', 'at_pickup'].includes(j.status)
+        );
+      } else if (params.tab === 'in_progress') {
+        filtered = filtered.filter((j) =>
+          ['picked_up', 'in_transit', 'at_dropoff'].includes(j.status)
+        );
+      } else if (params.tab === 'delivered') {
+        filtered = filtered.filter((j) => j.status === 'delivered');
+      } else if (params.tab === 'failed') {
+        filtered = filtered.filter((j) => j.status === 'failed');
+      } else if (params.tab === 'cancelled') {
+        filtered = filtered.filter((j) => j.status === 'cancelled');
+      }
+    }
+
+    if (params?.staleOnly) {
+      filtered = filtered.filter((j) => j.isStaleOpen);
+    }
+    if (params?.governorateId && params.governorateId !== 'all') {
+      filtered = filtered.filter((j) => j.governorateId === params.governorateId);
+    }
+    if (params?.partnerId && params.partnerId !== 'all') {
+      filtered = filtered.filter((j) => j.assignedPartnerId === params.partnerId);
+    }
+    if (params?.search && params.search.trim()) {
+      const q = params.search.trim().toLowerCase();
+      filtered = filtered.filter(
+        (j) =>
+          j.id.toLowerCase().includes(q) ||
+          j.subOrderId.toLowerCase().includes(q) ||
+          j.pickup.name.toLowerCase().includes(q) ||
+          j.dropoff.name.toLowerCase().includes(q) ||
+          (j.assignedDriverName || '').toLowerCase().includes(q) ||
+          (j.assignedPartnerName || '').toLowerCase().includes(q)
+      );
+    }
+
+    filtered.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+    const convertibleOrders = this.subOrders
+      .filter(
+        (o) =>
+          o.deliveryType !== 'platform_driver' &&
+          (o.status === 'pending' || o.status === 'approved')
+      )
+      .map((o) => ({
+        id: o.id,
+        supplierId: o.supplierId,
+        supplierName: o.supplierName,
+        storeName: o.storeName,
+        storeCity: o.storeCity,
+        status: o.status,
+        deliveryType: o.deliveryType,
+        paymentMethod: o.paymentMethod,
+        subtotalIQD: o.subtotalIQD,
+        createdAt: o.createdAt
+      }));
+
+    return {
+      items: filtered,
+      total: filtered.length,
+      counts,
+      convertibleOrders
+    };
+  }
+
+  getAdminDispatchJobDetail(jobId: string) {
+    const job = this.deliveryJobs.find((j) => j.id === jobId);
+    if (!job) {
+      const err: any = new Error('مهمة التوصيل غير موجودة');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const enrichedJob = this.enrichDeliveryJob(job);
+    const subOrder = this.subOrders.find((o) => o.id === job.subOrderId) || null;
+
+    const driverCandidates = this.deliveryDrivers.map((drv) => {
+      const partner = drv.partnerId
+        ? this.deliveryPartners.find((p) => p.id === drv.partnerId) || null
+        : null;
+      const defaultVehicle = drv.assignedVehicleId
+        ? this.deliveryVehicles.find((v) => v.id === drv.assignedVehicleId)
+        : this.deliveryVehicles.find(
+            (v) =>
+              v.status === 'active' &&
+              (drv.providerType === 'platform'
+                ? v.ownerType === 'platform'
+                : v.partnerId === drv.partnerId)
+          );
+      const selectableVehicles = this.deliveryVehicles.filter((v) =>
+        drv.providerType === 'platform'
+          ? v.ownerType === 'platform'
+          : v.partnerId === drv.partnerId
+      );
+      const eligibility = this.evaluateDriverVehicleForJob(job, drv, defaultVehicle);
+      return {
+        driver: this.enrichDeliveryDriver(drv),
+        partner: partner ? this.enrichDeliveryPartner(partner) : null,
+        defaultVehicle: defaultVehicle ? this.enrichDeliveryVehicle(defaultVehicle) : null,
+        selectableVehicles: selectableVehicles.map((v) => this.enrichDeliveryVehicle(v)),
+        eligibility
+      };
+    });
+
+    driverCandidates.sort((a, b) => Number(b.eligibility.eligible) - Number(a.eligibility.eligible));
+
+    const auditLogs = this.auditLogs
+      .filter(
+        (l) =>
+          (l.entityType === 'delivery_job' && l.entityId === job.id) ||
+          (l.entityType === 'sub_order' && l.entityId === job.subOrderId)
+      )
+      .slice(0, 30);
+
+    return {
+      job: enrichedJob,
+      subOrder,
+      driverCandidates,
+      settings: this.deliveryPlatformSettings,
+      auditLogs
+    };
+  }
+
+  assignDispatchJob(params: {
+    jobId: string;
+    driverId: string;
+    vehicleId?: string;
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const job = this.deliveryJobs.find((j) => j.id === params.jobId);
+    if (!job) {
+      const err: any = new Error('مهمة التوصيل غير موجودة');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (job.status !== 'open') {
+      const err: any = new Error(
+        `لا يمكن إسناد المهمة وهي في الحالة (${job.status}) — يجب أن تكون مفتوحة (open)`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const driver = this.deliveryDrivers.find((d) => d.id === params.driverId);
+    if (!driver) {
+      const err: any = new Error('السائق المختار غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const resolvedVehicleId = params.vehicleId || driver.assignedVehicleId;
+    const vehicle = resolvedVehicleId
+      ? this.deliveryVehicles.find((v) => v.id === resolvedVehicleId)
+      : undefined;
+
+    const evalResult = this.evaluateDriverVehicleForJob(job, driver, vehicle);
+    if (!evalResult.eligible) {
+      const err: any = new Error(evalResult.reasonsAr.join('؛ '));
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const before = {
+      status: job.status,
+      assignedPartnerId: job.assignedPartnerId || null,
+      assignedDriverId: job.assignedDriverId || null,
+      assignedVehicleId: job.assignedVehicleId || null
+    };
+
+    // Pass through centralized SubOrder state engine
+    this.transitionSubOrder({
+      id: job.subOrderId,
+      toStatus: 'assigned_driver',
+      driverId: driver.id,
+      actor: {
+        actorType: 'admin',
+        actorId: params.actor.actorId,
+        actorName: params.actor.actorName
+      },
+      reason: cleanReason,
+      extraHistoryNote: `توزيع المهمة (${job.id}) عبر لوحة التوزيع للمركبة ${vehicle!.plateNumber}`
+    });
+
+    const nowIso = new Date().toISOString();
+    job.status = 'assigned';
+    job.assignedPartnerId = driver.partnerId;
+    job.assignedDriverId = driver.id;
+    job.assignedVehicleId = vehicle!.id;
+    job.assignedAt = nowIso;
+    job.attempts = (job.attempts || 0) + 1;
+    job.history.push({
+      status: 'assigned',
+      at: nowIso,
+      actorType: 'admin',
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      note: `إسناد إداري إلى ${driver.name} (${vehicle!.plateNumber}) — ${cleanReason}`
+    });
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'dispatch.assign_job',
+      entityType: 'delivery_job',
+      entityId: job.id,
+      summaryAr: `توزيع مهمة التوصيل (${job.id}) إلى ${driver.name}`,
+      summaryEn: `Assigned delivery job ${job.id} to ${driver.name}`,
+      before,
+      after: {
+        status: job.status,
+        assignedPartnerId: job.assignedPartnerId || null,
+        assignedDriverId: job.assignedDriverId,
+        assignedVehicleId: job.assignedVehicleId
+      },
+      reason: cleanReason
+    });
+
+    return this.enrichDeliveryJob(job);
+  }
+
+  unassignDispatchJob(params: {
+    jobId: string;
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const job = this.deliveryJobs.find((j) => j.id === params.jobId);
+    if (!job) {
+      const err: any = new Error('مهمة التوصيل غير موجودة');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (!['assigned', 'accepted', 'at_pickup'].includes(job.status)) {
+      const err: any = new Error(
+        'لا يمكن سحب التعيين بعد استلام البضاعة من المستودع أو انتهاء المهمة'
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const before = {
+      status: job.status,
+      assignedPartnerId: job.assignedPartnerId || null,
+      assignedDriverId: job.assignedDriverId || null,
+      assignedVehicleId: job.assignedVehicleId || null
+    };
+
+    const order = this.subOrders.find((o) => o.id === job.subOrderId);
+    if (order && order.status === 'assigned_driver') {
+      this.transitionSubOrder({
+        id: order.id,
+        toStatus: 'approved',
+        actor: {
+          actorType: 'admin',
+          actorId: params.actor.actorId,
+          actorName: params.actor.actorName
+        },
+        reason: cleanReason,
+        extraHistoryNote: `سحب التعيين من السائق وإعادة المهمة (${job.id}) إلى قائمة المهام المفتوحة`
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    job.status = 'open';
+    job.assignedPartnerId = undefined;
+    job.assignedDriverId = undefined;
+    job.assignedVehicleId = undefined;
+    job.assignedAt = undefined;
+    job.acceptedAt = undefined;
+    job.arrivedPickupAt = undefined;
+    job.history.push({
+      status: 'open',
+      at: nowIso,
+      actorType: 'admin',
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      note: `سحب التعيين وإعادة الفتح: ${cleanReason}`
+    });
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'dispatch.unassign_job',
+      entityType: 'delivery_job',
+      entityId: job.id,
+      summaryAr: `سحب تعيين مهمة التوصيل (${job.id}) وإعادتها للمهام المفتوحة`,
+      summaryEn: `Unassigned delivery job ${job.id}`,
+      before,
+      after: {
+        status: job.status,
+        assignedPartnerId: null,
+        assignedDriverId: null,
+        assignedVehicleId: null
+      },
+      reason: cleanReason
+    });
+
+    return this.enrichDeliveryJob(job);
+  }
+
+  cancelDispatchJob(params: {
+    jobId: string;
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const job = this.deliveryJobs.find((j) => j.id === params.jobId);
+    if (!job) {
+      const err: any = new Error('مهمة التوصيل غير موجودة');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (job.status === 'delivered' || job.status === 'cancelled') {
+      const err: any = new Error('لا يمكن إلغاء مهمة مسلمة أو ملغاة بالفعل');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const before = {
+      status: job.status,
+      assignedDriverId: job.assignedDriverId || null,
+      assignedVehicleId: job.assignedVehicleId || null
+    };
+
+    const order = this.subOrders.find((o) => o.id === job.subOrderId);
+    if (order) {
+      if (order.status === 'out_for_delivery') {
+        this.transitionSubOrder({
+          id: order.id,
+          toStatus: 'assigned_driver',
+          actor: {
+            actorType: 'admin',
+            actorId: params.actor.actorId,
+            actorName: params.actor.actorName
+          },
+          reason: cleanReason
+        });
+      }
+      if (order.status === 'assigned_driver') {
+        this.transitionSubOrder({
+          id: order.id,
+          toStatus: 'approved',
+          actor: {
+            actorType: 'admin',
+            actorId: params.actor.actorId,
+            actorName: params.actor.actorName
+          },
+          reason: cleanReason,
+          extraHistoryNote: `إلغاء مهمة التوصيل (${job.id}) دون إلغاء الطلبية`
+        });
+      }
+      if (order.deliveryJobId === job.id) {
+        order.deliveryJobId = undefined;
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    job.status = 'cancelled';
+    job.cancelledAt = nowIso;
+    job.history.push({
+      status: 'cancelled',
+      at: nowIso,
+      actorType: 'admin',
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      note: `إلغاء المهمة: ${cleanReason}`
+    });
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'dispatch.cancel_job',
+      entityType: 'delivery_job',
+      entityId: job.id,
+      summaryAr: `إلغاء مهمة التوصيل (${job.id})`,
+      summaryEn: `Cancelled delivery job ${job.id}`,
+      before,
+      after: { status: 'cancelled' },
+      reason: cleanReason
+    });
+
+    return this.enrichDeliveryJob(job);
+  }
+
+  reopenDispatchJob(params: {
+    jobId: string;
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const job = this.deliveryJobs.find((j) => j.id === params.jobId);
+    if (!job) {
+      const err: any = new Error('مهمة التوصيل غير موجودة');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (job.status !== 'failed' && job.status !== 'cancelled') {
+      const err: any = new Error('إعادة الفتح متاحة فقط للمهام الفاشلة أو الملغاة');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const order = this.subOrders.find((o) => o.id === job.subOrderId);
+    if (!order) {
+      const err: any = new Error('الطلب المرتبط بهذه المهمة غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (order.status === 'delivered' || order.status === 'cancelled') {
+      const err: any = new Error('لا يمكن إعادة فتح مهمة لطلب مسلم أو ملغى');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const activeSibling = this.deliveryJobs.find(
+      (j) =>
+        j.subOrderId === order.id &&
+        j.id !== job.id &&
+        !['failed', 'cancelled', 'delivered'].includes(j.status)
+    );
+    if (activeSibling) {
+      const err: any = new Error(
+        `يوجد بالفعل مهمة نشطة (${activeSibling.id}) مرتبطة بهذا الطلب`
+      );
+      err.statusCode = 409;
+      throw err;
+    }
+
+    // Ensure order sits cleanly at 'approved' before opening new job
+    if (order.status === 'out_for_delivery') {
+      this.transitionSubOrder({
+        id: order.id,
+        toStatus: 'assigned_driver',
+        actor: {
+          actorType: 'admin',
+          actorId: params.actor.actorId,
+          actorName: params.actor.actorName
+        },
+        reason: cleanReason
+      });
+    }
+    if (order.status === 'assigned_driver') {
+      this.transitionSubOrder({
+        id: order.id,
+        toStatus: 'approved',
+        actor: {
+          actorType: 'admin',
+          actorId: params.actor.actorId,
+          actorName: params.actor.actorName
+        },
+        reason: cleanReason,
+        extraHistoryNote: `إعادة الطلبية للتوزيع بعد المهمة (${job.id})`
+      });
+    }
+
+    const newJob = this.createDeliveryJobForSubOrder(
+      order,
+      {
+        actorType: 'admin',
+        actorId: params.actor.actorId,
+        actorName: params.actor.actorName,
+        note: `إعادة فتح مهمة جديدة (محاولة رقم ${(job.attempts || 0) + 1}) بعد (${job.id}): ${cleanReason}`
+      },
+      {
+        preserveAttempts: job.attempts || 0
+      }
+    );
+
+    this.recordAudit({
+      at: new Date().toISOString(),
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'dispatch.reopen_job',
+      entityType: 'delivery_job',
+      entityId: newJob.id,
+      summaryAr: `إعادة فتح مهمة توصيل جديدة (${newJob.id}) بدلاً عن المهمة (${job.id})`,
+      summaryEn: `Reopened delivery job ${newJob.id} replacing ${job.id}`,
+      before: { previousJobId: job.id, previousStatus: job.status, attempts: job.attempts },
+      after: { newJobId: newJob.id, status: newJob.status, attempts: newJob.attempts },
+      reason: cleanReason
+    });
+
+    return this.enrichDeliveryJob(newJob);
+  }
+
+  convertOrderToPlatformDelivery(params: {
+    orderId: string;
+    reason: string;
+    actor: { actorId: string; actorName: string };
+  }) {
+    const cleanReason = this.requireDeliveryReason(params.reason);
+    const order = this.subOrders.find((o) => o.id === params.orderId);
+    if (!order) {
+      const err: any = new Error('الطلب غير موجود');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (order.deliveryType === 'platform_driver') {
+      const err: any = new Error('هذا الطلب محول بالفعل لشبكة توصيل المنصة');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!['pending', 'approved'].includes(order.status)) {
+      const err: any = new Error(
+        'يمكن تحويل الطلب لشبكة المنصة فقط قبل إسناده لسائق أو خروجه للتوصيل'
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const before = {
+      deliveryType: order.deliveryType || 'supplier_fleet',
+      deliveryZoneId: order.deliveryZoneId || null,
+      deliveryJobId: order.deliveryJobId || null
+    };
+
+    const zoneInfo = this.inferZoneForSubOrder(order);
+    order.deliveryType = 'platform_driver';
+    order.deliveryZoneId = zoneInfo.deliveryZoneId;
+
+    let createdJob: DeliveryJob | undefined;
+    if (order.status === 'approved') {
+      createdJob = this.createDeliveryJobForSubOrder(order, {
+        actorType: 'admin',
+        actorId: params.actor.actorId,
+        actorName: params.actor.actorName,
+        note: `تحويل الطلب إلى شبكة توصيل المنصة وفتح مهمة: ${cleanReason}`
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    if (!order.statusHistory) order.statusHistory = [];
+    order.statusHistory.push({
+      status: order.status,
+      at: nowIso,
+      actorType: 'admin',
+      actorName: params.actor.actorName,
+      reason: cleanReason,
+      note: 'تحويل مسار التوصيل من أسطول المورد إلى شبكة توصيل المنصة'
+    });
+
+    this.recordAudit({
+      at: nowIso,
+      actorId: params.actor.actorId,
+      actorName: params.actor.actorName,
+      action: 'dispatch.convert_order_to_platform',
+      entityType: 'sub_order',
+      entityId: order.id,
+      summaryAr: `تحويل الطلب (${order.id}) للتوصيل عبر شبكة المنصة`,
+      summaryEn: `Converted order ${order.id} to platform delivery network`,
+      before,
+      after: {
+        deliveryType: order.deliveryType,
+        deliveryZoneId: order.deliveryZoneId || null,
+        deliveryJobId: order.deliveryJobId || null
+      },
+      reason: cleanReason
+    });
+
+    return {
+      order,
+      job: createdJob ? this.enrichDeliveryJob(createdJob) : null
+    };
+  }
+
+  // ================= PARTNER / PLATFORM DRIVER PORTAL =================
+
+  resolveDeliveryPortalSession(sessionToken: string): {
+    mode: 'partner' | 'platform_driver';
+    partner?: DeliveryPartner;
+    driver?: DeliveryDriver;
+    drivers: DeliveryDriver[];
+    vehicles: DeliveryVehicle[];
+  } {
+    const raw = String(sessionToken || '').trim();
+    if (raw.startsWith('partner:')) {
+      const partnerId = raw.slice('partner:'.length).trim();
+      const partner = this.deliveryPartners.find((p) => p.id === partnerId);
+      if (!partner || partner.accountStatus !== 'active') {
+        const err: any = new Error('جلسة الشريك غير صالحة أو الحساب غير نشط');
+        err.statusCode = 401;
+        throw err;
+      }
+      const drivers = this.deliveryDrivers.filter((d) => d.partnerId === partner.id);
+      const vehicles = this.deliveryVehicles.filter((v) => v.partnerId === partner.id);
+      return { mode: 'partner', partner, drivers, vehicles };
+    }
+    if (raw.startsWith('platform_driver:')) {
+      const driverId = raw.slice('platform_driver:'.length).trim();
+      const driver = this.deliveryDrivers.find(
+        (d) => d.id === driverId && d.providerType === 'platform'
+      );
+      if (!driver || driver.accountStatus !== 'active') {
+        const err: any = new Error('جلسة سائق المنصة غير صالحة أو الحساب غير نشط');
+        err.statusCode = 401;
+        throw err;
+      }
+      const vehicles = this.deliveryVehicles.filter((v) => v.ownerType === 'platform');
+      return { mode: 'platform_driver', driver, drivers: [driver], vehicles };
+    }
+
+    const err: any = new Error('مصادقة بوابة التوصيل مطلوبة (x-delivery-session)');
+    err.statusCode = 401;
+    throw err;
+  }
+
+  loginDeliveryPortal(params: { phone: string; registrationCode: string }) {
+    const normPhone = this.normalizeDeliveryPhone(params.phone || '');
+    const code = String(params.registrationCode || '').trim().toUpperCase();
+    if (!normPhone || !code) {
+      const err: any = new Error('يرجى إدخال رقم الهاتف ورمز التسجيل / الرخصة');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const matchedPartner = this.deliveryPartners.find(
+      (p) =>
+        this.normalizeDeliveryPhone(p.phone) === normPhone &&
+        p.registrationCode.trim().toUpperCase() === code
+    );
+    if (matchedPartner) {
+      if (matchedPartner.accountStatus !== 'active') {
+        const err: any = new Error(
+          `حساب الشريك (${matchedPartner.name}) حالته الحالية (${matchedPartner.accountStatus}) ولا يمكن تسجيل الدخول قبل التفعيل`
+        );
+        err.statusCode = 403;
+        throw err;
+      }
+      const token = `partner:${matchedPartner.id}`;
+      return {
+        sessionToken: token,
+        ...this.getDeliveryPortalMe(token)
+      };
+    }
+
+    const matchedPlatformDriver = this.deliveryDrivers.find(
+      (d) =>
+        d.providerType === 'platform' &&
+        this.normalizeDeliveryPhone(d.phone) === normPhone &&
+        (d.licenseNo || '').trim().toUpperCase() === code
+    );
+    if (matchedPlatformDriver) {
+      if (matchedPlatformDriver.accountStatus !== 'active') {
+        const err: any = new Error(
+          `حساب السائق (${matchedPlatformDriver.name}) حالته (${matchedPlatformDriver.accountStatus}) غير نشطة`
+        );
+        err.statusCode = 403;
+        throw err;
+      }
+      const token = `platform_driver:${matchedPlatformDriver.id}`;
+      return {
+        sessionToken: token,
+        ...this.getDeliveryPortalMe(token)
+      };
+    }
+
+    const err: any = new Error('رقم الهاتف أو رمز الدخول غير صحيح');
+    err.statusCode = 401;
+    throw err;
+  }
+
+  getDeliveryPortalMe(sessionToken: string) {
+    const session = this.resolveDeliveryPortalSession(sessionToken);
+    return {
+      mode: session.mode,
+      partner: session.partner ? this.enrichDeliveryPartner(session.partner) : null,
+      driver: session.driver ? this.enrichDeliveryDriver(session.driver) : null,
+      drivers: session.drivers.map((d) => this.enrichDeliveryDriver(d)),
+      vehicles: session.vehicles.map((v) => this.enrichDeliveryVehicle(v)),
+      codAllowedForPartners: this.deliveryPlatformSettings.codAllowedForPartners,
+      maxActiveJobsPerDriver: this.deliveryPlatformSettings.maxActiveJobsPerDriver ?? 3
+    };
+  }
+
+  setDeliveryDriverAvailability(params: {
+    sessionToken: string;
+    driverId?: string;
+    availability: 'online' | 'offline';
+  }) {
+    const session = this.resolveDeliveryPortalSession(params.sessionToken);
+    const targetDriverId =
+      params.driverId || (session.drivers.length === 1 ? session.drivers[0].id : undefined);
+    const driver = session.drivers.find((d) => d.id === targetDriverId);
+    if (!driver) {
+      const err: any = new Error('السائق غير موجود ضمن هذا الحساب');
+      err.statusCode = 403;
+      throw err;
+    }
+    this.assertDeliveryDriverOperable(driver.id);
+    const avail: 'online' | 'offline' =
+      params.availability === 'offline' ? 'offline' : 'online';
+    driver.availability = avail;
+    driver.isAvailable = avail === 'online';
+    return this.enrichDeliveryDriver(driver);
+  }
+
+  getAvailablePortalJobs(sessionToken: string) {
+    const session = this.resolveDeliveryPortalSession(sessionToken);
+
+    const activeDrivers = session.drivers.filter((d) => d.accountStatus === 'active');
+    const coveredZones = new Set<string>();
+    const coveredGovs = new Set<string>();
+
+    if (session.partner) {
+      coveredGovs.add(session.partner.governorateId);
+      for (const z of session.partner.serviceZoneIds) coveredZones.add(z);
+    }
+    for (const d of activeDrivers) {
+      coveredGovs.add(d.governorateId);
+      for (const z of d.serviceZoneIds) coveredZones.add(z);
+    }
+
+    const openJobs = this.deliveryJobs.filter((j) => {
+      if (j.status !== 'open') return false;
+      if (j.deliveryZoneId && coveredZones.size > 0) {
+        return coveredZones.has(j.deliveryZoneId);
+      }
+      return coveredGovs.has(j.governorateId);
+    });
+
+    return openJobs.map((job) => {
+      const eligibleDriverIds: string[] = [];
+      const eligibleVehicleIds = new Set<string>();
+      const reasonsSet = new Set<string>();
+
+      for (const drv of session.drivers) {
+        const candidateVehicles = drv.assignedVehicleId
+          ? session.vehicles.filter((v) => v.id === drv.assignedVehicleId)
+          : session.vehicles.filter((v) => v.status === 'active');
+        let drvEligible = false;
+        if (candidateVehicles.length === 0) {
+          const ev = this.evaluateDriverVehicleForJob(job, drv, undefined);
+          ev.reasonsAr.forEach((r) => reasonsSet.add(r));
+        } else {
+          for (const veh of candidateVehicles) {
+            const ev = this.evaluateDriverVehicleForJob(job, drv, veh);
+            if (ev.eligible) {
+              drvEligible = true;
+              eligibleVehicleIds.add(veh.id);
+            } else {
+              ev.reasonsAr.forEach((r) => reasonsSet.add(r));
+            }
+          }
+        }
+        if (drvEligible) eligibleDriverIds.push(drv.id);
+      }
+
+      return {
+        ...this.enrichDeliveryJob(job, { sanitizeForPortal: true }),
+        canAccept: eligibleDriverIds.length > 0,
+        eligibleDriverIds,
+        eligibleVehicleIds: Array.from(eligibleVehicleIds),
+        ineligibilityReasons: eligibleDriverIds.length > 0 ? [] : Array.from(reasonsSet)
+      };
+    });
+  }
+
+  acceptPortalJob(params: {
+    sessionToken: string;
+    jobId: string;
+    driverId?: string;
+    vehicleId?: string;
+  }) {
+    const session = this.resolveDeliveryPortalSession(params.sessionToken);
+    const job = this.deliveryJobs.find((j) => j.id === params.jobId);
+    if (!job) {
+      const err: any = new Error('مهمة التوصيل غير موجودة');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (job.status !== 'open') {
+      const err: any = new Error(
+        'عذراً، تم قبول هذه المهمة أو إسنادها مسبقاً ولا يمكن قبولها مرة أخرى'
+      );
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const driverId =
+      params.driverId || (session.drivers.length === 1 ? session.drivers[0].id : undefined);
+    const driver = session.drivers.find((d) => d.id === driverId);
+    if (!driver) {
+      const err: any = new Error('يرجى اختيار سائق تابع لحسابك لتنفيذ المهمة');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const vehicleId =
+      params.vehicleId ||
+      driver.assignedVehicleId ||
+      (session.vehicles.filter((v) => v.status === 'active').length === 1
+        ? session.vehicles.find((v) => v.status === 'active')?.id
+        : undefined);
+    const vehicle = session.vehicles.find((v) => v.id === vehicleId);
+
+    const evalResult = this.evaluateDriverVehicleForJob(job, driver, vehicle);
+    if (!evalResult.eligible) {
+      const err: any = new Error(evalResult.reasonsAr.join('؛ '));
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const actorName = session.partner?.name || driver.name;
+    this.transitionSubOrder({
+      id: job.subOrderId,
+      toStatus: 'assigned_driver',
+      driverId: driver.id,
+      actor: {
+        actorType: 'delivery_partner',
+        actorId: session.partner?.id || driver.id,
+        actorName
+      },
+      extraHistoryNote: `قبول المهمة (${job.id}) عبر بوابة الشريك بالمركبة ${vehicle!.plateNumber}`
+    });
+
+    const nowIso = new Date().toISOString();
+    job.status = 'accepted';
+    job.assignedPartnerId = session.partner?.id;
+    job.assignedDriverId = driver.id;
+    job.assignedVehicleId = vehicle!.id;
+    job.acceptedAt = nowIso;
+    job.attempts = (job.attempts || 0) + 1;
+    job.history.push({
+      status: 'accepted',
+      at: nowIso,
+      actorType: session.mode === 'partner' ? 'partner' : 'driver',
+      actorId: session.partner?.id || driver.id,
+      actorName,
+      note: `قبول المهمة للسائق ${driver.name} (${vehicle!.plateNumber})`
+    });
+
+    return this.enrichDeliveryJob(job, { sanitizeForPortal: true });
+  }
+
+  getMyPortalJobs(sessionToken: string) {
+    const session = this.resolveDeliveryPortalSession(sessionToken);
+    const jobs = this.deliveryJobs
+      .filter((j) =>
+        session.mode === 'partner'
+          ? j.assignedPartnerId === session.partner!.id
+          : j.assignedDriverId === session.driver!.id
+      )
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+    return jobs.map((j) => this.enrichDeliveryJob(j, { sanitizeForPortal: true }));
+  }
+
+  progressPortalJob(params: {
+    sessionToken: string;
+    jobId: string;
+    step: 'arrived-pickup' | 'pickup' | 'start' | 'arrived-dropoff' | 'deliver' | 'fail';
+    pickupPin?: string;
+    deliveryPin?: string;
+    reasonCode?: DeliveryJobFailureReasonCode;
+    note?: string;
+  }) {
+    const session = this.resolveDeliveryPortalSession(params.sessionToken);
+    const job = this.deliveryJobs.find((j) => j.id === params.jobId);
+    if (!job) {
+      const err: any = new Error('مهمة التوصيل غير موجودة');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const ownsJob =
+      session.mode === 'partner'
+        ? job.assignedPartnerId === session.partner!.id
+        : job.assignedDriverId === session.driver!.id;
+    if (!ownsJob) {
+      const err: any = new Error('هذه المهمة غير مسندة إلى حسابك');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    const driver = job.assignedDriverId
+      ? this.deliveryDrivers.find((d) => d.id === job.assignedDriverId)
+      : undefined;
+    const actorName = driver?.name || session.partner?.name || 'سائق المنصة';
+    const actorId = driver?.id || session.partner?.id;
+    const nowIso = new Date().toISOString();
+
+    if (params.step === 'arrived-pickup') {
+      if (!['assigned', 'accepted'].includes(job.status)) {
+        const err: any = new Error('لا يمكن تسجيل الوصول للمستودع في المرحلة الحالية للمهمة');
+        err.statusCode = 400;
+        throw err;
+      }
+      job.status = 'at_pickup';
+      job.arrivedPickupAt = nowIso;
+      job.history.push({
+        status: 'at_pickup',
+        at: nowIso,
+        actorType: 'driver',
+        actorId,
+        actorName,
+        note: 'وصل السائق إلى مستودع المورد للاستلام'
+      });
+      return this.enrichDeliveryJob(job, { sanitizeForPortal: true });
+    }
+
+    if (params.step === 'pickup') {
+      if (job.status !== 'at_pickup') {
+        const err: any = new Error('يجب تأكيد الوصول للمستودع أولاً قبل تأكيد استلام الشحنة');
+        err.statusCode = 400;
+        throw err;
+      }
+      if (String(params.pickupPin || '').trim() !== job.pickupPin) {
+        const err: any = new Error(
+          'رمز الاستلام من المستودع (Pickup PIN) غير صحيح! اطلب الرمز المكون من 4 أرقام من أمين المستودع'
+        );
+        err.statusCode = 400;
+        throw err;
+      }
+      this.transitionSubOrder({
+        id: job.subOrderId,
+        toStatus: 'out_for_delivery',
+        actor: {
+          actorType: 'delivery_partner',
+          actorId,
+          actorName
+        },
+        extraHistoryNote: `تم التحقق من رمز الاستلام من المستودع للمهمة (${job.id})`
+      });
+      job.status = 'picked_up';
+      job.pickedUpAt = nowIso;
+      job.history.push({
+        status: 'picked_up',
+        at: nowIso,
+        actorType: 'driver',
+        actorId,
+        actorName,
+        note: 'تم التحقق من رمز الاستلام واستلام البضاعة من المستودع'
+      });
+      return this.enrichDeliveryJob(job, { sanitizeForPortal: true });
+    }
+
+    if (params.step === 'start') {
+      if (job.status !== 'picked_up') {
+        const err: any = new Error('يجب إتمام استلام الشحنة برمز المستودع أولاً');
+        err.statusCode = 400;
+        throw err;
+      }
+      job.status = 'in_transit';
+      job.inTransitAt = nowIso;
+      job.history.push({
+        status: 'in_transit',
+        at: nowIso,
+        actorType: 'driver',
+        actorId,
+        actorName,
+        note: 'انطلقت الرحلة باتجاه المتجر'
+      });
+      return this.enrichDeliveryJob(job, { sanitizeForPortal: true });
+    }
+
+    if (params.step === 'arrived-dropoff') {
+      if (!['picked_up', 'in_transit'].includes(job.status)) {
+        const err: any = new Error('لا يمكن تسجيل الوصول للمتجر في المرحلة الحالية للمهمة');
+        err.statusCode = 400;
+        throw err;
+      }
+      job.status = 'at_dropoff';
+      job.arrivedDropoffAt = nowIso;
+      job.history.push({
+        status: 'at_dropoff',
+        at: nowIso,
+        actorType: 'driver',
+        actorId,
+        actorName,
+        note: 'وصل السائق إلى موقع المتجر'
+      });
+      return this.enrichDeliveryJob(job, { sanitizeForPortal: true });
+    }
+
+    if (params.step === 'deliver') {
+      if (job.status !== 'at_dropoff') {
+        const err: any = new Error('يجب تسجيل الوصول للمتجر أولاً قبل تأكيد التسليم');
+        err.statusCode = 400;
+        throw err;
+      }
+      this.transitionSubOrder({
+        id: job.subOrderId,
+        toStatus: 'delivered',
+        pin: String(params.deliveryPin || '').trim(),
+        actor: {
+          actorType: 'delivery_partner',
+          actorId,
+          actorName
+        },
+        extraHistoryNote: `تم التسليم للمتجر برمز PIN عبر بوابة الشريك (${job.id})`
+      });
+      job.status = 'delivered';
+      job.deliveredAt = nowIso;
+      job.history.push({
+        status: 'delivered',
+        at: nowIso,
+        actorType: 'driver',
+        actorId,
+        actorName,
+        note: 'تم التحقق من رمز الاستلام من التاجر وإغلاق المهمة بنجاح'
+      });
+      return this.enrichDeliveryJob(job, { sanitizeForPortal: true });
+    }
+
+    // step === 'fail'
+    if (
+      !['assigned', 'accepted', 'at_pickup', 'picked_up', 'in_transit', 'at_dropoff'].includes(
+        job.status
+      )
+    ) {
+      const err: any = new Error('لا يمكن الإبلاغ عن فشل التوصيل في هذه الحالة');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const validCodes: DeliveryJobFailureReasonCode[] = [
+      'store_closed',
+      'customer_refused',
+      'address_not_found',
+      'vehicle_issue',
+      'other'
+    ];
+    const code = params.reasonCode as DeliveryJobFailureReasonCode;
+    if (!validCodes.includes(code)) {
+      const err: any = new Error('يرجى اختيار سبب فشل التوصيل');
+      err.statusCode = 400;
+      throw err;
+    }
+    const cleanNote = String(params.note || '').trim();
+    if (cleanNote.length < 3) {
+      const err: any = new Error('يرجى إدخال وصف مختصر لتعذر التوصيل (3 أحرف على الأقل)');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const order = this.subOrders.find((o) => o.id === job.subOrderId);
+    if (order && order.status === 'out_for_delivery') {
+      this.transitionSubOrder({
+        id: order.id,
+        toStatus: 'assigned_driver',
+        actor: {
+          actorType: 'delivery_partner',
+          actorId,
+          actorName
+        },
+        reason: cleanNote,
+        extraHistoryNote: `تعذر التوصيل (${code}) في المهمة ${job.id} — بانتظار إعادة التوزيع`
+      });
+    }
+
+    job.status = 'failed';
+    job.failure = {
+      reasonCode: code,
+      note: cleanNote,
+      failedAt: nowIso,
+      failedBy: actorName
+    };
+    job.history.push({
+      status: 'failed',
+      at: nowIso,
+      actorType: 'driver',
+      actorId,
+      actorName,
+      note: `${code}: ${cleanNote}`
+    });
+
+    return this.enrichDeliveryJob(job, { sanitizeForPortal: true });
+  }
+
+  getDeliveryPortalEarnings(sessionToken: string) {
+    const session = this.resolveDeliveryPortalSession(sessionToken);
+    const todayPrefix = new Date().toISOString().slice(0, 10);
+
+    const deliveredJobs = this.deliveryJobs
+      .filter(
+        (j) =>
+          j.status === 'delivered' &&
+          (session.mode === 'partner'
+            ? j.assignedPartnerId === session.partner!.id
+            : j.assignedDriverId === session.driver!.id)
+      )
+      .sort((a, b) => Date.parse(b.deliveredAt || b.createdAt) - Date.parse(a.deliveredAt || a.createdAt));
+
+    const totalEstimatedPayoutIQD = deliveredJobs.reduce(
+      (sum, j) => sum + (j.estimatedPayoutIQD || 0),
+      0
+    );
+    const todayPayoutIQD = deliveredJobs
+      .filter((j) => (j.deliveredAt || '').slice(0, 10) === todayPrefix)
+      .reduce((sum, j) => sum + (j.estimatedPayoutIQD || 0), 0);
+    const cashOnHandIQD = session.drivers.reduce((sum, d) => sum + (d.cashOnHandIQD || 0), 0);
+
+    return {
+      totalDeliveredCount: deliveredJobs.length,
+      totalEstimatedPayoutIQD,
+      todayPayoutIQD,
+      cashOnHandIQD,
+      commissionPercent: this.deliveryPlatformSettings.partnerCommissionPercent || 0,
+      codAllowedForPartners: this.deliveryPlatformSettings.codAllowedForPartners,
+      recentJobs: deliveredJobs.slice(0, 25).map((j) => ({
+        id: j.id,
+        subOrderId: j.subOrderId,
+        pickupName: j.pickup.name,
+        dropoffName: j.dropoff.name,
+        dropoffCity: j.dropoff.city,
+        estimatedPayoutIQD: j.estimatedPayoutIQD,
+        paymentMethod: j.paymentMethod,
+        orderSubtotalIQD: j.orderSubtotalIQD,
+        deliveredAt: j.deliveredAt
+      }))
     };
   }
 }

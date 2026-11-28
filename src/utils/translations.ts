@@ -412,6 +412,40 @@ export interface TranslationDictionary {
   partnerRegTabApply: string;
   partnerRegTabStatus: string;
   partnerRegBackBtn: string;
+  // Dispatch Board & Delivery Partner Portal (Phase D2)
+  adminDispatchTitle: string;
+  adminDispatchSubtitle: string;
+  adminDispatchTabAll: string;
+  adminDispatchTabOpen: string;
+  adminDispatchTabAssigned: string;
+  adminDispatchTabInProgress: string;
+  adminDispatchTabDelivered: string;
+  adminDispatchTabFailed: string;
+  adminDispatchTabConvertible: string;
+  adminDispatchStaleBadge: string;
+  adminDispatchAssignBtn: string;
+  adminDispatchUnassignBtn: string;
+  adminDispatchCancelBtn: string;
+  adminDispatchReopenBtn: string;
+  adminDispatchConvertBtn: string;
+  adminDispatchEmpty: string;
+  adminDispatchAttemptsLabel: string;
+  adminDispatchPickupPinLabel: string;
+  partnerPortalLoginLinkLabel: string;
+  partnerPortalTitle: string;
+  partnerPortalSubtitle: string;
+  partnerPortalTabAvailable: string;
+  partnerPortalTabMine: string;
+  partnerPortalTabEarnings: string;
+  partnerPortalTabAccount: string;
+  partnerPortalOnline: string;
+  partnerPortalOffline: string;
+  partnerPortalAcceptBtn: string;
+  partnerPortalPickupBtn: string;
+  partnerPortalDeliverBtn: string;
+  partnerPortalFailBtn: string;
+  partnerPortalMapsBtn: string;
+  partnerPortalLogoutBtn: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -827,7 +861,40 @@ export const translations: Record<Language, TranslationDictionary> = {
     partnerRegSubtitle: 'انضم إلى شبكة توصيل دليل الخيرات العراق كشريك فردي أو شركة لوجستية وتابع حالة طلبك مباشرة',
     partnerRegTabApply: 'التسجيل كشريك توصيل',
     partnerRegTabStatus: 'استعلام عن حالة الطلب',
-    partnerRegBackBtn: 'رجوع للبوابة الرئيسية'
+    partnerRegBackBtn: 'رجوع للبوابة الرئيسية',
+    adminDispatchTitle: 'لوحة التوزيع ومهام التوصيل',
+    adminDispatchSubtitle: 'متابعة مهام شبكة توصيل المنصة، تنبيهات التأخر، التوزيع على السائقين/الشركاء وإعادة فتح المهام الفاشلة',
+    adminDispatchTabAll: 'الكل',
+    adminDispatchTabOpen: 'مفتوحة',
+    adminDispatchTabAssigned: 'موزّعة / مقبولة',
+    adminDispatchTabInProgress: 'قيد التنفيذ',
+    adminDispatchTabDelivered: 'مكتملة',
+    adminDispatchTabFailed: 'فاشلة',
+    adminDispatchTabConvertible: 'تحويل طلب للشبكة',
+    adminDispatchStaleBadge: 'متأخرة',
+    adminDispatchAssignBtn: 'توزيع لسائق',
+    adminDispatchUnassignBtn: 'سحب التعيين',
+    adminDispatchCancelBtn: 'إلغاء المهمة',
+    adminDispatchReopenBtn: 'إعادة فتح مهمة',
+    adminDispatchConvertBtn: 'تحويل إلى شبكة المنصة',
+    adminDispatchEmpty: 'لا توجد مهام توصيل مطابقة للمعايير الحالية',
+    adminDispatchAttemptsLabel: 'عدد المحاولات',
+    adminDispatchPickupPinLabel: 'رمز استلام المستودع',
+    partnerPortalLoginLinkLabel: 'دخول شريك / سائق توصيل',
+    partnerPortalTitle: 'بوابة شريك وسائق التوصيل',
+    partnerPortalSubtitle: 'استلام مهام شبكة المنصة، تنفيذ الرحلات بالتحقق المزدوج (PIN) ومتابعة المستحقات',
+    partnerPortalTabAvailable: 'المهام المتاحة',
+    partnerPortalTabMine: 'مهامي',
+    partnerPortalTabEarnings: 'المستحقات',
+    partnerPortalTabAccount: 'حسابي',
+    partnerPortalOnline: 'متاح لاستلام المهام',
+    partnerPortalOffline: 'غير متاح',
+    partnerPortalAcceptBtn: 'قبول المهمة',
+    partnerPortalPickupBtn: 'تأكيد الاستلام من المستودع',
+    partnerPortalDeliverBtn: 'تأكيد التسليم للمتجر',
+    partnerPortalFailBtn: 'إبلاغ عن تعذر التوصيل',
+    partnerPortalMapsBtn: 'فتح المسار على خرائط Google',
+    partnerPortalLogoutBtn: 'تسجيل خروج'
   },
   en: {
     // Brand & General
@@ -1241,7 +1308,40 @@ export const translations: Record<Language, TranslationDictionary> = {
     partnerRegSubtitle: 'Join Dalil Al-Khairat Iraq Delivery Network as an individual carrier or logistics company and track application status',
     partnerRegTabApply: 'Register as Delivery Partner',
     partnerRegTabStatus: 'Check Application Status',
-    partnerRegBackBtn: 'Back to Portal'
+    partnerRegBackBtn: 'Back to Portal',
+    adminDispatchTitle: 'Platform Dispatch Board',
+    adminDispatchSubtitle: 'Track platform delivery jobs, stale SLA alerts, driver assignment eligibility, and failed-job recovery',
+    adminDispatchTabAll: 'All',
+    adminDispatchTabOpen: 'Open',
+    adminDispatchTabAssigned: 'Assigned / Accepted',
+    adminDispatchTabInProgress: 'In Progress',
+    adminDispatchTabDelivered: 'Delivered',
+    adminDispatchTabFailed: 'Failed',
+    adminDispatchTabConvertible: 'Convert Order',
+    adminDispatchStaleBadge: 'Overdue',
+    adminDispatchAssignBtn: 'Assign Driver',
+    adminDispatchUnassignBtn: 'Unassign',
+    adminDispatchCancelBtn: 'Cancel Job',
+    adminDispatchReopenBtn: 'Reopen Job',
+    adminDispatchConvertBtn: 'Route via Platform',
+    adminDispatchEmpty: 'No delivery jobs match the current filters',
+    adminDispatchAttemptsLabel: 'Attempts',
+    adminDispatchPickupPinLabel: 'Warehouse Pickup PIN',
+    partnerPortalLoginLinkLabel: 'Delivery Partner / Driver Login',
+    partnerPortalTitle: 'Delivery Partner & Driver Portal',
+    partnerPortalSubtitle: 'Accept platform jobs, complete dual-PIN warehouse & store handoffs, and track payouts',
+    partnerPortalTabAvailable: 'Available Jobs',
+    partnerPortalTabMine: 'My Jobs',
+    partnerPortalTabEarnings: 'Earnings',
+    partnerPortalTabAccount: 'Account',
+    partnerPortalOnline: 'Online for Jobs',
+    partnerPortalOffline: 'Offline',
+    partnerPortalAcceptBtn: 'Accept Job',
+    partnerPortalPickupBtn: 'Confirm Warehouse Pickup',
+    partnerPortalDeliverBtn: 'Confirm Store Delivery',
+    partnerPortalFailBtn: 'Report Failed Delivery',
+    partnerPortalMapsBtn: 'Open Google Maps Route',
+    partnerPortalLogoutBtn: 'Log Out'
   }
 };
 

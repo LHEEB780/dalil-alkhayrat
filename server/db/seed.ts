@@ -27,7 +27,8 @@ import {
   DeliveryVehicle,
   DeliveryDriver,
   DeliveryRateRule,
-  DeliveryPlatformSettings
+  DeliveryPlatformSettings,
+  DeliveryJob
 } from './types.ts';
 import { buildBranchProductsAndOffers } from './branchProductsSeed.ts';
 
@@ -2386,6 +2387,134 @@ export const initialSubOrders: SubOrder[] = [
     deliveryPin: '3619',
     createdAt: new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString(),
     notes: 'طلبية بانتظار اعتماد المورد منذ أكثر من 24 ساعة'
+  },
+  // ================= PHASE D2 DEMO SUB-ORDERS FOR PLATFORM DELIVERY DISPATCH =================
+  {
+    id: 'ord_sub_201',
+    parentOrderId: 'ord_main_d2_1',
+    supplierId: 'supp_dijla',
+    supplierName: 'مجموعة دجلة للمشروبات والسلع الغذائية',
+    storeId: 'store_najaf_pending',
+    storeName: 'أسواق الغدير للتجارة الحديثة',
+    storePhone: '+964 781 666 3344',
+    storeCity: 'النجف',
+    storeAddress: 'النجف - حي الأمير - الشارع الحولي، قرب تقاطع الجامعة',
+    items: [
+      {
+        barcode: '6281007000123',
+        productName: 'أرز بسمتي هندي عنبر درجة أولى',
+        unit: 'كيس (10 كغم)',
+        quantity: 6,
+        unitPriceIQD: 28500,
+        totalPriceIQD: 171000
+      }
+    ],
+    subtotalIQD: 171000,
+    paymentMethod: 'credit',
+    status: 'approved',
+    deliveryType: 'platform_driver',
+    deliveryZoneId: 'zone_najaf_center',
+    deliveryJobId: 'djob_201_open',
+    deliveryPin: '5182',
+    createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    notes: 'شحنة بانتظار التوزيع على شبكة المنصة (النجف المركز)'
+  },
+  {
+    id: 'ord_sub_202',
+    parentOrderId: 'ord_main_d2_2',
+    supplierId: 'supp_dijla',
+    supplierName: 'مجموعة دجلة للمشروبات والسلع الغذائية',
+    storeId: 'store_najaf_pending',
+    storeName: 'أسواق الغدير للتجارة الحديثة',
+    storePhone: '+964 781 666 3344',
+    storeCity: 'النجف',
+    storeAddress: 'النجف - حي الأمير - الشارع الحولي، قرب تقاطع الجامعة',
+    items: [
+      {
+        barcode: '6210001234567',
+        productName: 'زيت دوار الشمس النقي مكرر',
+        unit: 'كرتون (12 × 1 لتر)',
+        quantity: 5,
+        unitPriceIQD: 36000,
+        totalPriceIQD: 180000
+      }
+    ],
+    subtotalIQD: 180000,
+    paymentMethod: 'credit',
+    status: 'assigned_driver',
+    deliveryType: 'platform_driver',
+    deliveryZoneId: 'zone_najaf_center',
+    deliveryJobId: 'djob_202_accepted',
+    assignedDriverId: 'ddrv_partner_furat_1',
+    assignedDriverName: 'سجاد كريم الحسناوي (سائق شريك)',
+    deliveryPin: '6420',
+    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    notes: 'شحنة مقبولة من شركة الفرات وجاهزة للتحرك للاستلام'
+  },
+  {
+    id: 'ord_sub_203',
+    parentOrderId: 'ord_main_d2_3',
+    supplierId: 'supp_dijla',
+    supplierName: 'مجموعة دجلة للمشروبات والسلع الغذائية',
+    storeId: 'store_najaf_pending',
+    storeName: 'أسواق الغدير للتجارة الحديثة',
+    storePhone: '+964 781 666 3344',
+    storeCity: 'النجف',
+    storeAddress: 'النجف - حي الأمير - الشارع الحولي، قرب تقاطع الجامعة',
+    items: [
+      {
+        barcode: '5201002345678',
+        productName: 'معجون طماطم تركي مركز',
+        unit: 'كرتون (48 × 800 غرام)',
+        quantity: 4,
+        unitPriceIQD: 42000,
+        totalPriceIQD: 168000
+      }
+    ],
+    subtotalIQD: 168000,
+    paymentMethod: 'credit',
+    status: 'delivered',
+    deliveryType: 'platform_driver',
+    deliveryZoneId: 'zone_najaf_center',
+    deliveryJobId: 'djob_203_delivered',
+    assignedDriverId: 'ddrv_partner_furat_1',
+    assignedDriverName: 'سجاد كريم الحسناوي (سائق شريك)',
+    deliveryPin: '7741',
+    deliveredAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    notes: 'تم التسليم بنجاح عبر شبكة توصيل المنصة'
+  },
+  {
+    id: 'ord_sub_204',
+    parentOrderId: 'ord_main_d2_4',
+    supplierId: 'supp_dijla',
+    supplierName: 'مجموعة دجلة للمشروبات والسلع الغذائية',
+    storeId: 'store_najaf_pending',
+    storeName: 'أسواق الغدير للتجارة الحديثة',
+    storePhone: '+964 781 666 3344',
+    storeCity: 'النجف',
+    storeAddress: 'النجف - حي الأمير - الشارع الحولي، قرب تقاطع الجامعة',
+    items: [
+      {
+        barcode: '6281005551234',
+        productName: 'معكرونة إسباغيتي قمح صلب',
+        unit: 'كرتون (20 × 500 غرام)',
+        quantity: 7,
+        unitPriceIQD: 18500,
+        totalPriceIQD: 129500
+      }
+    ],
+    subtotalIQD: 129500,
+    paymentMethod: 'credit',
+    status: 'assigned_driver',
+    deliveryType: 'platform_driver',
+    deliveryZoneId: 'zone_najaf_center',
+    deliveryJobId: 'djob_204_failed',
+    assignedDriverId: 'ddrv_partner_furat_1',
+    assignedDriverName: 'سجاد كريم الحسناوي (سائق شريك)',
+    deliveryPin: '9033',
+    createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    notes: 'مهمة فشلت بسبب إغلاق المتجر وقت الظهيرة وتنتظر إعادة التوزيع'
   }
 ];
 
@@ -2910,6 +3039,8 @@ export const initialDeliveryDrivers: DeliveryDriver[] = [
     serviceZoneIds: ['zone_najaf_center', 'zone_najaf_kufa', 'zone_karbala_center'],
     accountStatus: 'active',
     isAvailable: true,
+    availability: 'online',
+    cashOnHandIQD: 0,
     createdAt: '2026-11-01T08:00:00Z'
   },
   {
@@ -2923,6 +3054,8 @@ export const initialDeliveryDrivers: DeliveryDriver[] = [
     serviceZoneIds: ['zone_babil_hilla', 'zone_babil_musayyib'],
     accountStatus: 'active',
     isAvailable: true,
+    availability: 'online',
+    cashOnHandIQD: 0,
     createdAt: '2026-11-05T08:00:00Z'
   },
   {
@@ -2938,6 +3071,8 @@ export const initialDeliveryDrivers: DeliveryDriver[] = [
     serviceZoneIds: ['zone_najaf_center', 'zone_najaf_kufa'],
     accountStatus: 'active',
     isAvailable: true,
+    availability: 'online',
+    cashOnHandIQD: 0,
     createdAt: '2026-11-10T09:00:00Z'
   },
   {
@@ -2953,6 +3088,8 @@ export const initialDeliveryDrivers: DeliveryDriver[] = [
     serviceZoneIds: ['zone_karbala_center', 'zone_karbala_hindiya'],
     accountStatus: 'active',
     isAvailable: true,
+    availability: 'online',
+    cashOnHandIQD: 0,
     createdAt: '2026-11-14T10:15:00Z'
   }
 ];
@@ -2961,6 +3098,8 @@ export const initialDeliveryPlatformSettings: DeliveryPlatformSettings = {
   freeDeliveryThresholdIQD: 250000, // قيمة تجريبية للعرض — قابلة للتعديل من الإدارة
   partnerCommissionPercent: 0,
   codAllowedForPartners: false,
+  staleOpenJobMinutes: 30,
+  maxActiveJobsPerDriver: 3,
   vehicleClassDefaults: [
     {
       vehicleClass: 'motorcycle',
@@ -3280,6 +3419,229 @@ export const initialDeliveryRateRules: DeliveryRateRule[] = [
     refrigeratedSurchargeIQD: 7000,
     isActive: true,
     createdAt: '2026-11-01T08:00:00Z'
+  }
+];
+
+export const initialDeliveryJobs: DeliveryJob[] = [
+  {
+    id: 'djob_201_open',
+    subOrderId: 'ord_sub_201',
+    supplierId: 'supp_dijla',
+    storeId: 'store_najaf_pending',
+    governorateId: 'gov_najaf',
+    deliveryZoneId: 'zone_najaf_center',
+    pickup: {
+      name: 'مجموعة دجلة للمشروبات والسلع الغذائية',
+      phone: '+964 750 444 3322',
+      city: 'أربيل',
+      address: 'شارع 100 متري - مجمع المخازن اللوجستية'
+    },
+    dropoff: {
+      name: 'أسواق الغدير للتجارة الحديثة',
+      phone: '+964 781 666 3344',
+      city: 'النجف',
+      address: 'حي الأمير - الشارع الحولي، قرب تقاطع الجامعة'
+    },
+    unitsCount: 6,
+    requiredTemperature: 'ambient',
+    paymentMethod: 'credit',
+    orderSubtotalIQD: 171000,
+    estimatedPayoutIQD: 12000,
+    status: 'open',
+    pickupPin: '3519',
+    attempts: 0,
+    createdAt: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+    history: [
+      {
+        status: 'open',
+        at: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+        actorType: 'system',
+        actorName: 'النظام',
+        note: 'فتح مهمة توصيل تلقائياً بعد اعتماد المورد للطلب'
+      }
+    ]
+  },
+  {
+    id: 'djob_202_accepted',
+    subOrderId: 'ord_sub_202',
+    supplierId: 'supp_dijla',
+    storeId: 'store_najaf_pending',
+    governorateId: 'gov_najaf',
+    deliveryZoneId: 'zone_najaf_center',
+    pickup: {
+      name: 'مجموعة دجلة للمشروبات والسلع الغذائية',
+      phone: '+964 750 444 3322',
+      city: 'أربيل',
+      address: 'شارع 100 متري - مجمع المخازن اللوجستية'
+    },
+    dropoff: {
+      name: 'أسواق الغدير للتجارة الحديثة',
+      phone: '+964 781 666 3344',
+      city: 'النجف',
+      address: 'حي الأمير - الشارع الحولي، قرب تقاطع الجامعة'
+    },
+    unitsCount: 5,
+    requiredTemperature: 'ambient',
+    paymentMethod: 'credit',
+    orderSubtotalIQD: 180000,
+    estimatedPayoutIQD: 12000,
+    status: 'accepted',
+    assignedPartnerId: 'dp_furat_logistics',
+    assignedDriverId: 'ddrv_partner_furat_1',
+    assignedVehicleId: 'dveh_furat_small_1',
+    pickupPin: '2468',
+    attempts: 1,
+    createdAt: new Date(Date.now() - 110 * 60 * 1000).toISOString(),
+    acceptedAt: new Date(Date.now() - 90 * 60 * 1000).toISOString(),
+    history: [
+      {
+        status: 'open',
+        at: new Date(Date.now() - 110 * 60 * 1000).toISOString(),
+        actorType: 'system',
+        actorName: 'النظام',
+        note: 'فتح مهمة توصيل للطلب ord_sub_202'
+      },
+      {
+        status: 'accepted',
+        at: new Date(Date.now() - 90 * 60 * 1000).toISOString(),
+        actorType: 'partner',
+        actorId: 'dp_furat_logistics',
+        actorName: 'شركة الفرات اللوجستية للنقل المبرد (تجريبي)',
+        note: 'تم قبول المهمة وتخصيص المركبة NJF-4421-PT'
+      }
+    ]
+  },
+  {
+    id: 'djob_203_delivered',
+    subOrderId: 'ord_sub_203',
+    supplierId: 'supp_dijla',
+    storeId: 'store_najaf_pending',
+    governorateId: 'gov_najaf',
+    deliveryZoneId: 'zone_najaf_center',
+    pickup: {
+      name: 'مجموعة دجلة للمشروبات والسلع الغذائية',
+      phone: '+964 750 444 3322',
+      city: 'أربيل',
+      address: 'شارع 100 متري - مجمع المخازن اللوجستية'
+    },
+    dropoff: {
+      name: 'أسواق الغدير للتجارة الحديثة',
+      phone: '+964 781 666 3344',
+      city: 'النجف',
+      address: 'حي الأمير - الشارع الحولي، قرب تقاطع الجامعة'
+    },
+    unitsCount: 4,
+    requiredTemperature: 'ambient',
+    paymentMethod: 'credit',
+    orderSubtotalIQD: 168000,
+    estimatedPayoutIQD: 12000,
+    status: 'delivered',
+    assignedPartnerId: 'dp_furat_logistics',
+    assignedDriverId: 'ddrv_partner_furat_1',
+    assignedVehicleId: 'dveh_furat_small_1',
+    pickupPin: '4110',
+    attempts: 1,
+    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    acceptedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000 + 20 * 60 * 1000).toISOString(),
+    pickedUpAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000).toISOString(),
+    deliveredAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    history: [
+      {
+        status: 'open',
+        at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+        actorType: 'system',
+        actorName: 'النظام',
+        note: 'فتح مهمة التوصيل'
+      },
+      {
+        status: 'accepted',
+        at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000 + 20 * 60 * 1000).toISOString(),
+        actorType: 'partner',
+        actorId: 'dp_furat_logistics',
+        actorName: 'شركة الفرات اللوجستية للنقل المبرد (تجريبي)',
+        note: 'تم قبول المهمة'
+      },
+      {
+        status: 'picked_up',
+        at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000).toISOString(),
+        actorType: 'driver',
+        actorId: 'ddrv_partner_furat_1',
+        actorName: 'سجاد كريم الحسناوي (سائق شريك)',
+        note: 'تم التحقق من رمز الاستلام من المستودع'
+      },
+      {
+        status: 'delivered',
+        at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        actorType: 'driver',
+        actorId: 'ddrv_partner_furat_1',
+        actorName: 'سجاد كريم الحسناوي (سائق شريك)',
+        note: 'تم التسليم للمتجر برمز PIN'
+      }
+    ]
+  },
+  {
+    id: 'djob_204_failed',
+    subOrderId: 'ord_sub_204',
+    supplierId: 'supp_dijla',
+    storeId: 'store_najaf_pending',
+    governorateId: 'gov_najaf',
+    deliveryZoneId: 'zone_najaf_center',
+    pickup: {
+      name: 'مجموعة دجلة للمشروبات والسلع الغذائية',
+      phone: '+964 750 444 3322',
+      city: 'أربيل',
+      address: 'شارع 100 متري - مجمع المخازن اللوجستية'
+    },
+    dropoff: {
+      name: 'أسواق الغدير للتجارة الحديثة',
+      phone: '+964 781 666 3344',
+      city: 'النجف',
+      address: 'حي الأمير - الشارع الحولي، قرب تقاطع الجامعة'
+    },
+    unitsCount: 7,
+    requiredTemperature: 'ambient',
+    paymentMethod: 'credit',
+    orderSubtotalIQD: 129500,
+    estimatedPayoutIQD: 12000,
+    status: 'failed',
+    assignedPartnerId: 'dp_furat_logistics',
+    assignedDriverId: 'ddrv_partner_furat_1',
+    assignedVehicleId: 'dveh_furat_small_1',
+    pickupPin: '8314',
+    attempts: 1,
+    failure: {
+      reasonCode: 'store_closed',
+      note: 'المتجر مغلق وقت الظهيرة ولم يتم الرد على الهاتف — يرجى إعادة فتح المهمة',
+      failedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      failedBy: 'سجاد كريم الحسناوي (سائق شريك)'
+    },
+    createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    acceptedAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
+    history: [
+      {
+        status: 'open',
+        at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+        actorType: 'system',
+        actorName: 'النظام',
+        note: 'فتح مهمة توصيل للطلب ord_sub_204'
+      },
+      {
+        status: 'accepted',
+        at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
+        actorType: 'partner',
+        actorId: 'dp_furat_logistics',
+        actorName: 'شركة الفرات اللوجستية للنقل المبرد (تجريبي)',
+        note: 'قبول المهمة'
+      },
+      {
+        status: 'failed',
+        at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        actorType: 'driver',
+        actorId: 'ddrv_partner_furat_1',
+        actorName: 'سجاد كريم الحسناوي (سائق شريك)',
+        note: 'store_closed: المتجر مغلق وقت الظهيرة ولم يتم الرد على الهاتف — يرجى إعادة فتح المهمة'
+      }
+    ]
   }
 ];
 

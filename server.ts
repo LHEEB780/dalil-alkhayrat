@@ -12,7 +12,9 @@ import {
   adminLogisticsRouter
 } from './server/routes/adminOrdersRoutes.ts';
 import { adminDeliveryRouter } from './server/routes/adminDeliveryRoutes.ts';
+import { adminDispatchRouter } from './server/routes/adminDispatchRoutes.ts';
 import { deliveryRouter } from './server/routes/deliveryRoutes.ts';
+import { deliveryPortalRouter } from './server/routes/deliveryPortalRoutes.ts';
 
 dotenv.config();
 
@@ -27,13 +29,15 @@ async function startServer() {
   // Middlewares
   app.use(express.json());
 
-  // Mount Admin Operations & API routes (specific routers MUST precede generic /api/admin)
+  // Mount Admin Operations & API routes (specific routers MUST precede generic /api/admin and /api/delivery)
   app.use('/api/admin/catalog', adminCatalogRouter);
   app.use('/api/admin/orders', adminOrdersRouter);
   app.use('/api/admin/disputes', adminDisputesRouter);
   app.use('/api/admin/logistics', adminLogisticsRouter);
   app.use('/api/admin/delivery', adminDeliveryRouter);
+  app.use('/api/admin/dispatch', adminDispatchRouter);
   app.use('/api/admin', adminRouter);
+  app.use('/api/delivery/portal', deliveryPortalRouter);
   app.use('/api/delivery', deliveryRouter);
   app.use('/api', apiRouter);
 

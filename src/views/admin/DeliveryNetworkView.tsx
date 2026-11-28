@@ -1059,9 +1059,6 @@ export const DeliveryNetworkView: React.FC<DeliveryNetworkViewProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-50 text-[#00A046] border border-emerald-200 text-[11px] font-black">
-                {isAr ? 'المرحلة D1 — التأسيس' : 'Phase D1 — Foundation'}
-              </span>
               <span className="text-[11px] font-semibold text-[#797878]">
                 {isAr ? 'منفصلة عن سائقي فانات الموردين' : 'Separate from Supplier Van Drivers'}
               </span>

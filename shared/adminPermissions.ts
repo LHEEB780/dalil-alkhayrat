@@ -28,7 +28,9 @@ export type AdminPermissionCode =
   | 'delivery.view'
   | 'delivery.partners.manage'
   | 'delivery.vehicles.manage'
-  | 'delivery.rates.manage';
+  | 'delivery.rates.manage'
+  | 'dispatch.view'
+  | 'dispatch.assign';
 
 export type AdminRoleId = 'super_admin' | 'operations' | 'finance' | 'support' | 'content';
 
@@ -137,7 +139,9 @@ export const ADMIN_PERMISSION_GROUPS: AdminPermissionGroup[] = [
       { code: 'delivery.view', labelAr: 'عرض شبكة التوصيل والمركبات والأسعار', labelEn: 'View delivery network, fleet & rates' },
       { code: 'delivery.partners.manage', labelAr: 'إدارة شركاء وسائقي شبكة التوصيل', labelEn: 'Manage delivery partners & platform drivers', sensitive: true },
       { code: 'delivery.vehicles.manage', labelAr: 'إدارة واعتماد مركبات شبكة التوصيل', labelEn: 'Manage & approve delivery vehicles', sensitive: true },
-      { code: 'delivery.rates.manage', labelAr: 'تعديل بطاقة الأسعار وإعدادات التوصيل', labelEn: 'Manage rate card & delivery settings', sensitive: true }
+      { code: 'delivery.rates.manage', labelAr: 'تعديل بطاقة الأسعار وإعدادات التوصيل', labelEn: 'Manage rate card & delivery settings', sensitive: true },
+      { code: 'dispatch.view', labelAr: 'عرض لوحة التوزيع ومهام التوصيل', labelEn: 'View dispatch board & delivery jobs' },
+      { code: 'dispatch.assign', labelAr: 'إسناد وإلغاء وإعادة فتح مهام التوصيل', labelEn: 'Assign, unassign, cancel & reopen delivery jobs', sensitive: true }
     ]
   }
 ];
@@ -192,6 +196,8 @@ export const ADMIN_ROLES: AdminRoleDefinition[] = [
       'delivery.partners.manage',
       'delivery.vehicles.manage',
       'delivery.rates.manage',
+      'dispatch.view',
+      'dispatch.assign',
       'audit.view'
     ]
   },

@@ -5,6 +5,11 @@
 
 import type { SupplierOrderRules } from '../../shared/orderRules.ts';
 import type {
+  DeliveryJob,
+  DeliveryJobEndpoint,
+  DeliveryJobFailureReasonCode,
+  DeliveryJobHistoryEntry,
+  DeliveryJobStatus,
   DeliveryPartnerType,
   DeliveryPlatformSettings,
   DeliveryProviderType,
@@ -15,6 +20,11 @@ import type {
   VehicleTemperatureType
 } from '../../shared/deliveryRules.ts';
 export type {
+  DeliveryJob,
+  DeliveryJobEndpoint,
+  DeliveryJobFailureReasonCode,
+  DeliveryJobHistoryEntry,
+  DeliveryJobStatus,
   DeliveryPartnerType,
   DeliveryPlatformSettings,
   DeliveryProviderType,
@@ -26,7 +36,15 @@ export type {
 };
 export type { SupplierOrderRules };
 
-export type UserRole = 'store' | 'cashier' | 'accountant' | 'supplier' | 'driver' | 'admin' | 'customer';
+export type UserRole =
+  | 'store'
+  | 'cashier'
+  | 'accountant'
+  | 'supplier'
+  | 'driver'
+  | 'admin'
+  | 'customer'
+  | 'delivery_partner';
 
 export type StoreStaffRole = 'cashier' | 'accountant';
 
@@ -514,6 +532,8 @@ export interface SubOrder {
   paymentMethod: PaymentMethod;
   status: OrderStatus;
   deliveryType: 'supplier_fleet' | 'platform_driver' | 'van_direct';
+  deliveryZoneId?: string;
+  deliveryJobId?: string;
   assignedDriverId?: string;
   assignedDriverName?: string;
   deliveryPin: string; // 4-digit verification code
@@ -842,6 +862,8 @@ export interface DeliveryDriver {
   statusChangedAt?: string;
   statusChangedBy?: string;
   isAvailable: boolean;
+  availability?: 'online' | 'offline';
+  cashOnHandIQD?: number;
   adminNotes?: AdminInternalNote[];
   createdAt: string;
 }

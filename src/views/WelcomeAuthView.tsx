@@ -472,7 +472,7 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
               : 'The National B2B Marketplace & Food Wholesale Supply Platform in Iraq. Click any role below to log in immediately:'}
           </p>
 
-          <div className="pt-1">
+          <div className="pt-1 flex flex-wrap items-center justify-center gap-4">
             <button
               type="button"
               onClick={() => setShowPartnerRegistration(true)}
@@ -481,6 +481,27 @@ export const WelcomeAuthView: React.FC<WelcomeAuthViewProps> = ({
             >
               <Truck className="w-3.5 h-3.5 text-[#00A046]" />
               <span>{t.partnerRegLinkLabel}</span>
+            </button>
+            <span className="text-gray-300 text-xs">•</span>
+            <button
+              type="button"
+              onClick={() =>
+                onLoginAsRole('delivery_partner', {
+                  role: 'delivery_partner',
+                  name: isAr ? 'شريك التوصيل' : 'Delivery Partner',
+                  entityName: isAr ? 'بوابة شبكة التوصيل' : 'Platform Delivery Portal',
+                  city: '',
+                  phone: '',
+                  badge: isAr ? 'شريك توصيل' : 'Delivery Partner',
+                  avatarColor: 'bg-emerald-50',
+                  entityId: ''
+                })
+              }
+              data-testid="open-partner-portal-link"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0B5D32] hover:text-[#00A046] underline underline-offset-4 decoration-[#00A046]/40 transition-colors cursor-pointer"
+            >
+              <LogIn className="w-3.5 h-3.5 text-[#00A046]" />
+              <span>{t.partnerPortalLoginLinkLabel}</span>
             </button>
           </div>
 

@@ -72,6 +72,7 @@ import { OrdersView } from './OrdersView.tsx';
 import { DisputesView } from './DisputesView.tsx';
 import { LogisticsView } from './LogisticsView.tsx';
 import { DeliveryNetworkView } from './DeliveryNetworkView.tsx';
+import { DispatchBoardView } from './DispatchBoardView.tsx';
 
 export type AdminSectionId =
   | 'overview'
@@ -86,6 +87,7 @@ export type AdminSectionId =
   | 'disputes'
   | 'fleet'
   | 'delivery_network'
+  | 'dispatch_board'
   | 'credit_limits'
   | 'credit_upgrades'
   | 'ledger'
@@ -250,6 +252,15 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     labelAr: 'شبكة التوصيل',
     labelEn: 'Delivery Network',
     items: [
+      {
+        id: 'dispatch_board',
+        labelAr: 'لوحة التوزيع',
+        labelEn: 'Dispatch Board',
+        descAr: 'متابعة مهام التوصيل المفتوحة، تنبيهات التأخر، التوزيع على السائقين/الشركاء وإعادة فتح المهام الفاشلة.',
+        descEn: 'Monitor open delivery jobs, SLA alerts, eligible driver assignment, and failed job recovery.',
+        icon: Activity,
+        implemented: true
+      },
       {
         id: 'delivery_network',
         labelAr: 'شبكة توصيل المنصة',
@@ -423,6 +434,9 @@ interface AdminOverviewData {
     priceAnomalyOffersCount?: number;
     pendingDeliveryPartnersCount?: number;
     expiringVehicleDocsCount?: number;
+    openDeliveryJobsCount?: number;
+    staleDeliveryJobsCount?: number;
+    failedDeliveryJobsCount?: number;
   };
   dailySeries: Array<{
     date: string;
@@ -458,7 +472,10 @@ interface AdminOverviewData {
       | 'catalog_price_anomaly'
       | 'pending_delivery_partner'
       | 'expiring_vehicle_doc'
-      | 'supplier_no_delivery_option';
+      | 'supplier_no_delivery_option'
+      | 'stale_delivery_job'
+      | 'failed_delivery_job'
+      | 'platform_order_missing_job';
     severity: 'high' | 'medium';
     titleAr: string;
     titleEn: string;
@@ -551,6 +568,10 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
     filterPreset?: string | null;
   }>({});
   const [deliveryDeepLink, setDeliveryDeepLink] = useState<{
+    selectedId?: string | null;
+    filterPreset?: string | null;
+  }>({});
+  const [dispatchDeepLink, setDispatchDeepLink] = useState<{
     selectedId?: string | null;
     filterPreset?: string | null;
   }>({});
@@ -734,6 +755,11 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
     );
     setDeliveryDeepLink(
       section === 'delivery_network'
+        ? { selectedId: options?.selectedId, filterPreset: options?.filterPreset }
+        : {}
+    );
+    setDispatchDeepLink(
+      section === 'dispatch_board'
         ? { selectedId: options?.selectedId, filterPreset: options?.filterPreset }
         : {}
     );
@@ -942,6 +968,23 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                               }`}
                             >
                               {overview?.kpis.pendingDeliveryPartnersCount}
+                            </span>
+                          )}
+                        {item.id === 'dispatch_board' &&
+                          ((overview?.kpis.openDeliveryJobsCount || 0) > 0 ||
+                            (overview?.kpis.failedDeliveryJobsCount || 0) > 0) && (
+                            <span
+                              className={`shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                                isActive
+                                  ? 'bg-white/20 text-white'
+                                  : (overview?.kpis.staleDeliveryJobsCount || 0) > 0 ||
+                                    (overview?.kpis.failedDeliveryJobsCount || 0) > 0
+                                  ? 'bg-red-100 text-red-700'
+                                  : 'bg-emerald-100 text-[#00A046]'
+                              }`}
+                            >
+                              {(overview?.kpis.openDeliveryJobsCount || 0) +
+                                (overview?.kpis.failedDeliveryJobsCount || 0)}
                             </span>
                           )}
                       </>
@@ -2414,6 +2457,12 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
                                 ? { filterPreset: 'vehicles_expiring', selectedId: item.entityId }
                                 : item.type === 'supplier_no_delivery_option'
                                 ? { filterPreset: 'supplier_delivery', selectedId: item.entityId }
+                                : item.type === 'stale_delivery_job'
+                                ? { filterPreset: 'stale', selectedId: item.entityId }
+                                : item.type === 'failed_delivery_job'
+                                ? { filterPreset: 'failed', selectedId: item.entityId }
+                                : item.type === 'platform_order_missing_job'
+                                ? { selectedId: item.entityId }
                                 : undefined
                             )
                           }
@@ -2508,6 +2557,14 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
               onOpenOrder={(orderId) => handleNavigate('orders', { selectedId: orderId })}
             />
           )}
+          {activeSection === 'dispatch_board' && (
+            <DispatchBoardView
+              language={language}
+              currency={currency}
+              initialDeepLink={dispatchDeepLink}
+              onDataChanged={() => fetchOverview(range)}
+            />
+          )}
           {activeSection === 'delivery_network' && (
             <DeliveryNetworkView
               language={language}
@@ -2530,6 +2587,7 @@ export const AdminConsoleView: React.FC<AdminConsoleViewProps> = ({
             activeSection !== 'orders' &&
             activeSection !== 'disputes' &&
             activeSection !== 'fleet' &&
+            activeSection !== 'dispatch_board' &&
             activeSection !== 'delivery_network' &&
             activeSection !== 'audit_log' &&
             activeSection !== 'roles_permissions' &&

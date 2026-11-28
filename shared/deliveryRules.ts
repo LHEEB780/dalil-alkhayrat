@@ -48,9 +48,88 @@ export interface DeliveryPlatformSettings {
   freeDeliveryThresholdIQD: number;
   partnerCommissionPercent: number;
   codAllowedForPartners: boolean;
+  staleOpenJobMinutes?: number;
+  maxActiveJobsPerDriver?: number;
   vehicleClassDefaults: VehicleClassDefaultConfig[];
   updatedAt?: string;
   updatedBy?: string;
+}
+
+export type DeliveryJobStatus =
+  | 'open'
+  | 'assigned'
+  | 'accepted'
+  | 'at_pickup'
+  | 'picked_up'
+  | 'in_transit'
+  | 'at_dropoff'
+  | 'delivered'
+  | 'failed'
+  | 'cancelled';
+
+export type DeliveryJobFailureReasonCode =
+  | 'store_closed'
+  | 'customer_refused'
+  | 'address_not_found'
+  | 'vehicle_issue'
+  | 'other';
+
+export interface DeliveryJobEndpoint {
+  name: string;
+  phone?: string;
+  address: string;
+  city: string;
+  governorateId?: string;
+  zoneId?: string;
+  lat?: number;
+  lng?: number;
+}
+
+export interface DeliveryJobHistoryEntry {
+  status: DeliveryJobStatus;
+  at: string;
+  actorType: 'system' | 'admin' | 'supplier' | 'driver' | 'partner';
+  actorId?: string;
+  actorName: string;
+  note?: string;
+}
+
+export interface DeliveryJob {
+  id: string;
+  subOrderId: string;
+  supplierId: string;
+  storeId: string;
+  governorateId: string;
+  deliveryZoneId?: string;
+  pickup: DeliveryJobEndpoint;
+  dropoff: DeliveryJobEndpoint;
+  unitsCount: number;
+  requiredTemperature: VehicleTemperatureType;
+  paymentMethod: 'cod' | 'credit' | 'wallet' | 'online';
+  orderSubtotalIQD: number;
+  estimatedPayoutIQD: number;
+  status: DeliveryJobStatus;
+  assignedPartnerId?: string;
+  assignedDriverId?: string;
+  assignedVehicleId?: string;
+  pickupPin: string;
+  attempts: number;
+  createdAt: string;
+  assignedAt?: string;
+  acceptedAt?: string;
+  arrivedPickupAt?: string;
+  pickedUpAt?: string;
+  inTransitAt?: string;
+  arrivedDropoffAt?: string;
+  deliveredAt?: string;
+  cancelledAt?: string;
+  failure?: {
+    reasonCode: DeliveryJobFailureReasonCode;
+    note: string;
+    failedAt?: string;
+    failedBy?: string;
+  };
+  history: DeliveryJobHistoryEntry[];
 }
 
 export interface SupplierDeliverySettings {

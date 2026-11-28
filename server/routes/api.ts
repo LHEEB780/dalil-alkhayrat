@@ -310,6 +310,12 @@ apiRouter.patch('/orders/:id/status', (req: Request, res: Response) => {
 
     if (!status) {
       if (driverId) {
+        if (existing.deliveryType === 'platform_driver') {
+          return res.status(400).json({
+            success: false,
+            message: 'توصيل هذا الطلب تتولاه شبكة المنصة'
+          });
+        }
         const driver = db.assertDriverOperable(driverId);
         existing.assignedDriverId = driver.id;
         existing.assignedDriverName = driver.name;
